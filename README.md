@@ -49,6 +49,8 @@ API_KEY=your-api-key-here
 PIPELEX_INFERENCE_API_KEY=your-pipelex-inference-key
 ```
 
+You can get a free API key ($20 of free credits) by joining our [Discord community](https://go.pipelex.com/discord) and requesting it in the appropriate channel.
+
 > **For complete API key configuration**, see the [API Key Configuration section](https://github.com/Pipelex/pipelex#api-key-configuration) in the main Pipelex repository.
 
 ### 2. Run with Docker
