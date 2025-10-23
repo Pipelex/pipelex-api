@@ -55,17 +55,31 @@ You can get a free API key ($20 of free credits) by joining our [Discord communi
 
 ### 2. Run with Docker
 
-**Option A: From Docker Hub (Recommended)**
+**Option A: Using Docker Compose (Recommended)**
+
+See [`docker-compose.yml`](docker-compose.yml) for reference.
 
 ```bash
-docker run --name pipelex-api -p 8081:8081 --env-file .env pipelex/pipelex-api:latest
+docker-compose up
 ```
 
-**Option B: Build Locally**
+**Option B: Using Docker Run**
+
+```bash
+docker run --name pipelex-api -p 8081:8081 \
+  -e API_KEY=your-api-key-here \
+  -e PIPELEX_INFERENCE_API_KEY=your-pipelex-inference-key-here \
+  pipelex/pipelex-api:latest
+```
+
+**Option C: Build Locally**
 
 ```bash
 docker build -t pipelex-api .
-docker run -d --name pipelex-api -p 8081:8081 --env-file .env pipelex-api
+docker run --name pipelex-api -p 8081:8081 \
+  -e API_KEY=your-api-key-here \
+  -e PIPELEX_INFERENCE_API_KEY=your-pipelex-inference-key-here \
+  pipelex-api
 ```
 
 ### 3. Verify
