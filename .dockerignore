@@ -1,0 +1,51 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.git
+.gitignore
+.dockerignore
+# README.md
+Dockerfile
+# *.md
+*.yml
+*.yaml
+
+# Cache files
+.cache
+.webassets-cache
+
+# Default .gcloudignore
+.gcloudignore
+.git
+.gitignore
+.gitmodules
+
+# Development directories
+.venv
+.vscode
+.mypy_cache
+.pylint
+dev_context
+playground
+
+# Development files
+.env
+.env.example
+.gitmodules
+Makefile
+
+# System files
+.DS_Store
+
+# Scripts
+*.sh
+
+# Miscellaneous
+CHANGELOG.md
+dependency_tree.txt
+files_tree.txt
+root.txt

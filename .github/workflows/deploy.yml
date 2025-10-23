@@ -1,0 +1,63 @@
+name: Deploy to AWS ECR and Docker Hub
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to AWS ECR and Docker Hub
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Required for OIDC authentication with AWS
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract version from pyproject.toml
+        id: get_version
+        run: |
+          VERSION=$(sed -n 's/^[[:space:]]*version = "\(.*\)"/\1/p' pyproject.toml)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Deploying version: $VERSION"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-west-2
+          role-session-name: GitHubActions-ECR-Push
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Get AWS Account ID
+        id: aws_account
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID" >> $GITHUB_ENV
+          echo "Account ID: $AWS_ACCOUNT_ID"
+
+      - name: Deploy to AWS ECR
+        env:
+          AWS_ACCOUNT_ID: ${{ env.AWS_ACCOUNT_ID }}
+          AWS_REGION: us-west-2
+          VERSION: ${{ env.VERSION }}
+        run: |
+          make deploy-api
+
+      - name: Deploy to Docker Hub
+        env:
+          DOCKER_HUB_TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
+          VERSION: ${{ env.VERSION }}
+        run: |
+          make deploy-docker-hub
+
+      - name: Deployment Summary
+        run: |
+          echo "✅ Successfully deployed pipelex-api:${{ env.VERSION }} to:"
+          echo "  - AWS ECR"
+          echo "  - Docker Hub (https://hub.docker.com/r/pipelex/pipelex-api)"
