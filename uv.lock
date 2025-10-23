@@ -247,6 +247,15 @@ wheels = [
 ]
 
 [[package]]
+name = "backoff"
+version = "2.2.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/47/d7/5bbeb12c44d7c4f2fb5b56abce497eb5ed9f34d85701de869acedd602619/backoff-2.2.1.tar.gz", hash = "sha256:03f829f5bb1923180821643f8753b0502c3b682293992485b0eef2807afa5cba", size = 17001, upload-time = "2022-10-05T19:19:32.061Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/df/73/b6e24bd22e6720ca8ee9a85a0c4a2971af8497d8f3193fa05390cbd46e09/backoff-2.2.1-py3-none-any.whl", hash = "sha256:63579f9a0628e06278f7e47b7d7d5b6ce20dc65c5e96a6f3ca99a6adca0396e8", size = 15148, upload-time = "2022-10-05T19:19:30.546Z" },
+]
+
+[[package]]
 name = "boto3"
 version = "1.40.49"
 source = { registry = "https://pypi.org/simple" }
@@ -1689,6 +1698,7 @@ dependencies = [
     { name = "openai" },
     { name = "pillow" },
     { name = "polyfactory" },
+    { name = "posthog" },
     { name = "pydantic" },
     { name = "pypdfium2" },
     { name = "python-dotenv" },
@@ -1753,6 +1763,7 @@ requires-dist = [
     { name = "openai", specifier = ">=1.60.1" },
     { name = "pillow", specifier = ">=11.2.1" },
     { name = "polyfactory", specifier = ">=2.21.0" },
+    { name = "posthog", specifier = ">=6.7.0" },
     { name = "pydantic", specifier = ">=2.10.6,<3.0.0" },
     { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.3.8" },
     { name = "pypdfium2", specifier = ">=4.30.0,!=4.30.1" },
@@ -1876,6 +1887,23 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/64/5a/c9105c974e03d78dc6d5642bee97f075156a28ad344428e562c6c86526b9/polyfactory-2.22.3.tar.gz", hash = "sha256:ae57d07408d1f7609031a83827c7980ce32104535e146cac2253988d0a7665e1", size = 263543, upload-time = "2025-10-18T14:04:54.901Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c4/f7/244a5b1dd298650e4092c501197dad45036b1c31309ad4d01af430071a0f/polyfactory-2.22.3-py3-none-any.whl", hash = "sha256:0bfd5fe2fb2e5db39ded6aee8e923d1961095d4ebb44185cceee4654cb85e0b1", size = 63715, upload-time = "2025-10-18T14:04:52.657Z" },
+]
+
+[[package]]
+name = "posthog"
+version = "6.7.9"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "backoff" },
+    { name = "distro" },
+    { name = "python-dateutil" },
+    { name = "requests" },
+    { name = "six" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/88/f8/9118197ff1113b957fa3b5d206c0e41d8885afdbb9c590bc5274602e5e62/posthog-6.7.9.tar.gz", hash = "sha256:506fd31a6a4a1a6ca207df5a05ec9bef10b64bbe148d983d8d6956bffad195c3", size = 120171, upload-time = "2025-10-22T20:53:40.099Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/9c/72705369b4b8bbefebe60d5bc00ad04a76a91b1a437e8ef758cd17d12acb/posthog-6.7.9-py3-none-any.whl", hash = "sha256:1415c20fed34f4be2ed4fb910516637a28a18bdfa461ee6a41588baa2f4fa64a", size = 138472, upload-time = "2025-10-22T20:53:38.749Z" },
 ]
 
 [[package]]
