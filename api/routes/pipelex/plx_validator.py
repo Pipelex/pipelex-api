@@ -3,13 +3,12 @@ from typing import Any
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pipelex.core.bundles.pipelex_bundle_blueprint import PipelexBundleBlueprint
-from pipelex.hub import get_library_manager
 from pipelex.pipeline.validate_plx import validate_plx
 from pydantic import BaseModel, Field
 
 from api.routes.helpers import extract_pipe_structures
 
-router = APIRouter(tags=["plx-validator"])
+router = APIRouter()
 
 
 class PlxValidatorRequest(BaseModel):
@@ -26,7 +25,7 @@ class PlxValidatorResponse(BaseModel):
     message: str = Field(default="PLX content validated successfully", description="Status message")
 
 
-@router.post("/plx-validator/validate", response_model=PlxValidatorResponse)
+@router.post("/validate", response_model=PlxValidatorResponse)
 async def validate_pipes(request_data: PlxValidatorRequest):
     """Validate PLX content by parsing, loading, and dry-running pipes.
 
@@ -34,20 +33,12 @@ async def validate_pipes(request_data: PlxValidatorRequest):
     1. Parsing it into a bundle blueprint
     2. Loading pipes into the library
     3. Running static validation and dry runs
-    4. Cleaning up loaded pipes
 
     Returns validation results with blueprint and pipe structures.
-    Raises HTTPException if validation fails.
     """
-    # Validate and load pipes (this will raise HTTPException on validation errors)
-    blueprint, pipes = await validate_plx(request_data.plx_content)
-
-    # Clean up: remove pipes from library
-    library_manager = get_library_manager()
-    library_manager.remove_from_blueprint(blueprint=blueprint)
+    blueprint, pipes = await validate_plx(plx_content=request_data.plx_content)
     pipe_structures = extract_pipe_structures(pipes)
 
-    # Create the response
     response_data = PlxValidatorResponse(
         plx_content=request_data.plx_content,
         pipelex_bundle_blueprint=blueprint,
