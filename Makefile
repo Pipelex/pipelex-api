@@ -44,4 +44,4 @@ check-version-format:
 
 -include Makefiles/Makefile_basics.mk
 -include Makefiles/Makefile.local.mk
--include Makefiles/Makefile.deploy.aws.api.mk
+-include Makefiles/Makefile.deploy.api.mk
