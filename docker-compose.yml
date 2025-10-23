@@ -1,0 +1,8 @@
+services:
+  pipelex-api:
+    image: pipelex/pipelex-api:latest
+    ports:
+      - "8081:8081"
+    environment:
+      - API_KEY=${API_KEY}
+      - PIPELEX_INFERENCE_API_KEY=${PIPELEX_INFERENCE_API_KEY}

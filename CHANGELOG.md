@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.0.2] - 2e25-10-22
+
+### Added
+
+- `docker-compose.yml` file
+
+### Changed
+
+- `README.md` Added more precise instructions for local, docker run, and docker compose.
+
 ## [v0.0.1] - 2025-10-22
 
 - Initial commit!

@@ -23,6 +23,14 @@ async def verify_token(credentials: Annotated[HTTPAuthorizationCredentials, Depe
     try:
         api_key = os.getenv("API_KEY")
 
+        if not api_key:
+            log.error("API_KEY environment variable is not set")
+            msg = "Server configuration error: API_KEY not configured"
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=msg,
+            )
+
         if credentials.credentials != api_key:
             log.warning("Token mismatch")
             msg = "Invalid authentication token"
@@ -32,8 +40,11 @@ async def verify_token(credentials: Annotated[HTTPAuthorizationCredentials, Depe
                 headers={"WWW-Authenticate": "Bearer"},
             )
         return credentials.credentials
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as exc:
-        log.error(f"Error in token verification: {exc!s}")
+        log.error(f"Unexpected error in token verification: {exc!s}")
         msg = f"Error verifying token: {exc!s}"
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
