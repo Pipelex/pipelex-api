@@ -1,11 +1,11 @@
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pipelex.pipelex import Pipelex
+from pipelex.system.runtime import IntegrationMode
 
 from api.routes import router as api_router
 from api.routes.pipelex.health import router as health_router
 from api.security import verify_token
-from pipelex.system.runtime import IntegrationMode
 
 Pipelex.make(IntegrationMode.FASTAPI)
 
