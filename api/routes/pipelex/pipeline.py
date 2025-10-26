@@ -1,5 +1,5 @@
 import traceback
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -8,16 +8,14 @@ from pipelex import log
 from pipelex.client.pipeline_request_factory import PipelineRequestFactory
 from pipelex.client.pipeline_response_factory import PipelineResponseFactory
 from pipelex.client.protocol import PipelineRequest, PipelineResponse, PipelineState
-from pipelex.core.memory.working_memory_factory import WorkingMemoryFactory
+from pipelex.core.interpreter import PipelexInterpreter
 from pipelex.hub import get_library_manager
 from pipelex.pipeline.execute import execute_pipeline
 from pipelex.pipeline.start import start_pipeline
+from pipelex.pipeline.validate_plx import validate_plx
 
-from api.routes.helpers import validate_and_load_pipes
+from api.routes.helpers import extract_pipe_structures
 from api.routes.pipelex.utils import get_current_iso_timestamp
-
-if TYPE_CHECKING:
-    from pipelex.core.bundles.pipelex_bundle_blueprint import PipelexBundleBlueprint
 
 router = APIRouter(tags=["pipeline"])
 
@@ -30,9 +28,8 @@ async def request_deserialization(request: Request) -> PipelineRequest:
     return PipelineRequestFactory.make_from_body(request_data)
 
 
-@router.post("/pipeline/{pipe_code}/execute", response_model=PipelineResponse)
+@router.post("/pipeline/execute", response_model=PipelineResponse)
 async def execute(
-    pipe_code: str,
     pipeline_request: Annotated[PipelineRequest, Depends(request_deserialization)],
 ):
     """Executes a pipe with the given memory and waits for completion.
@@ -43,31 +40,21 @@ async def execute(
 
     This is a blocking operation that doesn't return until the pipe execution is complete.
     """
-    library_manager = get_library_manager()
-    blueprint: PipelexBundleBlueprint | None = None
-    pipe_structures: dict[str, dict[str, Any]] = {}
-
     try:
         created_at = get_current_iso_timestamp()
-
-        # If plx_content is provided, validate and load the pipes
-        if pipeline_request.plx_content:
-            blueprint, _, pipe_structures = await validate_and_load_pipes(pipeline_request.plx_content)
-
-        working_memory = WorkingMemoryFactory.make_from_pipeline_inputs(pipeline_inputs=pipeline_request.inputs or {})
-
         pipe_output = await execute_pipeline(
-            pipe_code=pipe_code,
-            inputs=working_memory,
+            pipe_code=pipeline_request.pipe_code,
+            plx_content=pipeline_request.plx_content,
+            inputs=pipeline_request.inputs,
             output_name=pipeline_request.output_name,
             output_multiplicity=pipeline_request.output_multiplicity,
             dynamic_output_concept_code=pipeline_request.dynamic_output_concept_code,
         )
+        blueprint = PipelexInterpreter(file_content=pipeline_request.plx_content).make_pipelex_bundle_blueprint()
+        pipes = get_library_manager().load_from_blueprint(blueprint=blueprint)
+        pipe_structures = extract_pipe_structures(pipes)
+        get_library_manager().remove_from_blueprint(blueprint=blueprint)
 
-        if blueprint is not None:
-            library_manager.remove_from_blueprint(blueprint=blueprint)
-
-        # Create the response
         return PipelineResponseFactory.make_from_pipe_output(
             status="success",
             pipeline_run_id=pipe_output.pipeline_run_id,
@@ -82,13 +69,6 @@ async def execute(
         log.error("Pipeline execution error details:")
         traceback.print_exc()
 
-        # Clean up if blueprint was created
-        try:
-            if blueprint is not None:
-                library_manager.remove_from_blueprint(blueprint=blueprint)
-        except Exception as cleanup_error:
-            log.error(f"Error during cleanup: {cleanup_error}")
-
         raise HTTPException(
             status_code=500,
             detail={
@@ -98,9 +78,8 @@ async def execute(
         ) from exc
 
 
-@router.post("/pipeline/{pipe_code}/start", response_model=PipelineResponse)
+@router.post("/pipeline/start", response_model=PipelineResponse)
 async def start(
-    pipe_code: str,
     pipeline_request: Annotated[PipelineRequest, Depends(request_deserialization)],
 ):
     """Starts a pipe execution with the given memory but does not wait for completion.
@@ -113,22 +92,15 @@ async def start(
 
     Note: If plx_content is provided, pipes remain loaded after this call returns.
     """
-    library_manager = get_library_manager()
-    blueprint: PipelexBundleBlueprint | None = None
-    pipe_structures: dict[str, dict[str, Any]] = {}
-
     try:
-        created_at = get_current_iso_timestamp()
-
-        # If plx_content is provided, validate and load the pipes
         if pipeline_request.plx_content:
-            blueprint, _, pipe_structures = await validate_and_load_pipes(pipeline_request.plx_content)
-
-        # Start the pipeline execution
-        working_memory = WorkingMemoryFactory.make_from_pipeline_inputs(pipeline_inputs=pipeline_request.inputs or {})
+            raise HTTPException(status_code=400, detail="PLX content is not supported when using the route 'start'")
+        if not pipeline_request.pipe_code:
+            raise HTTPException(status_code=400, detail="Pipe code is required when using the route 'start'")
+        created_at = get_current_iso_timestamp()
         pipeline_run_id, _ = await start_pipeline(
-            pipe_code=pipe_code,
-            inputs=working_memory,
+            pipe_code=pipeline_request.pipe_code,
+            inputs=pipeline_request.inputs,
             output_name=pipeline_request.output_name,
             output_multiplicity=pipeline_request.output_multiplicity,
             dynamic_output_concept_code=pipeline_request.dynamic_output_concept_code,
@@ -144,25 +116,18 @@ async def start(
         )
 
         # If we have pipe structures, add them to the response
-        if pipe_structures:
+        if pipeline_request.plx_content:
+            blueprint, pipes = await validate_plx(plx_content=pipeline_request.plx_content)
             full_response_data = {
                 "pipeline_response": response_data.model_dump(),
-                "pipe_structures": pipe_structures,
+                "pipe_structures": extract_pipe_structures(pipes),
             }
+            get_library_manager().remove_from_blueprint(blueprint=blueprint)
             return JSONResponse(content=full_response_data)
-
-        return JSONResponse(content=response_data.model_dump())
 
     except Exception as exc:
         log.error("Pipeline start error details:")
         traceback.print_exc()
-
-        # Clean up if blueprint was created
-        try:
-            if blueprint is not None:
-                library_manager.remove_from_blueprint(blueprint=blueprint)
-        except Exception as cleanup_error:
-            log.error(f"Error during cleanup: {cleanup_error}")
 
         raise HTTPException(
             status_code=500,
