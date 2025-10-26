@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.0.3] - 2025-10-25
+
+### Feature
+
+- You can now run directly a pipelex bundle from the API.
+
+### Added
+
+- `Pipelex.make(IntegrationMode.FASTAPI)` to the API
+
 ## [v0.0.2] - 2e25-10-22
 
 ### Added
