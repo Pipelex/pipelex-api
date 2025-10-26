@@ -5,8 +5,9 @@ from pipelex.pipelex import Pipelex
 from api.routes import router as api_router
 from api.routes.pipelex.health import router as health_router
 from api.security import verify_token
+from pipelex.system.runtime import IntegrationMode
 
-Pipelex.make()
+Pipelex.make(IntegrationMode.FASTAPI)
 
 # Create FastAPI app with lifespan events
 app = FastAPI(redirect_slashes=False)
