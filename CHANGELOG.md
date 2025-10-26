@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.0.4] - 2025-10-26
+
+### Fixed
+
+- Updated telemetry settings.
+
 ## [v0.0.3] - 2025-10-25
 
 ### Feature
