@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.0.5] - 2025-10-27
+
+### Fixed
+
+- Updated `Pipelex` dependency to `v0.14.0`.
+
 ## [v0.0.4] - 2025-10-26
 
 ### Fixed
