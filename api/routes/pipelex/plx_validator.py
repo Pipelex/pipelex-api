@@ -51,7 +51,6 @@ async def validate_pipes(request_data: PlxValidatorRequest):
         )
 
         return JSONResponse(content=response_data.model_dump(serialize_as_any=True))
-
     finally:
         if blueprint is not None:
             get_library_manager().remove_from_blueprint(blueprint=blueprint)
