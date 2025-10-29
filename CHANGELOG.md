@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.0.7] - 2025-10-29
+
+### Changed
+
+- Hardcoded routing profile `all_blackboxai` for the pipelex hackathon.
+
 ## [v0.0.6] - 2025-10-29
 
 ### Changed
