@@ -1,5 +1,5 @@
 import traceback
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -16,6 +16,9 @@ from pipelex.pipeline.validate_plx import validate_plx
 
 from api.routes.helpers import extract_pipe_structures
 from api.routes.pipelex.utils import get_current_iso_timestamp
+
+if TYPE_CHECKING:
+    from pipelex.core.bundles.pipelex_bundle_blueprint import PipelexBundleBlueprint
 
 router = APIRouter(tags=["pipeline"])
 
@@ -40,6 +43,7 @@ async def execute(
 
     This is a blocking operation that doesn't return until the pipe execution is complete.
     """
+    blueprint: PipelexBundleBlueprint | None = None
     try:
         created_at = get_current_iso_timestamp()
         pipe_output = await execute_pipeline(
@@ -76,6 +80,9 @@ async def execute(
                 "message": str(exc),
             },
         ) from exc
+    finally:
+        if blueprint is not None:
+            get_library_manager().remove_from_blueprint(blueprint=blueprint)
 
 
 @router.post("/pipeline/start", response_model=PipelineResponse)
@@ -92,6 +99,7 @@ async def start(
 
     Note: If plx_content is provided, pipes remain loaded after this call returns.
     """
+    blueprint: PipelexBundleBlueprint | None = None
     try:
         if pipeline_request.plx_content:
             raise HTTPException(status_code=400, detail="PLX content is not supported when using the route 'start'")
@@ -136,3 +144,6 @@ async def start(
                 "message": str(exc),
             },
         ) from exc
+    finally:
+        if blueprint is not None:
+            get_library_manager().remove_from_blueprint(blueprint=blueprint)

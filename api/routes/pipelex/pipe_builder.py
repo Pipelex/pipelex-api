@@ -86,6 +86,9 @@ async def build_pipe(request_data: PipeBuilderRequest):
             log.error(f"Error during cleanup: {cleanup_error}")
 
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        if blueprint is not None:
+            library_manager.remove_from_blueprint(blueprint=blueprint)
 
 
 class RunnerCodeRequest(BaseModel):
@@ -157,3 +160,7 @@ async def generate_runner(request_data: RunnerCodeRequest):
             log.error(f"Error during cleanup: {cleanup_error}")
 
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    finally:
+        if blueprint is not None:
+            library_manager.remove_from_blueprint(blueprint=blueprint)
