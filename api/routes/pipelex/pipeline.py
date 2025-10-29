@@ -1,5 +1,5 @@
 import traceback
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -8,7 +8,6 @@ from pipelex import log
 from pipelex.client.pipeline_request_factory import PipelineRequestFactory
 from pipelex.client.pipeline_response_factory import PipelineResponseFactory
 from pipelex.client.protocol import PipelineRequest, PipelineResponse, PipelineState
-from pipelex.core.bundles.pipelex_bundle_blueprint import PipelexBundleBlueprint
 from pipelex.core.interpreter import PipelexInterpreter
 from pipelex.hub import get_library_manager
 from pipelex.pipeline.execute import execute_pipeline
@@ -17,6 +16,9 @@ from pipelex.pipeline.validate_plx import validate_plx
 
 from api.routes.helpers import extract_pipe_structures
 from api.routes.pipelex.utils import get_current_iso_timestamp
+
+if TYPE_CHECKING:
+    from pipelex.core.bundles.pipelex_bundle_blueprint import PipelexBundleBlueprint
 
 router = APIRouter(tags=["pipeline"])
 
