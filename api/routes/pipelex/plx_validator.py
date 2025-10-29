@@ -3,6 +3,7 @@ from typing import Any
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pipelex.core.bundles.pipelex_bundle_blueprint import PipelexBundleBlueprint
+from pipelex.hub import get_library_manager
 from pipelex.pipeline.validate_plx import validate_plx
 from pydantic import BaseModel, Field
 
@@ -36,15 +37,21 @@ async def validate_pipes(request_data: PlxValidatorRequest):
 
     Returns validation results with blueprint and pipe structures.
     """
-    blueprint, pipes = await validate_plx(plx_content=request_data.plx_content)
-    pipe_structures = extract_pipe_structures(pipes)
+    blueprint: PipelexBundleBlueprint | None = None
+    try:
+        blueprint, pipes = await validate_plx(plx_content=request_data.plx_content, remove_after_validation=True)
+        pipe_structures = extract_pipe_structures(pipes)
 
-    response_data = PlxValidatorResponse(
-        plx_content=request_data.plx_content,
-        pipelex_bundle_blueprint=blueprint,
-        pipe_structures=pipe_structures,
-        success=True,
-        message="PLX content validated successfully",
-    )
+        response_data = PlxValidatorResponse(
+            plx_content=request_data.plx_content,
+            pipelex_bundle_blueprint=blueprint,
+            pipe_structures=pipe_structures,
+            success=True,
+            message="PLX content validated successfully",
+        )
 
-    return JSONResponse(content=response_data.model_dump(serialize_as_any=True))
+        return JSONResponse(content=response_data.model_dump(serialize_as_any=True))
+
+    finally:
+        if blueprint is not None:
+            get_library_manager().remove_from_blueprint(blueprint=blueprint)

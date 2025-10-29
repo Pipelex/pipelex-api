@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.0.6] - 2025-10-29
+
+### Changed
+
+- More robust library management.
+
 ## [v0.0.5] - 2025-10-27
 
 ### Fixed
