@@ -82,7 +82,10 @@ markdown_extensions:
 nav:
   - Home: https://docs.pipelex.com/
   - API Reference:
-    - Getting Started: index.md
+    - Getting Started: getting-started.md
+    - Pipe Builder: pipe-builder.md
+    - Pipe Run: pipe-run.md
+    - Pipe Validate: pipe-validate.md
   - n8n Node: https://pipelex.github.io/n8n-nodes-pipelex/
   - Configuration: https://docs.pipelex.com/pages/configuration/
   - Development: https://docs.pipelex.com/pages/tools/
