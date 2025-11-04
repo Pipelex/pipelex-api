@@ -423,3 +423,19 @@ v: validate
 
 li: lock install
 	@echo "> done: lock install"
+
+##########################################################################################
+### DOCUMENTATION
+##########################################################################################
+
+docs: env
+	$(call PRINT_TITLE,"Serving documentation with mkdocs")
+	$(VENV_MKDOCS) serve -a 127.0.0.1:8001 --watch docs
+
+docs-check: env
+	$(call PRINT_TITLE,"Checking documentation build with mkdocs")
+	$(VENV_MKDOCS) build --strict
+
+docs-deploy: env
+	$(call PRINT_TITLE,"Deploying documentation with mkdocs")
+	$(VENV_MKDOCS) gh-deploy --force --clean
