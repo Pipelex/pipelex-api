@@ -5,4 +5,5 @@ services:
       - "8081:8081"
     environment:
       - API_KEY=${API_KEY}
-      - BLACKBOX_API_KEY=${BLACKBOX_API_KEY}
+      - PIPELEX_INFERENCE_API_KEY=${PIPELEX_INFERENCE_API_KEY}
+      - FAL_API_KEY=${FAL_API_KEY}

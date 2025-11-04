@@ -12,7 +12,7 @@
 
 [pipelex_inference]
 display_name = "⭐ Pipelex Inference"
-enabled = false
+enabled = true
 endpoint = "https://inference.pipelex.com/v1"
 api_key = "${PIPELEX_INFERENCE_API_KEY}"
 
@@ -67,13 +67,13 @@ endpoint = "http://localhost:11434/v1"
 
 [blackboxai]
 display_name = "BlackBox AI"
-enabled = true
+enabled = false
 endpoint = "https://api.blackbox.ai/v1"
 api_key = "${BLACKBOX_API_KEY}"
 
 [fal]
 display_name = "FAL"
-enabled = false
+enabled = true
 api_key = "${FAL_API_KEY}"
 
 [internal] # software-only backend, runs internally, without AI
