@@ -47,6 +47,9 @@ API_KEY=your-api-key-here
 
 # AI inference provider API key
 PIPELEX_INFERENCE_API_KEY=your-pipelex-inference-api-key
+
+# TEMPORARY: Required for image generation (will be integrated into unified inference system)
+FAL_API_KEY=your-fal-api-key
 ```
 
 You can get a free Pipelex Inference API key ($20 of free credits) by joining our [Discord community](https://go.pipelex.com/discord) and requesting it in the appropriate channel.
@@ -69,6 +72,7 @@ docker-compose up
 docker run --name pipelex-api -p 8081:8081 \
   -e API_KEY=your-api-key-here \
   -e PIPELEX_INFERENCE_API_KEY=your-pipelex-inference-api-key \
+  -e FAL_API_KEY=your-fal-api-key \
   pipelex/pipelex-api:latest
 ```
 
@@ -79,6 +83,7 @@ docker build -t pipelex-api .
 docker run --name pipelex-api -p 8081:8081 \
   -e API_KEY=your-api-key-here \
   -e PIPELEX_INFERENCE_API_KEY=your-pipelex-inference-api-key \
+  -e FAL_API_KEY=your-fal-api-key \
   pipelex-api
 ```
 
