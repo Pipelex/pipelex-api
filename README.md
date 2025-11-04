@@ -45,13 +45,11 @@ Create a `.env` file with your API key and LLM provider configuration:
 # Required: Your API authentication key. This is the API key that will be required to access the API.
 API_KEY=your-api-key-here
 
-# AI inference provider API keys: either using Pipelex Inference API or your own API key(s) (see configuration below)
-BLACKBOX_API_KEY=your-blackboxai-api-key
+# AI inference provider API key
+PIPELEX_INFERENCE_API_KEY=your-pipelex-inference-api-key
 ```
 
-> **Note for v0.0.7**: This release temporarily uses `BLACKBOX_API_KEY` for AI inference. Future releases will revert to using `PIPELEX_INFERENCE_API_KEY` or allow multiple provider configurations.
-
-You can get a free API key ($20 of free credits) by joining our [Discord community](https://go.pipelex.com/discord) and requesting it in the appropriate channel.
+You can get a free Pipelex Inference API key ($20 of free credits) by joining our [Discord community](https://go.pipelex.com/discord) and requesting it in the appropriate channel.
 
 > **For complete API key configuration**, see the [API Key Configuration section](https://github.com/Pipelex/pipelex#api-key-configuration) in the main Pipelex repository.
 
@@ -70,7 +68,7 @@ docker-compose up
 ```bash
 docker run --name pipelex-api -p 8081:8081 \
   -e API_KEY=your-api-key-here \
-  -e BLACKBOX_API_KEY=your-blackboxai-api-key-here \
+  -e PIPELEX_INFERENCE_API_KEY=your-pipelex-inference-api-key \
   pipelex/pipelex-api:latest
 ```
 
@@ -80,7 +78,7 @@ docker run --name pipelex-api -p 8081:8081 \
 docker build -t pipelex-api .
 docker run --name pipelex-api -p 8081:8081 \
   -e API_KEY=your-api-key-here \
-  -e BLACKBOX_API_KEY=your-blackboxai-api-key-here \
+  -e PIPELEX_INFERENCE_API_KEY=your-pipelex-inference-api-key \
   pipelex-api
 ```
 
