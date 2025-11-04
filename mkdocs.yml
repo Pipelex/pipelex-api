@@ -83,7 +83,7 @@ markdown_extensions:
 
 nav:
   - Home: https://docs.pipelex.com/
-  - API Reference:
+  - API:
     - Overview: index.md
     - Pipe Builder: pipe-builder.md
     - Pipe Run: pipe-run.md
@@ -93,8 +93,7 @@ nav:
       - Code of Conduct: CODE_OF_CONDUCT.md
       - License: license.md
     - Changelog: changelog.md
-  - Integrations:
-    - MCP Server: https://pipelex.github.io/pipelex-mcp/
-    - n8n Node: https://pipelex.github.io/n8n-nodes-pipelex/
+  - MCP: https://pipelex.github.io/pipelex-mcp/
+  - n8n: https://pipelex.github.io/n8n-nodes-pipelex/
   - Contribute: https://docs.pipelex.com/pages/contributing/
   - Changelog: https://docs.pipelex.com/pages/changelog/
