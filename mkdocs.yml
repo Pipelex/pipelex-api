@@ -86,9 +86,10 @@ nav:
     - Pipe Builder: pipe-builder.md
     - Pipe Run: pipe-run.md
     - Pipe Validate: pipe-validate.md
-  - n8n Node: https://pipelex.github.io/n8n-nodes-pipelex/
-  - Configuration: https://docs.pipelex.com/pages/configuration/
-  - Development: https://docs.pipelex.com/pages/tools/
+  - Integrations:
+    - n8n Node: https://pipelex.github.io/n8n-nodes-pipelex/
+  - Contribute: https://docs.pipelex.com/pages/contributing/
+  - Changelog: https://docs.pipelex.com/pages/changelog/
 
 extra_css:
   - stylesheets/general.css
