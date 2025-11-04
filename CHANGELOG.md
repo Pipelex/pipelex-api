@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.0.8] - 2025-11-04
+
+### Added
+
+- Documentation for the API.
+
+### Changed
+
+- Reverted the `all_blackboxai` routing profile to the pipelex default one.
+
 ## [v0.0.7] - 2025-10-29
 
 ### Changed

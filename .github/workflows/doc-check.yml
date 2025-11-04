@@ -1,0 +1,26 @@
+name: Documentation Check
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+
+jobs:
+  doc-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install MkDocs and plugins
+        run: |
+          pip install mkdocs-material mkdocs-glightbox
+
+      - name: Check documentation build
+        run: mkdocs build --strict 
