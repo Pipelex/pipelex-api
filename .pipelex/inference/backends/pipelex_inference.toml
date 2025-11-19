@@ -24,6 +24,7 @@
 model_type = "llm"
 sdk = "openai"
 prompting_target = "anthropic"
+structure_method = "instructor/openai_tools"
 
 ################################################################################
 # LANGUAGE MODELS
@@ -102,6 +103,12 @@ model_id = "pipelex/claude-4.5-sonnet"
 inputs = ["text", "images"]
 outputs = ["text", "structured"]
 costs = { input = 3, output = 15 }
+
+["claude-4.5-haiku"]
+model_id = "pipelex/claude-4.5-haiku"
+inputs = ["text", "images"]
+outputs = ["text", "structured"]
+costs = { input = 1, output = 5 }
 
 # --- Gemini LLMs --------------------------------------------------------------
 ["gemini-2.0-flash"]

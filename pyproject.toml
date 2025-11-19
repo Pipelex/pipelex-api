@@ -20,6 +20,8 @@ dependencies = [
     "fastapi>=0.118.0",
     "uvicorn>=0.37.0",
 ]
+[tool.uv.sources]
+pipelex = { path = "../pipelex", editable = true }
 
 [build-system]
 requires = ["hatchling"]
@@ -175,8 +177,6 @@ reportUnusedFunction = "error"
 reportUnusedImport = "none"
 reportUnusedVariable = "error"
 reportWildcardImportFromLibrary = "error"
-reportUnusedParameter = "information"
-strictDictionaryInference = true
 strictListInference = true
 strictParameterNoneValue = true
 strictSetInference = true
