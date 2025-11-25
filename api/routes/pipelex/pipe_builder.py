@@ -1,4 +1,6 @@
+import importlib.util
 import traceback
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -6,8 +8,8 @@ from fastapi.responses import JSONResponse
 from pipelex import log
 from pipelex.builder.builder_loop import BuilderLoop
 from pipelex.builder.runner_code import generate_runner_code
-from pipelex.core.interpreter import PipelexInterpreter
-from pipelex.hub import get_library_manager, get_required_pipe, set_current_library_id
+from pipelex.core.interpreter.interpreter import PipelexInterpreter
+from pipelex.hub import get_library_manager, get_required_pipe, set_current_library,teardown_current_library
 from pipelex.language.plx_factory import PlxFactory
 from pipelex.pipe_run.dry_run import dry_run_pipes
 from pydantic import BaseModel, Field
@@ -39,22 +41,32 @@ async def build_pipe(request_data: PipeBuilderRequest):
     and the corresponding pipelex bundle blueprint, along with pipe structures.
     """
     # Execute the pipe_builder pipeline
-    builder_loop = BuilderLoop()
-    pipelex_bundle_spec = await builder_loop.build_and_fix(inputs={"brief": request_data.brief})
-    blueprint = pipelex_bundle_spec.to_blueprint()
-
-    # Generate PLX content from the blueprint
-    blueprint = pipelex_bundle_spec.to_blueprint()
-    plx_content = PlxFactory.make_plx_content(blueprint=blueprint)
-
-    # Load pipes temporarily to extract structures
     library_manager = get_library_manager()
+    library_id, library = library_manager.open_library()
+    set_current_library(library_id)
+    
+    # Find the pipelex package, then get the builder subdirectory path
+    pipelex_spec = importlib.util.find_spec("pipelex")
+    if pipelex_spec is None or pipelex_spec.origin is None:
+        raise ImportError("Could not find pipelex package")
+    pipelex_path = Path(pipelex_spec.origin).parent
+    pipelex_builder_path = pipelex_path / "builder"
+    
+    library_manager.load_libraries(library_id=library_id, library_dirs=[pipelex_builder_path])
+    builder_loop = BuilderLoop()
+    pipelex_bundle_spec = await builder_loop.build_and_fix(inputs={"brief": request_data.brief}, builder_pipe="pipe_builder")
+    blueprint = pipelex_bundle_spec.to_blueprint()
+
+    library.teardown()
+    teardown_current_library()
+
     library_id, _ = library_manager.open_library()
-    set_current_library_id(library_id)
+    set_current_library(library_id)
+    # Load pipes temporarily to extract structures
     pipes = library_manager.load_from_blueprints(library_id=library_id, blueprints=[blueprint])
     pipe_structures = extract_pipe_structures(pipes)
 
-    # Create the response
+    plx_content = PlxFactory.make_plx_content(blueprint=blueprint)
     response_data = PipeBuilderResponse(
         plx_content=plx_content,
         pipelex_bundle_blueprint=blueprint.model_dump(serialize_as_any=True),
@@ -94,7 +106,7 @@ async def generate_runner(request_data: RunnerCodeRequest):
     blueprint = None
 
     library_id, _ = library_manager.open_library()
-    set_current_library_id(library_id)
+    set_current_library(library_id)
     try:
         # Parse PLX content into a bundle blueprint
         converter = PipelexInterpreter()
@@ -111,9 +123,6 @@ async def generate_runner(request_data: RunnerCodeRequest):
         # Get the required pipe and generate runner code
         pipe = get_required_pipe(request_data.pipe_code)
         python_code = generate_runner_code(pipe=pipe)
-
-        # Clean up: remove pipes from library
-        library_manager.remove_from_blueprints(library_id=library_id, blueprints=[blueprint])
 
         # Create the response
         response_data = RunnerCodeResponse(
