@@ -9,7 +9,7 @@ from pipelex import log
 from pipelex.builder.builder_loop import BuilderLoop
 from pipelex.builder.runner_code import generate_runner_code
 from pipelex.core.interpreter.interpreter import PipelexInterpreter
-from pipelex.hub import get_library_manager, get_required_pipe, set_current_library,teardown_current_library
+from pipelex.hub import get_library_manager, get_required_pipe, set_current_library, teardown_current_library
 from pipelex.language.plx_factory import PlxFactory
 from pipelex.pipe_run.dry_run import dry_run_pipes
 from pydantic import BaseModel, Field
@@ -44,14 +44,15 @@ async def build_pipe(request_data: PipeBuilderRequest):
     library_manager = get_library_manager()
     library_id, library = library_manager.open_library()
     set_current_library(library_id)
-    
+
     # Find the pipelex package, then get the builder subdirectory path
     pipelex_spec = importlib.util.find_spec("pipelex")
     if pipelex_spec is None or pipelex_spec.origin is None:
-        raise ImportError("Could not find pipelex package")
+        msg = "Could not find pipelex package"
+        raise ImportError(msg)
     pipelex_path = Path(pipelex_spec.origin).parent
     pipelex_builder_path = pipelex_path / "builder"
-    
+
     library_manager.load_libraries(library_id=library_id, library_dirs=[pipelex_builder_path])
     builder_loop = BuilderLoop()
     pipelex_bundle_spec = await builder_loop.build_and_fix(inputs={"brief": request_data.brief}, builder_pipe="pipe_builder")
