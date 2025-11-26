@@ -28,18 +28,13 @@
 
 [pipelex.scan_config]
 excluded_dirs = [
-    ".venv",
-    "venv",
     "env",
     ".env",
-    "virtualenv",
-    ".virtualenv",
     ".git",
     "__pycache__",
     ".pytest_cache",
     ".mypy_cache",
     ".ruff_cache",
-    "node_modules",
     "results",
 ]
 

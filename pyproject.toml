@@ -16,7 +16,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.16.0",
+    "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal] @git+https://github.com/Pipelex/pipelex.git@fix/deep_update-overrides-arrays",
     "fastapi>=0.118.0",
     "uvicorn>=0.37.0",
 ]
@@ -175,6 +175,8 @@ reportUnusedFunction = "error"
 reportUnusedImport = "none"
 reportUnusedVariable = "error"
 reportWildcardImportFromLibrary = "error"
+reportUnusedParameter = "information"
+strictDictionaryInference = true
 strictListInference = true
 strictParameterNoneValue = true
 strictSetInference = true
