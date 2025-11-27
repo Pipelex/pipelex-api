@@ -1,5 +1,5 @@
 import traceback
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -8,17 +8,10 @@ from pipelex import log
 from pipelex.client.pipeline_request_factory import PipelineRequestFactory
 from pipelex.client.pipeline_response_factory import PipelineResponseFactory
 from pipelex.client.protocol import PipelineRequest, PipelineResponse, PipelineState
-from pipelex.core.interpreter import PipelexInterpreter
-from pipelex.hub import get_library_manager
 from pipelex.pipeline.execute import execute_pipeline
 from pipelex.pipeline.start import start_pipeline
-from pipelex.pipeline.validate_plx import validate_plx
 
-from api.routes.helpers import extract_pipe_structures
 from api.routes.pipelex.utils import get_current_iso_timestamp
-
-if TYPE_CHECKING:
-    from pipelex.core.bundles.pipelex_bundle_blueprint import PipelexBundleBlueprint
 
 router = APIRouter(tags=["pipeline"])
 
@@ -43,7 +36,6 @@ async def execute(
 
     This is a blocking operation that doesn't return until the pipe execution is complete.
     """
-    blueprint: PipelexBundleBlueprint | None = None
     try:
         created_at = get_current_iso_timestamp()
         pipe_output = await execute_pipeline(
@@ -54,10 +46,6 @@ async def execute(
             output_multiplicity=pipeline_request.output_multiplicity,
             dynamic_output_concept_code=pipeline_request.dynamic_output_concept_code,
         )
-        blueprint = PipelexInterpreter(file_content=pipeline_request.plx_content).make_pipelex_bundle_blueprint()
-        pipes = get_library_manager().load_from_blueprint(blueprint=blueprint)
-        pipe_structures = extract_pipe_structures(pipes)
-        get_library_manager().remove_from_blueprint(blueprint=blueprint)
 
         return PipelineResponseFactory.make_from_pipe_output(
             status="success",
@@ -66,7 +54,6 @@ async def execute(
             created_at=created_at,
             finished_at=get_current_iso_timestamp(),
             pipe_output=pipe_output,
-            pipe_structures=pipe_structures,
         )
 
     except Exception as exc:
@@ -80,9 +67,6 @@ async def execute(
                 "message": str(exc),
             },
         ) from exc
-    finally:
-        if blueprint is not None:
-            get_library_manager().remove_from_blueprint(blueprint=blueprint)
 
 
 @router.post("/pipeline/start", response_model=PipelineResponse)
@@ -99,12 +83,12 @@ async def start(
 
     Note: If plx_content is provided, pipes remain loaded after this call returns.
     """
-    blueprint: PipelexBundleBlueprint | None = None
     try:
         if pipeline_request.plx_content:
             raise HTTPException(status_code=400, detail="PLX content is not supported when using the route 'start'")
         if not pipeline_request.pipe_code:
             raise HTTPException(status_code=400, detail="Pipe code is required when using the route 'start'")
+
         created_at = get_current_iso_timestamp()
         pipeline_run_id, _ = await start_pipeline(
             pipe_code=pipeline_request.pipe_code,
@@ -122,16 +106,7 @@ async def start(
             main_stuff_name=None,
             status="success",
         )
-
-        # If we have pipe structures, add them to the response
-        if pipeline_request.plx_content:
-            blueprint, pipes = await validate_plx(plx_content=pipeline_request.plx_content)
-            full_response_data = {
-                "pipeline_response": response_data.model_dump(),
-                "pipe_structures": extract_pipe_structures(pipes),
-            }
-            get_library_manager().remove_from_blueprint(blueprint=blueprint)
-            return JSONResponse(content=full_response_data)
+        return JSONResponse(content=response_data.model_dump(serialize_as_any=True))
 
     except Exception as exc:
         log.error("Pipeline start error details:")
@@ -144,6 +119,3 @@ async def start(
                 "message": str(exc),
             },
         ) from exc
-    finally:
-        if blueprint is not None:
-            get_library_manager().remove_from_blueprint(blueprint=blueprint)
