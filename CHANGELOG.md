@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Bump `pipelex` to `v0.16.0`: See `Pipelex` changelog [here](https://docs.pipelex.com/changelog/)
+- Bump `pipelex` to `v0.17.0`: See `Pipelex` changelog [here](https://docs.pipelex.com/changelog/)
 
 ## [v0.0.8] - 2025-11-04
 
