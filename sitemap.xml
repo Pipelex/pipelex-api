@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+         <loc>https://pipelex.github.io/pipelex-api/</loc>
+         <lastmod>2025-12-01</lastmod>
+    </url>
+    <url>
+         <loc>https://pipelex.github.io/pipelex-api/CODE_OF_CONDUCT/</loc>
+         <lastmod>2025-12-01</lastmod>
+    </url>
+    <url>
+         <loc>https://pipelex.github.io/pipelex-api/changelog/</loc>
+         <lastmod>2025-12-01</lastmod>
+    </url>
+    <url>
+         <loc>https://pipelex.github.io/pipelex-api/contributing/</loc>
+         <lastmod>2025-12-01</lastmod>
+    </url>
+    <url>
+         <loc>https://pipelex.github.io/pipelex-api/license/</loc>
+         <lastmod>2025-12-01</lastmod>
+    </url>
+    <url>
+         <loc>https://pipelex.github.io/pipelex-api/pipe-builder/</loc>
+         <lastmod>2025-12-01</lastmod>
+    </url>
+    <url>
+         <loc>https://pipelex.github.io/pipelex-api/pipe-run/</loc>
+         <lastmod>2025-12-01</lastmod>
+    </url>
+    <url>
+         <loc>https://pipelex.github.io/pipelex-api/pipe-validate/</loc>
+         <lastmod>2025-12-01</lastmod>
+    </url>
+</urlset>
