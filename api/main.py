@@ -5,7 +5,7 @@ from pipelex.system.runtime import IntegrationMode
 
 from api.routes import router as api_router
 from api.routes.pipelex.health import router as health_router
-from api.security import verify_token
+from api.security import get_auth_dependency
 
 Pipelex.make(IntegrationMode.FASTAPI)
 
@@ -24,8 +24,9 @@ app.add_middleware(
 
 app.include_router(health_router)
 
-# Register all other routes WITH authentication
-app.include_router(api_router, prefix="/api/v1", dependencies=[Depends(verify_token)])
+# Register all other routes WITH authentication (auto-selects JWT or API key based on USE_JWT env var)
+auth_dependency = get_auth_dependency()
+app.include_router(api_router, prefix="/api/v1", dependencies=[Depends(auth_dependency)])
 
 
 @app.get("/")
