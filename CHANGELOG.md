@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.0.11] - 2025-12-01
+
+### Added
+
+- `pyjwt` dependency.
+
 ## [v0.0.10] - 2025-12-01
 
 ### Changed
