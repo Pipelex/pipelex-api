@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.0.10] - 2025-12-01
+
+### Added
+
+- JWT authentication support.
+
 ## [v0.0.9] - 2025-11-26
 
 ### Changed
