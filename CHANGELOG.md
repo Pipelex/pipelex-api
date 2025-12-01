@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.0.10] - 2025-12-01
+
+### Changed
+
+- Bump `pipelex` to `v0.17.3`: See `Pipelex` changelog [here](https://docs.pipelex.com/changelog/)
+
+### Added
+
+- JWT authentication support.
+
 ## [v0.0.9] - 2025-11-26
 
 ### Changed
