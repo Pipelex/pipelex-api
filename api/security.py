@@ -1,17 +1,17 @@
 """Authentication - Pluggable JWT or API Key validation."""
 
-import os
 from typing import Annotated, Any, cast
 
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pipelex import log
+from pipelex.system.environment import get_optional_env
 
 security = HTTPBearer()
 
-# JWT Configuration - Fail fast if JWT is enabled but not configured
-JWT_SECRET = os.getenv("JWT_SECRET_KEY")
+# JWT Configuration
+JWT_SECRET = get_optional_env("JWT_SECRET_KEY")
 JWT_ALGORITHM = "HS256"
 
 
@@ -100,7 +100,7 @@ async def verify_api_key(credentials: Annotated[HTTPAuthorizationCredentials, De
         HTTPException: If API key is invalid
     """
     try:
-        api_key = os.getenv("API_KEY")
+        api_key = get_optional_env("API_KEY")
 
         if not api_key:
             log.error("API_KEY environment variable is not set")
@@ -141,5 +141,5 @@ def get_auth_dependency():
     Returns:
         The appropriate authentication function (verify_jwt or verify_api_key)
     """
-    use_jwt = os.getenv("USE_JWT", "false").lower() == "true"
+    use_jwt = get_optional_env("USE_JWT") == "true"
     return verify_jwt if use_jwt else verify_api_key
