@@ -1898,7 +1898,7 @@ wheels = [
 
 [[package]]
 name = "pipelex"
-version = "0.17.1"
+version = "0.17.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -1926,9 +1926,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "yattag" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/09/41/431acc4ed3877e2dea125b7d52344ebe0f8f3d17cadeaed9004e13cc49a4/pipelex-0.17.1.tar.gz", hash = "sha256:e7107a7a6e7acf179ed43230a4ac4eb4a0e1af5dbd0322962be3f6054f5f21fc", size = 367468, upload-time = "2025-11-27T16:55:56.191Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/33/69/98c518fc203b3096bf163124d3eeae8b15f8608c28e4292b977bef99bbc1/pipelex-0.17.3.tar.gz", hash = "sha256:9be425de4faee01d1039f8e97c55a2beb66e91b005be13323709f5843b917d64", size = 368295, upload-time = "2025-12-01T13:45:52.849Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/20/f9/ac53af3828e5cd2dff151b7fe5a4de4aebbe3fc812f8f0240e42fc103055/pipelex-0.17.1-py3-none-any.whl", hash = "sha256:60e1f6a4f1191ce7f7f227fb754dc17c6f10034ff24410ed49ebe267e0dcb017", size = 566837, upload-time = "2025-11-27T16:55:54.241Z" },
+    { url = "https://files.pythonhosted.org/packages/4c/82/1ad4436608bd1c33077d9d0905a0d93640b9c47b310f1c19ae0f96c18224/pipelex-0.17.3-py3-none-any.whl", hash = "sha256:5dda80b9adcfd13433992e2dfd96f484c6339e14511388cb66adf5e22c28cafa", size = 567412, upload-time = "2025-12-01T13:45:51.07Z" },
 ]
 
 [package.optional-dependencies]
@@ -2006,7 +2006,7 @@ requires-dist = [
     { name = "mkdocs-meta-manager", marker = "extra == 'docs'", specifier = "==1.1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.2" },
     { name = "pandas-stubs", marker = "extra == 'dev'", specifier = ">=2.2.3.241126" },
-    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal"], specifier = "==0.17.1" },
+    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal"], specifier = "==0.17.3" },
     { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.3.8" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.405" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.3" },
