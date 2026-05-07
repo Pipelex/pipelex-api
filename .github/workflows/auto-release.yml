@@ -1,0 +1,61 @@
+name: Auto-release on main
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  detect-and-trigger:
+    name: Detect version bump and trigger publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version from pyproject.toml
+        run: |
+          VERSION=$(sed -n 's/^[[:space:]]*version = "\(.*\)"/\1/p' pyproject.toml)
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not read version from pyproject.toml"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Detected version: $VERSION"
+
+      - name: Skip if release already exists
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release v$VERSION already exists — nothing to do."
+            echo "SKIP=1" >> "$GITHUB_ENV"
+          fi
+
+      - name: Verify changelog entry exists
+        if: env.SKIP != '1'
+        run: |
+          if ! grep -q "^## \[v$VERSION\] - " CHANGELOG.md; then
+            echo "::error::No changelog entry for v$VERSION in CHANGELOG.md — refusing to publish."
+            exit 1
+          fi
+
+      - name: Trigger Docker Hub publish
+        if: env.SKIP != '1'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy.yml --ref main -f version="$VERSION"
+
+      - name: Trigger GitHub Release
+        if: env.SKIP != '1'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: gh workflow run github-release.yml --ref main -f version="$VERSION"
+
+      - name: Summary
+        if: env.SKIP != '1'
+        run: |
+          echo "Dispatched deploy.yml and github-release.yml for v$VERSION"
+          echo "Watch progress: https://github.com/$GITHUB_REPOSITORY/actions"
