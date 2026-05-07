@@ -22,9 +22,9 @@ AUTH_MODE=none                 # one of: none | api_key | jwt
 API_KEY=your-api-key           # used when AUTH_MODE=api_key
 JWT_SECRET_KEY=your-jwt-secret # used when AUTH_MODE=jwt
 
-# Selects which pipelex_{ENVIRONMENT}.toml override file is layered on top
+# Selects which pipelex_{PIPELEX_ENV}.toml override file is layered on top
 # (see "Pipelex configuration files" below). Defaults to "dev" when unset.
-ENVIRONMENT=dev
+PIPELEX_ENV=dev
 
 # Required ONLY if you use POST /api/v1/pipeline/start with `callback_urls`
 # (see pipe-run.md → "Async Completion Callbacks"). HMAC secret shared between
@@ -92,7 +92,7 @@ The Pipelex runtime loads `.toml` config files in a layered, deep-merged order. 
 2. Global config — `~/.pipelex/pipelex.toml`
 3. Project config — `{cwd}/.pipelex/pipelex.toml` (if present and different from global)
 4. `pipelex_local.toml`
-5. `pipelex_{ENVIRONMENT}.toml` — picked from the `ENVIRONMENT` env var (e.g. `pipelex_dev.toml`, `pipelex_prod.toml`)
+5. `pipelex_{PIPELEX_ENV}.toml` — picked from the `PIPELEX_ENV` env var (e.g. `pipelex_dev.toml`, `pipelex_prod.toml`)
 6. `pipelex_{run_mode}.toml`
 7. `pipelex_override.toml` — your final override
 8. `pipelex_temporary_override.toml` — ephemeral, safe for tools to write/delete
@@ -122,7 +122,7 @@ services:
       # — see "Pipelex configuration files" above for the load order):
       - ./pipelex_override.toml:/root/.pipelex/pipelex_override.toml:ro
 
-      # Or env-specific (selected by ENVIRONMENT):
+      # Or env-specific (selected by PIPELEX_ENV):
       - ./pipelex_dev.toml:/root/.pipelex/pipelex_dev.toml:ro
 
       # Or replace inference layer files directly:
