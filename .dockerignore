@@ -1,0 +1,71 @@
+# Python build artifacts
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+build/
+dist/
+
+# Virtual environments
+.venv
+env/
+venv/
+
+# Caches
+.cache
+.webassets-cache
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.pylint
+.coverage
+coverage.xml
+
+# Git / SCM
+.git
+.gitignore
+.gitmodules
+.gitattributes
+.dockerignore
+
+# Editor / IDE / agent state
+.vscode
+.cursor
+.claude
+.idea
+
+# Tests + docs not needed at runtime
+tests
+docs
+site
+mkdocs.yml
+CLAUDE.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+CHANGELOG.md
+CLA.md
+
+# Build/CI tooling not needed at runtime
+.github
+Makefile
+Makefiles
+
+# Local dev artifacts
+.env
+.env.example
+dev_context
+playground
+
+# OS / system files
+.DS_Store
+Thumbs.db
+
+# Scripts
+*.sh
+
+# Misc
+dependency_tree.txt
+files_tree.txt
+root.txt

@@ -1,0 +1,157 @@
+# Pipelex API Documentation
+
+Welcome to the Pipelex API documentation. The API provides programmatic access to the Pipelex system.
+
+## What the API Offers
+
+The API currently allows you to:
+
+1. **Run** any Pipelex pipeline with flexible inputs (sync or async)
+2. **Validate** any Pipelex pipeline to ensure correctness
+3. **Build** pipeline components — generate input schemas, output representations, runner code, concepts, and pipe specs
+4. **List** available model presets and configurations
+5. **Upload** files via presigned URLs
+
+## Deployment
+
+Deploy the Pipelex API anywhere that runs Docker (your laptop, ECS, Cloud Run, Kubernetes, …) using our Docker image: [`pipelex/pipelex-api`](https://hub.docker.com/r/pipelex/pipelex-api).
+
+### 1. Run with Docker
+
+The only required env var is `PIPELEX_GATEWAY_API_KEY`. Get a free key (with free credits) at https://app.pipelex.com — it's the default path to LLMs and gives you access to every supported model with a single credential. (If you'd rather call providers like OpenAI, Anthropic, Bedrock, or Vertex directly, you reconfigure that on the Pipelex side, not here — see https://docs.pipelex.com.)
+
+```bash
+docker run --name pipelex-api -p 8081:8081 \
+  -e PIPELEX_GATEWAY_API_KEY=your-pipelex-gateway-api-key \
+  pipelex/pipelex-api:latest
+```
+
+To require authentication on the API itself, add `-e AUTH_MODE=api_key -e API_KEY=your-secret` (or `AUTH_MODE=jwt` + `JWT_SECRET_KEY`). The full set of accepted env vars is documented in [Configuration](configuration.md) and `.env.example`.
+
+If you'd rather keep config out of your shell history, use `--env-file .env` or a `docker-compose.yml` instead — see [Configuration → Setting env vars in Docker](configuration.md#setting-env-vars-in-docker) for both patterns.
+
+To build the image yourself instead of pulling, replace `pipelex/pipelex-api:latest` with a local tag after `docker build -t pipelex-api .`.
+
+### 2. Verify
+
+```bash
+curl http://localhost:8081/health
+```
+
+### 3. Run your first pipeline
+
+Send an inline MTHDS bundle and inputs to `/api/v1/pipeline/execute`:
+
+```bash
+curl -s http://localhost:8081/api/v1/pipeline/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pipe_code": "summarize",
+    "mthds_contents": ["domain = \"hello\"\nmain_pipe = \"summarize\"\n\n[pipe.summarize]\ntype = \"PipeLLM\"\ndescription = \"Summarize the input text in one sentence\"\ninputs = { text = \"Text\" }\noutput = \"Text\"\nprompt = \"Summarize in one sentence:\\n@text\"\n"],
+    "inputs": { "text": "Pipelex turns plain-language pipeline definitions into reproducible AI workflows that run as HTTP endpoints." }
+  }'
+```
+
+The response contains `pipeline_state: "COMPLETED"` and the result under `pipe_output.working_memory.root.<main_stuff_name>.content`. See **[Pipe Run →](pipe-run.md)** for every input shape (text, structured objects, `Document`, `Image`, …) and the full `/execute` and `/start` reference.
+
+### 4. Customize the configuration
+
+Need to disable Temporal, point to a different storage backend, or ship your own model deck? See **[Configuration →](configuration.md)** for how to provide your own `.pipelex/` config files to the Docker image and a quick recipe for running without Temporal.
+
+## Base URL
+
+Once deployed locally, the API is available at:
+
+```
+http://localhost:8081/api/v1
+```
+
+## Authentication
+
+The API supports three authentication modes via the `AUTH_MODE` environment variable:
+
+### No Authentication (Default)
+
+By default (`AUTH_MODE=none`), the API requires no authentication. This is the default for open-source deployments and for running behind an API Gateway that handles auth.
+
+If you sit this API behind a trusted reverse proxy that authenticates users and forwards identity via `X-User-Email` / `X-User-Sub` / `X-User-Id` / `X-Auth-Method` headers, set `TRUST_FORWARDED_IDENTITY_HEADERS=true` to honor them. **Default is off** — without this flag, the API ignores those headers entirely and requests stay anonymous. Only enable it when your proxy strips inbound copies of these headers before adding its own; otherwise, any external client can spoof user identity by sending the headers directly.
+
+### API Key Authentication
+
+Set `AUTH_MODE=api_key` and provide the `API_KEY` environment variable. Include it in the Authorization header:
+
+```
+Authorization: Bearer YOUR_API_KEY
+```
+
+```bash
+docker run --name pipelex-api -p 8081:8081 \
+  -e AUTH_MODE=api_key \
+  -e API_KEY=your-api-key \
+  pipelex/pipelex-api:latest
+```
+
+### JWT Authentication
+
+Set `AUTH_MODE=jwt` and provide the `JWT_SECRET_KEY` environment variable:
+
+```bash
+docker run --name pipelex-api -p 8081:8081 \
+  -e AUTH_MODE=jwt \
+  -e JWT_SECRET_KEY=your-jwt-secret-key \
+  pipelex/pipelex-api:latest
+```
+
+**JWT Requirements:**
+
+- Tokens must be signed with the HS256 algorithm
+- Tokens must contain an `email` field in the payload
+- Pass the JWT in the Authorization header: `Authorization: Bearer YOUR_JWT_TOKEN`
+
+## API Endpoints
+
+### Health & Version
+
+- `GET /health` — Health check (no auth required)
+- `GET /api/v1/pipelex_version` — Pipelex library version
+- `GET /api/v1/api_version` — API server version
+
+### Pipe Run
+Execute pipelines with flexible input formats, either synchronously or asynchronously.
+
+- `POST /api/v1/pipeline/execute` — Run a pipeline and wait for completion
+- `POST /api/v1/pipeline/start` — Start a pipeline execution without waiting
+
+[Learn more →](pipe-run.md)
+
+### Pipe Validate
+Validate MTHDS content to ensure pipelines are correctly defined before execution.
+
+- `POST /api/v1/validate` — Parse, validate, and dry-run pipelines
+
+[Learn more →](pipe-validate.md)
+
+### Pipe Builder
+Generate input schemas, output representations, and runner code for pipelines.
+
+- `POST /api/v1/build/inputs` — Generate example input JSON for a pipe
+- `POST /api/v1/build/output` — Generate output representation (schema, JSON, or Python)
+- `POST /api/v1/build/runner` — Generate Python runner code for a pipe
+
+[Learn more →](pipe-builder.md)
+
+### Agent
+Tools for AI agents building pipelines programmatically.
+
+- `POST /api/v1/build/concept` — Convert a JSON concept spec to TOML
+- `POST /api/v1/build/pipe-spec` — Convert a JSON pipe spec to TOML
+- `GET /api/v1/models` — List available model presets, aliases, and waterfalls
+
+### Uploader (auth-gated)
+
+These endpoints require `AUTH_MODE=api_key` or `AUTH_MODE=jwt` — they reject anonymous requests with 401. They're useful when a client wants to push a local file to the server instead of hosting it themselves.
+
+- `POST /api/v1/upload` — Upload a base64-encoded file. Returns a `pipelex-storage://…` URI you can pass back as a `Document`/`Image` `url` in subsequent pipeline calls.
+- `POST /api/v1/resolve-storage-url` — Resolve a `pipelex-storage://…` URI to a presigned HTTPS URL (when the storage backend supports it).
+
+For most use cases you don't need either: pass any public HTTP(S) URL (or base64 data URL) directly as `Document.content.url` and skip the upload step entirely.
