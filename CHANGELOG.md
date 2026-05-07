@@ -6,8 +6,6 @@
 
 - `/release` Claude Code skill (`.claude/skills/release/`) automating the release workflow: version bump in `pyproject.toml`, changelog finalization, `make check`, `make li`, release branch creation, commit, push, and PR.
 
-## [v0.1.1] - 2026-05-07
-
 ### Changed
 
 - Bumped Pipelex to v0.27.0. See changelog here: https://docs.pipelex.com/latest/changelog/
