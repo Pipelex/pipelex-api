@@ -1,8 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `/release` Claude Code skill (`.claude/skills/release/`) automating the release workflow: version bump in `pyproject.toml`, changelog finalization, `make check`, `make li`, release branch creation, commit, push, and PR.
+
+## [v0.1.1] - 2026-05-07
+
+### Changed
+
+- Bumped Pipelex to v0.27.0. See changelog here: https://docs.pipelex.com/latest/changelog/
+
 ## [v0.1.0] - 2026-05-04
 
-### Changed (BREAKING)
+### Changed
 
 - **The published `pipelex/pipelex-api` Docker image is now generic.** Temporal is **off** by default, no S3 storage is configured, and no DynamoDB tracing is enabled. Anything environment-specific is now expected to come from a user-supplied `.pipelex/pipelex_override.toml` (or `pipelex_<env>.toml`) mounted into `/root/.pipelex/`. See [`docs/configuration.md`](https://github.com/Pipelex/pipelex-api/blob/main/docs/configuration.md).
 - **Removed deployment-specific env configs from the repo.** `pipelex_dev.toml`, `pipelex_staging.toml`, `pipelex_prod.toml`, and `pipelex_service.toml` previously baked one specific deployment's Temporal cluster, S3 buckets, and DynamoDB table names into the public image. They are gone — bring your own via a mounted `.pipelex/` override (see [`docs/configuration.md`](https://github.com/Pipelex/pipelex-api/blob/main/docs/configuration.md)).
