@@ -1,0 +1,53 @@
+name: Publish to Docker Hub
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # Manual trigger for re-publishing or out-of-band tags.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (without leading "v")'
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    name: Build & push pipelex/pipelex-api to Docker Hub
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          PYPROJECT_VERSION=$(sed -n 's/^[[:space:]]*version = "\(.*\)"/\1/p' pyproject.toml)
+          if [ "$VERSION" != "$PYPROJECT_VERSION" ]; then
+            echo "::error::Tag version ($VERSION) does not match pyproject.toml ($PYPROJECT_VERSION). Bump pyproject.toml first."
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Publishing version: $VERSION"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Publish to Docker Hub
+        env:
+          DOCKER_HUB_TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
+          VERSION: ${{ env.VERSION }}
+        run: make deploy-docker-hub
+
+      - name: Summary
+        run: |
+          echo "Published pipelex/pipelex-api:${{ env.VERSION }} and :latest to Docker Hub"
+          echo "https://hub.docker.com/r/pipelex/pipelex-api"
