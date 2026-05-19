@@ -21,8 +21,8 @@ async def _whoami_jwt(
 ) -> dict[str, str | None]:
     _ = request
     if user is None:
-        return {"email": None}
-    return {"email": user.email, "user_id": user.user_id}
+        return {"user_id": None}
+    return {"user_id": user.user_id}
 
 
 async def _ping_api_key(_token: Annotated[str, Depends(verify_api_key)]) -> dict[str, str]:
@@ -42,18 +42,29 @@ def _build_api_key_client() -> TestClient:
 
 
 class TestSecurityVerifiers:
-    def test_jwt_happy_path(self, mocker: MockerFixture):
+    def test_jwt_happy_path_user_id_claim(self, mocker: MockerFixture):
+        """Preferred claim: explicit `user_id`. Anything else in the JWT is ignored."""
         mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
         client = _build_jwt_client()
-        token = jwt.encode({"email": "user@example.com", "sub": "u#1", "user_id": "uuid-1"}, JWT_SECRET, algorithm="HS256")
+        token = jwt.encode({"user_id": "uuid-1", "sub": "ignored", "email": "ignored@x.com"}, JWT_SECRET, algorithm="HS256")
         response = client.get("/whoami", headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 200
-        assert response.json() == {"email": "user@example.com", "user_id": "uuid-1"}
+        assert response.json() == {"user_id": "uuid-1"}
 
-    def test_jwt_missing_email_rejected(self, mocker: MockerFixture):
+    def test_jwt_falls_back_to_sub_claim(self, mocker: MockerFixture):
+        """When no `user_id` claim is present, fall back to the standard `sub` claim."""
         mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
         client = _build_jwt_client()
-        token = jwt.encode({"sub": "u#1"}, JWT_SECRET, algorithm="HS256")
+        token = jwt.encode({"sub": "google#abc"}, JWT_SECRET, algorithm="HS256")
+        response = client.get("/whoami", headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 200
+        assert response.json() == {"user_id": "google#abc"}
+
+    def test_jwt_missing_caller_identifier_rejected(self, mocker: MockerFixture):
+        """No `user_id` and no `sub` means no caller identifier — reject."""
+        mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
+        client = _build_jwt_client()
+        token = jwt.encode({"email": "x@x.com"}, JWT_SECRET, algorithm="HS256")
         response = client.get("/whoami", headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 401
         body = response.json()
@@ -69,14 +80,14 @@ class TestSecurityVerifiers:
     def test_jwt_wrong_secret_rejected(self, mocker: MockerFixture):
         mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
         client = _build_jwt_client()
-        token = jwt.encode({"email": "x@x.com"}, "different-secret", algorithm="HS256")
+        token = jwt.encode({"user_id": "uuid-1"}, "different-secret", algorithm="HS256")
         response = client.get("/whoami", headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 401
 
     def test_jwt_missing_secret_returns_500(self, mocker: MockerFixture):
         mocker.patch("api.security.get_optional_env", return_value=None)
         client = _build_jwt_client()
-        token = jwt.encode({"email": "x@x.com"}, "anything", algorithm="HS256")
+        token = jwt.encode({"user_id": "uuid-1"}, "anything", algorithm="HS256")
         response = client.get("/whoami", headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 500
 
