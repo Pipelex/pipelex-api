@@ -28,6 +28,21 @@ class AuthMode(StrEnum):
     API_KEY = "api_key"
 
 
+class ForwardedIdentityHeader(StrEnum):
+    """HTTP headers a trusted reverse proxy may forward to authenticate
+    a caller when `TRUST_FORWARDED_IDENTITY_HEADERS=true`.
+
+    The runner is a generic execution engine: the ONLY piece of identity
+    it consumes is an opaque user id, which it scopes S3 storage keys
+    under (`<user_id>/...`). Anything else a proxy might want to forward
+    (email, OAuth subject, auth method) is metadata the runner has no
+    use for — handlers that need it look it up by `user_id` against the
+    deployment's own user store.
+    """
+
+    USER_ID = "X-User-Id"
+
+
 class RequestUser(BaseModel):
     """Authenticated caller identity available to route handlers.
 
@@ -157,7 +172,7 @@ async def no_auth(request: Request) -> None:
     if get_optional_env("TRUST_FORWARDED_IDENTITY_HEADERS") != "true":
         return
 
-    user_id = request.headers.get("x-user-id")
+    user_id = request.headers.get(ForwardedIdentityHeader.USER_ID)
     if not user_id or user_id == "anonymous":
         return
 

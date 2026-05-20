@@ -5,7 +5,8 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 
-from api.security import RequestUser, get_request_user, no_auth
+from api.security import ForwardedIdentityHeader, RequestUser, get_request_user, no_auth
+from tests.unit._constants import RoutePath
 
 USER_ID = "11111111-1111-4111-1111-111111111111"
 
@@ -18,7 +19,7 @@ async def _whoami(user: Annotated[RequestUser | None, Depends(get_request_user)]
 
 def _build_client() -> TestClient:
     app = FastAPI()
-    app.add_api_route("/whoami", _whoami, methods=["GET"], dependencies=[Depends(no_auth)])
+    app.add_api_route(RoutePath.WHOAMI, _whoami, methods=["GET"], dependencies=[Depends(no_auth)])
     return TestClient(app)
 
 
@@ -27,14 +28,16 @@ class TestNoAuthForwardedHeaders:
         """No TRUST_FORWARDED_IDENTITY_HEADERS env → X-User-Id is not trusted."""
         mocker.patch("api.security.get_optional_env", return_value=None)
         client = _build_client()
-        response = client.get("/whoami", headers={"x-user-id": USER_ID})
+        headers: dict[str, str] = {ForwardedIdentityHeader.USER_ID: USER_ID}
+        response = client.get(RoutePath.WHOAMI, headers=headers)
         assert response.status_code == 200
         assert response.json() == {"user_id": None}
 
     def test_header_ignored_when_flag_not_true(self, mocker: MockerFixture):
         mocker.patch("api.security.get_optional_env", return_value="false")
         client = _build_client()
-        response = client.get("/whoami", headers={"x-user-id": USER_ID})
+        headers: dict[str, str] = {ForwardedIdentityHeader.USER_ID: USER_ID}
+        response = client.get(RoutePath.WHOAMI, headers=headers)
         assert response.status_code == 200
         assert response.json() == {"user_id": None}
 
@@ -43,13 +46,13 @@ class TestNoAuthForwardedHeaders:
         mocker.patch("api.security.get_optional_env", return_value="true")
         client = _build_client()
         # Extra X-User-* headers are noise — the runner ignores them by design.
-        headers = {
-            "x-user-id": USER_ID,
+        headers: dict[str, str] = {
+            ForwardedIdentityHeader.USER_ID: USER_ID,
             "x-user-email": "evil@example.com",
             "x-user-sub": "spoofed#1",
             "x-auth-method": "gateway",
         }
-        response = client.get("/whoami", headers=headers)
+        response = client.get(RoutePath.WHOAMI, headers=headers)
         assert response.status_code == 200
         assert response.json() == {"user_id": USER_ID}
 
@@ -58,7 +61,7 @@ class TestNoAuthForwardedHeaders:
         """No `X-User-Id`, or the literal "anonymous" sentinel, means no user."""
         mocker.patch("api.security.get_optional_env", return_value="true")
         client = _build_client()
-        headers = {"x-user-id": user_id} if user_id else {}
-        response = client.get("/whoami", headers=headers)
+        headers: dict[str, str] = {ForwardedIdentityHeader.USER_ID: user_id} if user_id else {}
+        response = client.get(RoutePath.WHOAMI, headers=headers)
         assert response.status_code == 200
         assert response.json() == {"user_id": None}

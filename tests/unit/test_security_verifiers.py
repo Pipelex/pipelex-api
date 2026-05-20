@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 
 from api.security import RequestUser, get_request_user, verify_api_key, verify_jwt
+from tests.unit._constants import RoutePath
 
 JWT_SECRET = "test-jwt-secret-do-not-use-in-prod"
 API_KEY = "test-api-key-static"
@@ -31,13 +32,13 @@ async def _ping_api_key(_token: Annotated[str, Depends(verify_api_key)]) -> dict
 
 def _build_jwt_client() -> TestClient:
     app = FastAPI()
-    app.add_api_route("/whoami", _whoami_jwt, methods=["GET"])
+    app.add_api_route(RoutePath.WHOAMI, _whoami_jwt, methods=["GET"])
     return TestClient(app)
 
 
 def _build_api_key_client() -> TestClient:
     app = FastAPI()
-    app.add_api_route("/ping", _ping_api_key, methods=["GET"])
+    app.add_api_route(RoutePath.PING, _ping_api_key, methods=["GET"])
     return TestClient(app)
 
 
@@ -47,7 +48,7 @@ class TestSecurityVerifiers:
         mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
         client = _build_jwt_client()
         token = jwt.encode({"user_id": "uuid-1"}, JWT_SECRET, algorithm="HS256")
-        response = client.get("/whoami", headers={"Authorization": f"Bearer {token}"})
+        response = client.get(RoutePath.WHOAMI, headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 200
         assert response.json() == {"user_id": "uuid-1"}
 
@@ -63,7 +64,7 @@ class TestSecurityVerifiers:
         mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
         client = _build_jwt_client()
         token = jwt.encode({"sub": "google#abc"}, JWT_SECRET, algorithm="HS256")
-        response = client.get("/whoami", headers={"Authorization": f"Bearer {token}"})
+        response = client.get(RoutePath.WHOAMI, headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 401
         body = response.json()
         assert isinstance(body["detail"], dict)
@@ -73,7 +74,7 @@ class TestSecurityVerifiers:
         mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
         client = _build_jwt_client()
         token = jwt.encode({"iat": 0}, JWT_SECRET, algorithm="HS256")
-        response = client.get("/whoami", headers={"Authorization": f"Bearer {token}"})
+        response = client.get(RoutePath.WHOAMI, headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 401
         body = response.json()
         assert isinstance(body["detail"], dict)
@@ -81,7 +82,7 @@ class TestSecurityVerifiers:
     def test_jwt_invalid_token_rejected(self, mocker: MockerFixture):
         mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
         client = _build_jwt_client()
-        response = client.get("/whoami", headers={"Authorization": "Bearer not.a.real.token"})
+        response = client.get(RoutePath.WHOAMI, headers={"Authorization": "Bearer not.a.real.token"})
         assert response.status_code == 401
         assert response.json()["detail"]["error_type"] == "InvalidToken"
 
@@ -89,34 +90,34 @@ class TestSecurityVerifiers:
         mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
         client = _build_jwt_client()
         token = jwt.encode({"user_id": "uuid-1"}, "different-secret", algorithm="HS256")
-        response = client.get("/whoami", headers={"Authorization": f"Bearer {token}"})
+        response = client.get(RoutePath.WHOAMI, headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 401
 
     def test_jwt_missing_secret_returns_500(self, mocker: MockerFixture):
         mocker.patch("api.security.get_optional_env", return_value=None)
         client = _build_jwt_client()
         token = jwt.encode({"user_id": "uuid-1"}, "anything", algorithm="HS256")
-        response = client.get("/whoami", headers={"Authorization": f"Bearer {token}"})
+        response = client.get(RoutePath.WHOAMI, headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 500
 
     def test_api_key_happy_path(self, mocker: MockerFixture):
         mocker.patch("api.security.get_optional_env", return_value=API_KEY)
         client = _build_api_key_client()
-        response = client.get("/ping", headers={"Authorization": f"Bearer {API_KEY}"})
+        response = client.get(RoutePath.PING, headers={"Authorization": f"Bearer {API_KEY}"})
         assert response.status_code == 200
         assert response.json() == {"ok": "yes"}
 
     def test_api_key_wrong_key_rejected(self, mocker: MockerFixture):
         mocker.patch("api.security.get_optional_env", return_value=API_KEY)
         client = _build_api_key_client()
-        response = client.get("/ping", headers={"Authorization": "Bearer wrong-key"})
+        response = client.get(RoutePath.PING, headers={"Authorization": "Bearer wrong-key"})
         assert response.status_code == 401
         assert response.json()["detail"]["error_type"] == "InvalidToken"
 
     def test_api_key_missing_env_returns_500(self, mocker: MockerFixture):
         mocker.patch("api.security.get_optional_env", return_value=None)
         client = _build_api_key_client()
-        response = client.get("/ping", headers={"Authorization": "Bearer anything"})
+        response = client.get(RoutePath.PING, headers={"Authorization": "Bearer anything"})
         assert response.status_code == 500
         assert response.json()["detail"]["error_type"] == "ServerMisconfigured"
 
@@ -125,6 +126,6 @@ class TestSecurityVerifiers:
         mocker.patch("api.security.get_optional_env", return_value=API_KEY)
         client = _build_api_key_client()
         headers: dict[str, str] = {} if missing_header else {"Authorization": ""}
-        response = client.get("/ping", headers=headers)
+        response = client.get(RoutePath.PING, headers=headers)
         # Missing or empty Authorization header → HTTPBearer dependency rejects with 403/401.
         assert response.status_code in {401, 403}
