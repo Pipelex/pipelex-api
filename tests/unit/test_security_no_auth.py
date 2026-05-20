@@ -65,3 +65,30 @@ class TestNoAuthForwardedHeaders:
         response = client.get(RoutePath.WHOAMI, headers=headers)
         assert response.status_code == 200
         assert response.json() == {"user_id": None}
+
+    @pytest.mark.parametrize(
+        "non_uuid_user_id",
+        [
+            "google#abc",
+            "user-123",
+            "../etc/passwd",
+            "11111111-1111-4111-1111-11111111111",
+            "a" * 36,
+        ],
+    )
+    def test_non_uuid_forwarded_user_id_ignored(self, mocker: MockerFixture, non_uuid_user_id: str):
+        """A trusted proxy forwarding a non-UUID `X-User-Id` is ignored.
+
+        Storage URIs require the owner segment to match
+        `^[a-f0-9-]{36}$` (`_USER_ID_REGEX` in `routes/storage.py`).
+        Treating a non-UUID forwarded value as the storage owner would
+        write S3 keys that `/resolve-storage-url` would later refuse to
+        resolve for the same caller — so we silently fall through to
+        anonymous and let downstream handlers decide what to do.
+        """
+        mocker.patch("api.security.get_optional_env", return_value="true")
+        client = _build_client()
+        headers: dict[str, str] = {ForwardedIdentityHeader.USER_ID: non_uuid_user_id}
+        response = client.get(RoutePath.WHOAMI, headers=headers)
+        assert response.status_code == 200
+        assert response.json() == {"user_id": None}

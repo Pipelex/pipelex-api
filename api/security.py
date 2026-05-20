@@ -4,6 +4,7 @@ User identity is extracted during auth and stored on request.state.user as a Req
 Route handlers access it via the get_request_user dependency.
 """
 
+import re
 from typing import Annotated, Any
 
 import jwt
@@ -18,6 +19,16 @@ from api.error_types import ErrorType
 
 # JWT Configuration (only used when AUTH_MODE=jwt)
 JWT_ALGORITHM = "HS256"
+
+# A caller's `user_id` is the first path segment of every
+# `pipelex-storage://` URI; the storage resolver enforces this exact shape
+# when parsing those URIs. Validating here at the auth boundary keeps the
+# two layers in sync — without it, a token or proxy header with a non-UUID
+# value (e.g. `"google#abc"`, `"user-123"`, or anything containing `/`)
+# would authenticate, let `/upload` write S3 keys under a non-UUID owner
+# segment, and then `/resolve-storage-url` would refuse to resolve the
+# resulting URIs for the same caller.
+USER_ID_UUID_REGEX = re.compile(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")
 
 security = HTTPBearer()
 
@@ -109,6 +120,13 @@ async def verify_jwt(
                 detail={"error_type": ErrorType.INVALID_TOKEN, "message": "Invalid token: missing user_id claim"},
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        if not isinstance(user_id, str) or not USER_ID_UUID_REGEX.match(user_id):
+            log.warning(f"JWT user_id claim is not a UUID: {user_id!r}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"error_type": ErrorType.INVALID_TOKEN, "message": "Invalid token: user_id claim must be a UUID"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         _set_request_user(request, user_id=user_id)
 
         return payload
@@ -174,6 +192,9 @@ async def no_auth(request: Request) -> None:
 
     user_id = request.headers.get(ForwardedIdentityHeader.USER_ID)
     if not user_id or user_id == "anonymous":
+        return
+    if not USER_ID_UUID_REGEX.match(user_id):
+        log.warning(f"Forwarded X-User-Id is not a UUID, ignoring: {user_id!r}")
         return
 
     _set_request_user(request, user_id=user_id)
