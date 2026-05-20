@@ -42,9 +42,6 @@ Thumbs.db
 reports/
 results/
 
-# personnal pipelex config file that overrides the default one
-pipelex_super.toml
-
 # temporary files
 temp/
 
