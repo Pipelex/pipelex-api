@@ -20,11 +20,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from api.error_types import ErrorType
 from api.errors import STORAGE_HANDLED_EXCEPTIONS, raise_internal_error
-from api.security import RequestUser, get_request_user
+from api.security import USER_ID_UUID_REGEX, RequestUser, get_request_user
 
 router = APIRouter(tags=["storage"])
 
-_USER_ID_REGEX = re.compile(r"^[a-f0-9-]{36}$")
 _EXTENSION_REGEX = re.compile(r"^[a-zA-Z0-9]+$")
 _FALLBACK_LIFESPAN_SECONDS = 900
 
@@ -70,7 +69,7 @@ def parse_storage_uri(uri: str) -> tuple[str, str]:
         raise ValueError(msg)
 
     user_id = segments[0]
-    if not _USER_ID_REGEX.match(user_id):
+    if not USER_ID_UUID_REGEX.match(user_id):
         msg = "URI first segment must be a UUID user_id"
         raise ValueError(msg)
 

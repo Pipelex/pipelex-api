@@ -1,5 +1,22 @@
 # Changelog
 
+## [v0.1.2] - 2026-05-20
+
+### Changed
+
+- **Trimmed `RequestUser` to `user_id` only.** Dropped the `email`, `sub`, and `auth_method` fields. The runner is a generic execution engine — the only piece of identity it consumes is an opaque user id, which it scopes S3 storage keys under (`<user_id>/...`). Anything else (email, OAuth subject, auth method) is metadata the runner has no use for; handlers that need it look it up by `user_id` against the deployment's own user store.
+- **JWT auth now requires a `user_id` claim (UUID).** No fallback to the standard `sub` claim, and the value is now validated as a UUID (`^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$`) at the auth boundary. Storage URIs require the owner segment to match the same shape; provider-issued `sub` values like `"google#abc"` (or any non-UUID `user_id`) would otherwise let a caller upload to S3 under a key that `/resolve-storage-url` would later refuse to resolve. Deployments using OAuth JWTs must mint their own `user_id` claim (a UUID for that caller) when issuing tokens.
+- **Forwarded identity headers reduced to a single `X-User-Id` (must be a UUID).** With `TRUST_FORWARDED_IDENTITY_HEADERS=true`, only `X-User-Id` is honored and its value is validated against the same UUID shape as JWT `user_id`. Non-UUID values are silently ignored and the request stays anonymous. The previous `X-User-Email`, `X-User-Sub`, and `X-Auth-Method` headers are gone — they were metadata the runner never used.
+- Bumped Pipelex to v0.28.0. See changelog here: https://docs.pipelex.com/latest/changelog/
+
+### Fixed
+
+- `mkdocs build --strict` no longer fails on relative links inside the `CONTRIBUTING.md` snippet included into `docs/contributing.md`. Those links are authored to resolve from the repo root on GitHub; mkdocs validation for them is downgraded from `warn` to `info`.
+
+### Security
+
+- **Tightened `pipelex-storage://` owner-segment validation.** `parse_storage_uri` previously accepted any 36-character mix of hex and dashes (`^[a-f0-9-]{36}$`), so values like 36 dashes or `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` could pass through. The check now enforces the canonical UUID positional shape `8-4-4-4-12`, matching the validator newly applied at the auth boundary so the two layers cannot drift.
+
 ## [v0.1.1] - 2026-05-07
 
 ### Added
