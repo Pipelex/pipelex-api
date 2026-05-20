@@ -78,17 +78,20 @@ async def verify_jwt(
             algorithms=[JWT_ALGORITHM],
         )
 
-        # The caller identifier is whatever the JWT minter put in `user_id`,
-        # falling back to the standard `sub` claim. Anything else (email,
-        # provider, etc.) is metadata the runner does not care about — if a
-        # deployment needs it, it can look up by user_id against its own
-        # user store.
-        user_id = payload.get("user_id") or payload.get("sub")
+        # The caller identifier MUST be supplied as an explicit `user_id`
+        # claim. We deliberately do NOT fall back to the standard `sub`
+        # claim: storage URIs require the owner segment to be a UUID
+        # (`parse_storage_uri` in `routes/storage.py`), and provider-issued
+        # `sub` values like `"google#abc"` would let a caller upload to
+        # S3 under a key that `/resolve-storage-url` would later refuse to
+        # resolve. Deployments using OAuth JWTs must mint their own
+        # `user_id` claim (a UUID for that caller) when issuing tokens.
+        user_id = payload.get("user_id")
         if not user_id:
-            log.warning("JWT missing user_id and sub claims")
+            log.warning("JWT missing user_id claim")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"error_type": ErrorType.INVALID_TOKEN, "message": "Invalid token: missing caller identifier"},
+                detail={"error_type": ErrorType.INVALID_TOKEN, "message": "Invalid token: missing user_id claim"},
                 headers={"WWW-Authenticate": "Bearer"},
             )
         _set_request_user(request, user_id=user_id)

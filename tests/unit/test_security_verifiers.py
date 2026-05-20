@@ -43,28 +43,36 @@ def _build_api_key_client() -> TestClient:
 
 class TestSecurityVerifiers:
     def test_jwt_happy_path_user_id_claim(self, mocker: MockerFixture):
-        """Preferred claim: explicit `user_id`. Anything else in the JWT is ignored."""
+        """Preferred claim: explicit `user_id`."""
         mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
         client = _build_jwt_client()
-        token = jwt.encode({"user_id": "uuid-1", "sub": "ignored", "email": "ignored@x.com"}, JWT_SECRET, algorithm="HS256")
+        token = jwt.encode({"user_id": "uuid-1"}, JWT_SECRET, algorithm="HS256")
         response = client.get("/whoami", headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 200
         assert response.json() == {"user_id": "uuid-1"}
 
-    def test_jwt_falls_back_to_sub_claim(self, mocker: MockerFixture):
-        """When no `user_id` claim is present, fall back to the standard `sub` claim."""
+    def test_jwt_sub_only_is_rejected(self, mocker: MockerFixture):
+        """A JWT with only `sub` (and no `user_id`) is rejected.
+
+        We deliberately do NOT fall back to `sub`: storage URIs require the
+        owner segment to be a UUID, and OAuth providers' `sub` values
+        (e.g. `"google#abc"`) would let a caller write to S3 keys that
+        `/resolve-storage-url` would later refuse to resolve. Deployments
+        using OAuth must mint their own `user_id` claim.
+        """
         mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
         client = _build_jwt_client()
         token = jwt.encode({"sub": "google#abc"}, JWT_SECRET, algorithm="HS256")
         response = client.get("/whoami", headers={"Authorization": f"Bearer {token}"})
-        assert response.status_code == 200
-        assert response.json() == {"user_id": "google#abc"}
+        assert response.status_code == 401
+        body = response.json()
+        assert isinstance(body["detail"], dict)
 
-    def test_jwt_missing_caller_identifier_rejected(self, mocker: MockerFixture):
-        """No `user_id` and no `sub` means no caller identifier — reject."""
+    def test_jwt_missing_user_id_claim_rejected(self, mocker: MockerFixture):
+        """No `user_id` claim means no caller identifier — reject."""
         mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
         client = _build_jwt_client()
-        token = jwt.encode({"email": "x@x.com"}, JWT_SECRET, algorithm="HS256")
+        token = jwt.encode({"iat": 0}, JWT_SECRET, algorithm="HS256")
         response = client.get("/whoami", headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 401
         body = response.json()
