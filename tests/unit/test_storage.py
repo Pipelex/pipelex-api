@@ -106,7 +106,7 @@ class TestStorageEndpoint:
         assert before + timedelta(seconds=890) <= expires_at <= after
 
     def test_happy_path_upload_uri(self, mocker: MockerFixture):
-        user = RequestUser(email="a@example.com", sub="google#1", user_id=USER_A, auth_method="jwt")
+        user = RequestUser(user_id=USER_A)
         client = _build_client(user, mocker, PRESIGNED_URL)
 
         response = client.post("/resolve-storage-url", json={"uri": UPLOAD_URI})
@@ -119,7 +119,7 @@ class TestStorageEndpoint:
 
     def test_happy_path_pipeline_output_uri(self, mocker: MockerFixture):
         """Pipeline-generated URIs (with /results/{run_id}/assets/...) must resolve too."""
-        user = RequestUser(email="a@example.com", sub="google#1", user_id=USER_A, auth_method="jwt")
+        user = RequestUser(user_id=USER_A)
         client = _build_client(user, mocker, PRESIGNED_URL)
 
         response = client.post("/resolve-storage-url", json={"uri": RUN_URI})
@@ -134,13 +134,13 @@ class TestStorageEndpoint:
         assert response.json()["detail"]["error_type"] == "Unauthenticated"
 
     def test_anonymous_user_returns_401(self, mocker: MockerFixture):
-        user = RequestUser(email="", sub="", user_id="anonymous", auth_method="none")
+        user = RequestUser(user_id="anonymous")
         client = _build_client(user, mocker, PRESIGNED_URL)
         response = client.post("/resolve-storage-url", json={"uri": UPLOAD_URI})
         assert response.status_code == 401
 
     def test_cross_user_returns_403(self, mocker: MockerFixture):
-        user = RequestUser(email="a@example.com", sub="google#1", user_id=USER_A, auth_method="jwt")
+        user = RequestUser(user_id=USER_A)
         client = _build_client(user, mocker, PRESIGNED_URL)
 
         response = client.post("/resolve-storage-url", json={"uri": STRANGER_URI})
@@ -149,7 +149,7 @@ class TestStorageEndpoint:
         assert response.json()["detail"]["error_type"] == "Forbidden"
 
     def test_malformed_uri_returns_400(self, mocker: MockerFixture):
-        user = RequestUser(email="a@example.com", sub="google#1", user_id=USER_A, auth_method="jwt")
+        user = RequestUser(user_id=USER_A)
         client = _build_client(user, mocker, PRESIGNED_URL)
 
         response = client.post("/resolve-storage-url", json={"uri": f"pipelex-storage://{USER_A}/../secret.pdf"})
@@ -159,7 +159,7 @@ class TestStorageEndpoint:
 
     def test_signed_urls_disabled_returns_500(self, mocker: MockerFixture):
         """When storage falls back to a non-presigned URL, endpoint must 500 (not hand out a broken URL)."""
-        user = RequestUser(email="a@example.com", sub="google#1", user_id=USER_A, auth_method="jwt")
+        user = RequestUser(user_id=USER_A)
         client = _build_client(user, mocker, NON_PRESIGNED_URL)
 
         response = client.post("/resolve-storage-url", json={"uri": UPLOAD_URI})
@@ -168,7 +168,7 @@ class TestStorageEndpoint:
         assert response.json()["detail"]["error_type"] == "PresignFailed"
 
     def test_storage_returns_none_returns_500(self, mocker: MockerFixture):
-        user = RequestUser(email="a@example.com", sub="google#1", user_id=USER_A, auth_method="jwt")
+        user = RequestUser(user_id=USER_A)
         client = _build_client(user, mocker, None)
 
         response = client.post("/resolve-storage-url", json={"uri": UPLOAD_URI})
@@ -177,7 +177,7 @@ class TestStorageEndpoint:
         assert response.json()["detail"]["error_type"] == "PresignFailed"
 
     def test_extra_fields_rejected(self, mocker: MockerFixture):
-        user = RequestUser(email="a@example.com", sub="google#1", user_id=USER_A, auth_method="jwt")
+        user = RequestUser(user_id=USER_A)
         client = _build_client(user, mocker, PRESIGNED_URL)
 
         response = client.post("/resolve-storage-url", json={"uri": UPLOAD_URI, "extra": "nope"})
@@ -185,7 +185,7 @@ class TestStorageEndpoint:
         assert response.status_code == 422
 
     def test_uri_too_long_rejected(self, mocker: MockerFixture):
-        user = RequestUser(email="a@example.com", sub="google#1", user_id=USER_A, auth_method="jwt")
+        user = RequestUser(user_id=USER_A)
         client = _build_client(user, mocker, PRESIGNED_URL)
 
         long_uri = f"pipelex-storage://{USER_A}/" + ("a/" * 300) + f"{FILE_HASH}.pdf"
