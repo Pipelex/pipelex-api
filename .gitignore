@@ -55,3 +55,6 @@ temp/
 gcp_credentials.json
 
 results/*
+pipelex_override.toml
+telemetry_override.toml
+.pipelex/storage

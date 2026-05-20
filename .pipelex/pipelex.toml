@@ -223,7 +223,6 @@ region = ""
 is_enabled = false
 
 [temporal.worker_config]
-task_queue = "pipelex"
 workflow_execution_timeout = "1:00:00"
 run_timeout = "1:00:00"
 task_timeout = "0:00:10"
