@@ -6,6 +6,18 @@ docs_dir: docs
 repo_url: "https://github.com/Pipelex/pipelex-api"
 repo_name: "Pipelex API on GitHub"
 
+# `CONTRIBUTING.md` lives at the repo root and is snippet-included into
+# `docs/contributing.md`. Its links (e.g. `docs/configuration.md`) are
+# authored to work from the repo root on GitHub; from mkdocs' perspective
+# the included content sits inside `docs/` and the same relative paths
+# can't resolve. Downgrade these specific link checks from `warn`
+# (which `mkdocs build --strict` treats as fatal) to `info` so we keep
+# the human-friendly GitHub links without the build failing.
+validation:
+  links:
+    not_found: info
+    unrecognized_links: info
+
 theme:
   name: material
   favicon: https://pipelex-web.s3.amazonaws.com/logo/pipelex-favicon-32.png

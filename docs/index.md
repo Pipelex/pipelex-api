@@ -74,7 +74,7 @@ The API supports three authentication modes via the `AUTH_MODE` environment vari
 
 By default (`AUTH_MODE=none`), the API requires no authentication. This is the default for open-source deployments and for running behind an API Gateway that handles auth.
 
-If you sit this API behind a trusted reverse proxy that authenticates users and forwards identity via `X-User-Email` / `X-User-Sub` / `X-User-Id` / `X-Auth-Method` headers, set `TRUST_FORWARDED_IDENTITY_HEADERS=true` to honor them. **Default is off** — without this flag, the API ignores those headers entirely and requests stay anonymous. Only enable it when your proxy strips inbound copies of these headers before adding its own; otherwise, any external client can spoof user identity by sending the headers directly.
+If you sit this API behind a trusted reverse proxy that authenticates users and forwards the caller identity via the `X-User-Id` header, set `TRUST_FORWARDED_IDENTITY_HEADERS=true` to honor it. The runner is a generic execution engine — it does not own user metadata (email, OAuth subject, auth method), so a single opaque caller id is the entire trusted surface. The value MUST be a UUID, because storage URIs are scoped under `<user_id>/...` and `/resolve-storage-url` validates the URI owner segment as a UUID. **Default is off** — without this flag, the API ignores `X-User-Id` entirely and requests stay anonymous. Only enable it when your proxy strips any inbound copy of the header before adding its own; otherwise, any external client can spoof user identity by sending it directly.
 
 ### API Key Authentication
 
@@ -105,7 +105,7 @@ docker run --name pipelex-api -p 8081:8081 \
 **JWT Requirements:**
 
 - Tokens must be signed with the HS256 algorithm
-- Tokens must contain an `email` field in the payload
+- Tokens must contain a `user_id` claim whose value is a UUID. Storage URIs are scoped under `<user_id>/...` and `/resolve-storage-url` validates the URI owner segment as a UUID, so provider-issued `sub` values like `"google#abc"` are NOT accepted. Deployments using OAuth must mint their own `user_id` claim mapping each caller to a UUID.
 - Pass the JWT in the Authorization header: `Authorization: Bearer YOUR_JWT_TOKEN`
 
 ## API Endpoints
