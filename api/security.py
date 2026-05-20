@@ -28,18 +28,35 @@ class AuthMode(StrEnum):
     API_KEY = "api_key"
 
 
+class ForwardedIdentityHeader(StrEnum):
+    """HTTP headers a trusted reverse proxy may forward to authenticate
+    a caller when `TRUST_FORWARDED_IDENTITY_HEADERS=true`.
+
+    The runner is a generic execution engine: the ONLY piece of identity
+    it consumes is an opaque user id, which it scopes S3 storage keys
+    under (`<user_id>/...`). Anything else a proxy might want to forward
+    (email, OAuth subject, auth method) is metadata the runner has no
+    use for — handlers that need it look it up by `user_id` against the
+    deployment's own user store.
+    """
+
+    USER_ID = "X-User-Id"
+
+
 class RequestUser(BaseModel):
-    """Authenticated user identity, populated during auth and available to route handlers."""
+    """Authenticated caller identity available to route handlers.
 
-    email: str = Field(..., description="User's email address")
-    sub: str = Field(..., description="User's composite key (e.g. 'google#123')")
-    user_id: str = Field(default="anonymous", description="User's UUID from the users table")
-    auth_method: str = Field(..., description="How the user authenticated: 'jwt', 'api_key', or 'gateway'")
+    Holds only `user_id` by design — the runner is a generic execution engine
+    and does not own user metadata (email, name, OAuth subject). Deployments
+    that need that data look it up by `user_id` against their own user store.
+    """
+
+    user_id: str = Field(..., description="Opaque caller identifier supplied by the auth layer or the trusted proxy")
 
 
-def _set_request_user(request: Request, email: str, sub: str, auth_method: str, user_id: str = "anonymous") -> None:
-    """Store user identity on request.state for downstream handlers."""
-    request.state.user = RequestUser(email=email, sub=sub, user_id=user_id, auth_method=auth_method)
+def _set_request_user(request: Request, user_id: str) -> None:
+    """Store caller identity on request.state for downstream handlers."""
+    request.state.user = RequestUser(user_id=user_id)
 
 
 def get_auth_mode() -> AuthMode:
@@ -76,20 +93,25 @@ async def verify_jwt(
             algorithms=[JWT_ALGORITHM],
         )
 
-        email = payload.get("email")
-        if not email:
-            log.warning("JWT missing email field")
+        # The caller identifier MUST be supplied as an explicit `user_id`
+        # claim. We deliberately do NOT fall back to the standard `sub`
+        # claim: storage URIs require the owner segment to be a UUID
+        # (`parse_storage_uri` in `routes/storage.py`), and provider-issued
+        # `sub` values like `"google#abc"` would let a caller upload to
+        # S3 under a key that `/resolve-storage-url` would later refuse to
+        # resolve. Deployments using OAuth JWTs must mint their own
+        # `user_id` claim (a UUID for that caller) when issuing tokens.
+        user_id = payload.get("user_id")
+        if not user_id:
+            log.warning("JWT missing user_id claim")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"error_type": ErrorType.INVALID_TOKEN, "message": "Invalid token: missing email"},
+                detail={"error_type": ErrorType.INVALID_TOKEN, "message": "Invalid token: missing user_id claim"},
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        _set_request_user(request, user_id=user_id)
 
-        sub = payload.get("sub", "")
-        user_id = payload.get("user_id", "anonymous")
-        _set_request_user(request, email=email, sub=sub, user_id=user_id, auth_method="jwt")
-
-        return payload  # Contains: sub, user_id, email, provider, iat, exp
+        return payload
 
     except jwt.ExpiredSignatureError as exc:
         log.warning("JWT token has expired")
@@ -135,26 +157,26 @@ async def verify_api_key(credentials: Annotated[HTTPAuthorizationCredentials, De
 async def no_auth(request: Request) -> None:
     """No-op auth dependency for AUTH_MODE=none.
 
-    By default, requests stay anonymous. If you sit this API behind a trusted
-    reverse proxy / API gateway that authenticates users and forwards
-    identity via X-User-Email / X-User-Sub / X-User-Id / X-Auth-Method
-    headers, set TRUST_FORWARDED_IDENTITY_HEADERS=true to read them.
+    By default, requests stay anonymous. If the API sits behind a trusted
+    reverse proxy / API gateway that authenticates callers and forwards the
+    caller identifier via the `X-User-Id` header, set
+    TRUST_FORWARDED_IDENTITY_HEADERS=true to read it. That single header is
+    the only thing the runner trusts from a forwarded request — any other
+    `X-User-*` headers a caller might attach are ignored.
 
-    The headers are NOT trusted unless that env var is set, because any
-    external client could otherwise forge them when the API is reachable
+    The header is NOT trusted unless that env var is set, because any
+    external client could otherwise forge it when the API is reachable
     directly. With the flag enabled, you are responsible for ensuring your
-    proxy strips these headers from inbound requests before adding its own.
+    proxy strips `X-User-Id` from inbound requests before adding its own.
     """
     if get_optional_env("TRUST_FORWARDED_IDENTITY_HEADERS") != "true":
         return
 
-    email = request.headers.get("x-user-email")
-    sub = request.headers.get("x-user-sub")
-    user_id = request.headers.get("x-user-id", "anonymous")
-    auth_method = request.headers.get("x-auth-method")
+    user_id = request.headers.get(ForwardedIdentityHeader.USER_ID)
+    if not user_id or user_id == "anonymous":
+        return
 
-    if email and sub:
-        _set_request_user(request, email=email, sub=sub, user_id=user_id, auth_method=auth_method or "gateway")
+    _set_request_user(request, user_id=user_id)
 
 
 async def get_request_user(request: Request) -> RequestUser | None:
@@ -166,7 +188,7 @@ async def get_request_user(request: Request) -> RequestUser | None:
     Usage in route handlers:
         async def my_endpoint(user: Annotated[RequestUser | None, Depends(get_request_user)]):
             if user:
-                log.info(f"Request from {user.email}")
+                log.info(f"Request from {user.user_id}")
     """
     return getattr(request.state, "user", None)
 

@@ -45,21 +45,21 @@ class TestUploadEndpoint:
         assert response.json()["detail"]["error_type"] == "Unauthenticated"
 
     def test_anonymous_user_returns_401(self, mocker: MockerFixture):
-        user = RequestUser(email="", sub="", user_id="anonymous", auth_method="none")
+        user = RequestUser(user_id="anonymous")
         client, _ = _build_client(user, mocker)
         response = client.post("/upload", json={"filename": "a.txt", "data": VALID_B64})
         assert response.status_code == 401
         assert response.json()["detail"]["error_type"] == "Unauthenticated"
 
     def test_invalid_base64_returns_400(self, mocker: MockerFixture):
-        user = RequestUser(email="a@example.com", sub="google#1", user_id=USER_A, auth_method="jwt")
+        user = RequestUser(user_id=USER_A)
         client, _ = _build_client(user, mocker)
         response = client.post("/upload", json={"filename": "a.txt", "data": INVALID_B64})
         assert response.status_code == 400
         assert response.json()["detail"]["error_type"] == "InvalidBase64"
 
     def test_oversized_payload_rejected_at_validation(self, mocker: MockerFixture):
-        user = RequestUser(email="a@example.com", sub="google#1", user_id=USER_A, auth_method="jwt")
+        user = RequestUser(user_id=USER_A)
         client, store_mock = _build_client(user, mocker)
         oversized = "A" * (MAX_UPLOAD_BASE64_CHARS + 1)
         response = client.post("/upload", json={"filename": "big.bin", "data": oversized})
@@ -67,13 +67,13 @@ class TestUploadEndpoint:
         store_mock.assert_not_awaited()
 
     def test_extra_fields_rejected(self, mocker: MockerFixture):
-        user = RequestUser(email="a@example.com", sub="google#1", user_id=USER_A, auth_method="jwt")
+        user = RequestUser(user_id=USER_A)
         client, _ = _build_client(user, mocker)
         response = client.post("/upload", json={"filename": "a.txt", "data": VALID_B64, "extra": "nope"})
         assert response.status_code == 422
 
     def test_happy_path(self, mocker: MockerFixture):
-        user = RequestUser(email="a@example.com", sub="google#1", user_id=USER_A, auth_method="jwt")
+        user = RequestUser(user_id=USER_A)
         store_uri = f"pipelex-storage://{USER_A}/assets/abc.txt"
         client, _ = _build_client(user, mocker, store_uri=store_uri)
 
@@ -94,7 +94,7 @@ class TestUploadEndpoint:
     )
     def test_storage_key_uses_authenticated_user_id(self, mocker: MockerFixture, filename: str, expected_ext: str):
         """The S3 key must be scoped to the JWT user_id, never to 'anonymous'."""
-        user = RequestUser(email="a@example.com", sub="google#1", user_id=USER_A, auth_method="jwt")
+        user = RequestUser(user_id=USER_A)
         client, store_mock = _build_client(user, mocker)
 
         client.post("/upload", json={"filename": filename, "data": VALID_B64})
