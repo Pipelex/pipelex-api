@@ -1,6 +1,6 @@
 # Error Handling — Design
 
-This directory captures the design for how `pipelex-api` consumes the `pipelex` error model. It is **design only** — there is no implementation plan yet. Tracks describe the intended shape of the system; open questions are called out where a design decision needs sign-off before we move to planning.
+This directory captures the design for how `pipelex-api` consumes the `pipelex` error model. The `track-*.md` files describe the intended shape of the system; the implementation plan is [`../../TODOS.md`](../../TODOS.md), and the pipelex-side companion work is tracked in [pipelex-changes.md](pipelex-changes.md) — items #1–#7 there landed in pipelex as of 2026-05-22, so the API plan is unblocked. Open questions are called out where a design decision needs sign-off.
 
 ## Why this exists
 

@@ -10,6 +10,23 @@ The list is intentionally specific. "Pipelex should be better at errors" is not 
 
 ---
 
+## Status — reconciled 2026-05-22
+
+**Items #1–#7 have landed in pipelex.** They shipped via PR #931 and the `feature/API-readiness-2` follow-ups (PR #933) — see `_for_api/wip/error-handling/` and `_for_api/TODOS.md` on the pipelex side. The shipped surface differs from the proposals below: each landed item now carries a **✅ Landed** note with the real signature, and the [Tracking](#tracking) table is authoritative. The original *What / Why* prose is kept for intent — code against the **✅ Landed** notes.
+
+The `pipelex-api` dev dependency points at the worktree carrying this work: `pipelex = { path = "../_for_api", editable = true }`, published pin `pipelex==0.29.1`.
+
+Corrections that change the `pipelex-api` plan:
+
+- There is **no `ErrorReport.to_strict_dict()`** — disclosure is `ErrorReport.to_dict(disclosure_mode=DisclosureMode.STRICT)`. An RFC 7807 envelope is `ErrorReport.to_problem_document(...)` (item #6, also landed).
+- `type` URI namespace is **`https://docs.pipelex.com/latest/errors/<kebab>/`** (trailing slash), not `https://pipelex.dev/errors/`.
+- `ErrorReport.title` / `type_uri` are **required, always-populated** fields — the Phase 0 "fallback when `None`" never fires.
+- `ErrorReport` is a frozen Pydantic **`BaseModel`** (`extra="forbid"`), not a `@dataclass`.
+- `recover_error_report` is **total** — it always returns a report, never `None`.
+- Only #8 (status-query, future) and #9 (webhook signing, separate track) remain open.
+
+---
+
 ## Landing stages
 
 Stages map to **dependencies on the `pipelex-api` plan**, not effort. An item in Stage 2 takes the same engineering time as one in Stage 1 — it just has fewer downstream consumers waiting on it.
@@ -26,6 +43,8 @@ Stages map to **dependencies on the `pipelex-api` plan**, not effort. An item in
 ## Stage 1 — Foundations
 
 ### 1. `PipelexError.title: ClassVar[str | None]`
+
+> **✅ Landed (PR #931).** Shipped as a `PipelexError.title()` **classmethod** — it auto-derives a human title from the class name; a subclass overrides via a `_declared_title` ClassVar. `ErrorReport.title: str` is a **required** field, always populated by `to_error_report()`. There is no `ClassVar[str | None]` to read and no `None` case.
 
 **Where:** `pipelex/base_exceptions.py:114` (the `PipelexError` base class).
 
@@ -66,6 +85,8 @@ class ErrorReport:
 
 ### 2. `PipelexError.type_uri: ClassVar[str | None]`
 
+> **✅ Landed (PR #931).** Shipped as a `PipelexError.type_uri()` **classmethod**, auto-deriving `<URLs.error_docs_base>/<kebab-class-name>/` (subclass override via `_declared_type_uri`). `URLs.error_docs_base` is **`https://docs.pipelex.com/latest/errors`** — the real namespace is `https://docs.pipelex.com/latest/errors/<kebab>/` (trailing slash), not `https://pipelex.dev/errors/`. `ErrorReport.type_uri: str` is a required field.
+
 **Where:** `pipelex/base_exceptions.py:114` (same place as item 1).
 
 **What.** Let `PipelexError` subclasses optionally declare their RFC 7807 `type` URI. Default to `None` → downstream consumers auto-derive `<base>/<kebab-case classname>` from a pipelex-config-provided base URI (default: `https://pipelex.dev/errors/`).
@@ -85,6 +106,8 @@ class EnvVarNotFoundError(PipelexError):
 ---
 
 ### 3. First-class `request_id` on workflow input
+
+> **✅ Landed (PR #931, log-wiring completed in PR #933).** `request_id: str | None` lives on **`JobMetadata`** (`pipelex/pipeline/job_metadata.py:60`), not `PipeJob`. It is set via `pipeline_run_setup(request_id=...)`, crosses the Temporal boundary on `JobMetadata`, and a per-invocation bound `WorkflowLog` (built from `job_metadata.request_id` at workflow entry) puts it on every workflow log record. The `webhook.payload["request_id"]` piggyback workaround is obsolete — drop it from API Phase 4b.
 
 **Where:** `pipelex/pipeline/pipeline_run_setup.py` (where `pipeline_run_id` is established) and the workflow argument shape consumed by `pipelex/temporal/tprl_pipe/temporal_pipe_run.py:make_temporal_pipe_run`.
 
@@ -110,6 +133,8 @@ Today's workaround (currently in API Phase 4b) is to piggyback on `webhook.paylo
 ## Stage 2 — Rendering primitives
 
 ### 4. `ErrorReport.to_strict_dict()` — disclosure-mode redaction upstream
+
+> **✅ Landed (PR #931; STRICT rule revised in PR #933).** Shipped **not** as `to_strict_dict()` but as a `DisclosureMode` StrEnum (`VERBOSE` / `STRICT`) consumed by **`ErrorReport.to_dict(disclosure_mode=...)`** and `to_problem_document(disclosure_mode=...)`. One important difference from the design below: STRICT keys its `message` redaction on **message provenance** (a `caller_facing_message` flag set by error classes that author caller-facing copy), **not on `error_domain == INPUT`** — a domain-less wrapper raised `from` an INPUT cause is still redacted. STRICT always drops `provider` / `model` / `provider_metadata`. The API consumes `to_dict(disclosure_mode=STRICT)` directly and does not re-implement the rule.
 
 **Where:** `pipelex/base_exceptions.py:71` (next to `ErrorReport.to_dict()`).
 
@@ -148,6 +173,8 @@ Owning the rule in pipelex means every consumer gets the same redaction behavior
 ## Stage 3 — Async error pipe
 
 ### 5. `DeliveryExecutor.execute(...)` accepts an `error_report` parameter
+
+> **✅ Landed (PR #931; surrounding failure paths hardened in PR #933).** `DeliveryExecutor.execute(...)` accepts `error_report: ErrorReport | None`; `_notify_webhook` includes `error: <error_report.to_dict(disclosure_mode=VERBOSE)>` on the `FAILED` webhook. **The "unrecoverable case returns `None`" framing below is outdated:** `recover_error_report` is now *total* — it always returns a structured report (synthesizing an `UnrecoverableWorkflowFailureError` report when none can be recovered), and the pipelex worker side always recovers and passes one. So the API's webhook always carries a structured `error` on `FAILED`; API Phase 4 must not branch on `error_report is None` / "recovery returned `None`".
 
 **Where:** `pipelex/pipe_run/delivery_executor.py:38-54` (the `execute` method) and `pipelex/pipe_run/delivery_executor.py:238-267` (`_notify_webhook`).
 
@@ -194,6 +221,8 @@ This is **the most important item in the list.** The rest are quality-of-life up
 
 ### 6. `ErrorReport.to_problem_document(...)` — optional rendering helper
 
+> **✅ Landed (PR #931) — earlier than the "Stage 4" framing here.** `ErrorReport.to_problem_document(*, instance=None, request_id=None, disclosure_mode=VERBOSE) -> dict[str, Any]` exists with exactly the signature sketched below. The `pipelex-api` Phase 1 problem-document builder can **delegate to this method** rather than re-mapping RFC 7807 fields by hand — Phase 1 shrinks to a thin wrapper plus the API-error variant.
+
 **Where:** `pipelex/base_exceptions.py` (next to `to_dict()` and `to_strict_dict()` from item 4).
 
 **What.** A thin method that builds the RFC 7807 problem document directly from an `ErrorReport`:
@@ -229,6 +258,8 @@ Landing this method in pipelex now makes "flip to RFC 7807 in webhooks" a one-li
 ---
 
 ### 7. Per-class `type` URI doc pages
+
+> **✅ Landed (PR #931).** Pipelex generates one error doc page per `PipelexError` subclass under `docs/errors/`, regenerated via `pipelex-dev generate-error-pages`. Each class's `type_uri` resolves to its page at `https://docs.pipelex.com/latest/errors/<kebab>/`.
 
 **Where:** pipelex's docs site (`pipelex/docs/...`).
 
@@ -284,6 +315,8 @@ The blocking question for that endpoint is: how does the API query the state of 
 
 ### 9. `X-Completion-Signature` covers the full webhook payload
 
+> **⚠️ Superseded plan — still open.** The framing below (sign the full payload, lockstep cross-repo merge) is replaced by a dedicated security track with a safe **3-step rollout**: **`_for_api/wip/security/webhook-signing.md`** is the authoritative plan. Notable changes there: the secret env var is renamed to `PIPELEX_WEBHOOK_SIGNING_SECRET` (shared, both sides); header format is `X-Completion-Signature: sha256=<hex>`; the worker signs the exact body bytes; no lockstep deploy. Treat the prose below as the original motivation only.
+
 **Where:** `api/routes/pipelex/pipeline.py:44-56` (the `_completion_signature` helper) and `pipelex/pipe_run/delivery_executor.py:238-267` (the webhook POST).
 
 **What.** The current HMAC-SHA256 signature in `X-Completion-Signature` covers only `pipeline_run_id`. Sign the full payload instead.
@@ -319,16 +352,16 @@ Things that look like they belong in pipelex but actually stay API-side.
 
 ## Tracking
 
-| # | Item | Stage | pipelex file | Status | PR |
+| # | Item (as shipped) | Stage | pipelex file | Status | PR |
 |---|---|---|---|---|---|
-| 1 | `PipelexError.title` class attribute | 1 | `base_exceptions.py:114` | Not started | — |
-| 2 | `PipelexError.type_uri` class attribute | 1 | `base_exceptions.py:114` | Not started | — |
-| 3 | First-class `request_id` on workflow input | 1 | `pipeline_run_setup.py`, `temporal_pipe_run.py` | Not started | — |
-| 4 | `ErrorReport.to_strict_dict()` | 2 | `base_exceptions.py:71` | Not started | — |
-| 5 | `DeliveryExecutor.execute(error_report=...)` | 3 | `pipe_run/delivery_executor.py:38` | Not started | — |
-| 6 | `ErrorReport.to_problem_document()` | 4 | `base_exceptions.py` | Not started | — |
-| 7 | Per-class `type` URI doc pages | 4 | `docs/` | Not started | — |
-| 8 | `query_pipeline_state(...)` | 5 | `temporal/tprl/workflow_caller.py` (new) | Not started | — |
-| 9 | Webhook signature covers full payload | 6 | `pipe_run/delivery_executor.py:_notify_webhook` + `api/routes/pipelex/pipeline.py:_completion_signature` | Not started | — |
+| 1 | `PipelexError.title()` classmethod + `ErrorReport.title` | 1 | `base_exceptions.py` | ✅ Landed | #931 |
+| 2 | `PipelexError.type_uri()` classmethod + `ErrorReport.type_uri` | 1 | `base_exceptions.py` | ✅ Landed | #931 |
+| 3 | First-class `request_id` (on `JobMetadata`) | 1 | `pipeline/job_metadata.py`, `pipeline_run_setup.py` | ✅ Landed | #931, #933 |
+| 4 | `DisclosureMode` + `ErrorReport.to_dict(disclosure_mode=)` | 2 | `base_exceptions.py` | ✅ Landed | #931, #933 |
+| 5 | `DeliveryExecutor.execute(error_report=...)` | 3 | `pipe_run/delivery_executor.py` | ✅ Landed | #931, #933 |
+| 6 | `ErrorReport.to_problem_document()` | 4 | `base_exceptions.py` | ✅ Landed | #931 |
+| 7 | Per-class `type` URI doc pages | 4 | `docs/errors/` | ✅ Landed | #931 |
+| 8 | `query_pipeline_state(...)` | 5 | `temporal/tprl/workflow_caller.py` (new) | Not started — future-facing, no consumer yet | — |
+| 9 | Webhook signing | 6 | see `_for_api/wip/security/webhook-signing.md` | Open — separate track | — |
 
-Update the Status / PR columns as items land. When all of Stage 1-3 are landed, the `pipelex-api` plan unblocks fully — Phase 0 consumes items 1+2 directly, Phase 1 consumes item 4 directly, and Phase 4 consumes item 5 directly.
+Stages 1–4 (#1–#7) are landed — the `pipelex-api` plan is unblocked: Phase 0 consumes #1+#2, Phase 1 consumes #4 (`to_dict(disclosure_mode=)`) and #6 (`to_problem_document`), Phase 4 consumes #5. Only #8 (future, no consumer yet) and #9 (webhook signing — separate track) remain.
