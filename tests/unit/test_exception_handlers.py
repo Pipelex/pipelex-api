@@ -83,6 +83,49 @@ class _FakeTemporalTransportError(TemporalError):
     """A non-`PipelexError` `TemporalError` subclass — a Temporal transport failure."""
 
 
+def _report_with_retry(*, status_code: int, retry_after_seconds: float | None) -> ErrorReport:
+    """Build a provider-error report carrying a `retry_after_seconds` hint."""
+    return ErrorReport(
+        error_type="LLMCompletionError",
+        message="provider error",
+        title="LLM completion error",
+        type_uri="https://docs.pipelex.com/latest/errors/llm-completion-error/",
+        error_category="transient",
+        error_domain="runtime",
+        retryable=True,
+        provider_metadata=ProviderErrorMetadata(
+            provider=ProviderName.OPENAI,
+            sdk_exception_type="RateLimitError",
+            status_code=status_code,
+            retry_after_seconds=retry_after_seconds,
+        ),
+    )
+
+
+# Reports exercising every branch of `_retry_after_header`: a finite hint, the
+# two non-finite values a provider could emit, a negative value, and a hint
+# carried on a non-429 status (where `Retry-After` must not be emitted).
+_RETRY_REPORTS: dict[str, ErrorReport] = {
+    "finite": _report_with_retry(status_code=429, retry_after_seconds=12.4),
+    "infinite": _report_with_retry(status_code=429, retry_after_seconds=float("inf")),
+    "nan": _report_with_retry(status_code=429, retry_after_seconds=float("nan")),
+    "negative": _report_with_retry(status_code=429, retry_after_seconds=-5.0),
+    "non_429": _report_with_retry(status_code=503, retry_after_seconds=30.0),
+}
+
+
+class _CraftedRetryError(PipelexError):
+    """A `PipelexError` whose report is selected by key — exercises `_retry_after_header`."""
+
+    def __init__(self, report_key: str) -> None:
+        super().__init__("crafted retry-after scenario")
+        self._report = _RETRY_REPORTS[report_key]
+
+    @override
+    def to_error_report(self) -> ErrorReport:
+        return self._report
+
+
 # Route handlers are deliberately not underscore-prefixed: a private,
 # decorator-only function reads as unused to the type checker.
 _router = APIRouter()
@@ -134,6 +177,11 @@ async def temporal_transport_error_route() -> None:
 async def unexpected_error_route() -> None:
     msg = "something nobody anticipated"
     raise RuntimeError(msg)
+
+
+@_router.get("/crafted-retry/{report_key}")
+async def crafted_retry_route(report_key: str) -> None:
+    raise _CraftedRetryError(report_key)
 
 
 def _build_client(*, raise_server_exceptions: bool = True) -> TestClient:
@@ -202,6 +250,24 @@ class TestExceptionHandlers:
         assert body["retryable"] is True
         assert body["provider_metadata"]["status_code"] == 429
 
+    @pytest.mark.parametrize(
+        ("report_key", "expected_status", "expected_retry_after"),
+        [
+            ("finite", 429, "13"),  # 12.4 rounds up
+            ("infinite", 429, None),  # non-finite is dropped — no crash, no header
+            ("nan", 429, None),  # non-finite is dropped — no crash, no header
+            ("negative", 429, "0"),  # clamped to a non-negative integer
+            ("non_429", 500, None),  # the hint never rides a non-429 response
+        ],
+    )
+    def test_retry_after_header_is_guarded(self, report_key: str, expected_status: int, expected_retry_after: str | None):
+        response = _build_client().get(f"/crafted-retry/{report_key}")
+        assert response.status_code == expected_status
+        if expected_retry_after is None:
+            assert "retry-after" not in response.headers
+        else:
+            assert response.headers["Retry-After"] == expected_retry_after
+
     def test_unexpected_error_falls_back_to_sanitized_500(self):
         response = _build_client(raise_server_exceptions=False).get("/unexpected-error")
         assert response.status_code == 500
@@ -211,6 +277,8 @@ class TestExceptionHandlers:
         assert body["error_domain"] == "runtime"
         assert body["retryable"] is False
         assert body["type"].endswith("/internal-server-error/")
+        assert body["instance"] == "/unexpected-error"
+        assert body["error_category"] == "unknown"
         # The real exception class and message never reach the client.
         assert "RuntimeError" not in response.text
         assert "something nobody anticipated" not in response.text

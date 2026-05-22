@@ -106,16 +106,25 @@ def _request_id_of(request: Request) -> str | None:
 
 
 def _retry_after_header(report: ErrorReport) -> dict[str, str]:
-    """Return a `Retry-After` header dict when the report carries a provider retry hint.
+    """Return a `Retry-After` header dict when a retry hint applies to this response.
 
-    The provider's own `retry_after_seconds` is rounded up to whole seconds.
-    This is the one HTTP-protocol nicety that does not fall out of the body
-    alone — empty dict when there is no hint.
+    Emitted only when the response is itself a retry invitation — the
+    provider-429 passthrough (`report.http_status == 429`) — so a hint never
+    rides a 500/422 where `Retry-After` is meaningless. The provider's
+    `retry_after_seconds` is rounded up and clamped to a non-negative integer;
+    a non-finite value (a provider sending `Retry-After: inf` / `nan`) is
+    dropped rather than crashing `math.ceil`. Empty dict when no usable hint
+    applies.
     """
+    if report.http_status != 429:
+        return {}
     metadata = report.provider_metadata
-    if metadata is not None and metadata.retry_after_seconds is not None:
-        return {"Retry-After": str(math.ceil(metadata.retry_after_seconds))}
-    return {}
+    if metadata is None:
+        return {}
+    seconds = metadata.retry_after_seconds
+    if seconds is None or not math.isfinite(seconds):
+        return {}
+    return {"Retry-After": str(max(0, math.ceil(seconds)))}
 
 
 def _emit_error_log(*, fields: dict[str, Any], as_error: bool) -> None:
@@ -162,15 +171,36 @@ def _log_error_report(report: ErrorReport, *, request: Request, request_id: str 
     _emit_error_log(fields=fields, as_error=not is_caller_error)
 
 
+def _json_safe_report(report: ErrorReport) -> ErrorReport:
+    """Return a report whose floats Starlette's JSON encoder can render.
+
+    `JSONResponse` encodes with `allow_nan=False`, so a non-finite
+    `provider_metadata.retry_after_seconds` — a provider sending `Retry-After:
+    inf` / `nan`, which pipelex's header parser passes through unchecked —
+    would crash the whole response render, not just the `Retry-After` header.
+    Null the unusable hint out; the rest of the report renders intact.
+    """
+    metadata = report.provider_metadata
+    if metadata is None:
+        return report
+    seconds = metadata.retry_after_seconds
+    if seconds is None or math.isfinite(seconds):
+        return report
+    safe_metadata = metadata.model_copy(update={"retry_after_seconds": None})
+    return report.model_copy(update={"provider_metadata": safe_metadata})
+
+
 def _problem_response(report: ErrorReport, *, request: Request) -> JSONResponse:
     """Build the RFC 7807 `JSONResponse` for an `ErrorReport` and log the entry.
 
     Shared by the `PipelexError` and `TemporalError` handlers: both produce an
-    `ErrorReport`, so both render and log it identically. The status code comes
-    from `report.http_status` (which already encodes the provider-429
-    passthrough), and the response body from the Phase 1 problem-document
-    builder under the startup-resolved disclosure mode.
+    `ErrorReport`, so both render and log it identically. The report is first
+    made JSON-safe (see `_json_safe_report`); the status code then comes from
+    `report.http_status` (which already encodes the provider-429 passthrough),
+    and the response body from the Phase 1 problem-document builder under the
+    startup-resolved disclosure mode.
     """
+    report = _json_safe_report(report)
     request_id = _request_id_of(request)
     document = build_problem_document(
         report,
@@ -194,9 +224,10 @@ async def handle_pipelex_error(request: Request, exc: Exception) -> Response:
     `to_error_report()` walks the `__cause__` chain, so a wrapper exception
     still surfaces the classification of the underlying failure. `exc` is typed
     `Exception` to match Starlette's handler contract; FastAPI only routes a
-    `PipelexError` here, so the cast is sound. `WorkflowExecutionError` (a
-    `PipelexError` raised on the submitter side of a Temporal workflow) is more
-    specific than `temporalio`'s `TemporalError` and resolves here, not in the
+    `PipelexError` here, so the cast is sound. `WorkflowExecutionError` — a
+    Temporal workflow failure observed on the submitter side — is a
+    `PipelexError` (via `TemporalFlowError`) and is unrelated to `temporalio`'s
+    `TemporalError`, so Starlette's MRO walk resolves it here, never to the
     `TemporalError` handler.
     """
     report = cast("PipelexError", exc).to_error_report()
@@ -255,8 +286,10 @@ async def handle_unexpected_error(request: Request, exc: Exception) -> Response:
         "title": "Internal server error",
         "status": 500,
         "detail": "An unexpected error occurred. The request id is included for support.",
+        "instance": request.url.path,
         "error_type": "InternalServerError",
         "error_domain": ErrorDomain.RUNTIME,
+        "error_category": "unknown",
         "retryable": False,
     }
     if request_id is not None:
