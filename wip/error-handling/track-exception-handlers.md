@@ -128,7 +128,17 @@ App-level handlers
 
 ## Open questions
 
-None. The two settled design decisions ([RFC 7807 envelope](track-response-schema.md#decision-1--response-envelope-rfc-7807) and [verbose disclosure default](track-response-schema.md#decision-2--info-disclosure-default-verbose)) affect the body the handler returns but not the handler's shape.
+### `TemporalError` classification — blanket `retryable=true` and HTTP 500 (raised in the Phase 2 code review, 2026-05-22)
+
+The `TemporalError` handler authors one fixed classification for every bare `temporalio.exceptions.TemporalError`: `error_type = "TemporalTransportError"`, `error_category = transient`, `retryable = true`, `error_domain = RUNTIME` → HTTP 500. The Phase 2 code review surfaced two mismatches in that blanket rule:
+
+1. **Not every `TemporalError` is retryable.** `WorkflowAlreadyStartedError` is a `temporalio.exceptions.TemporalError`, but retrying a duplicate-workflow start fails identically every time — it is a caller (`INPUT`) mistake (the API accepts a caller-supplied `pipeline_run_id`), not a transient transport failure. Labelling it `retryable = true` / `transient` misclassifies a caller error as a retry-me runtime error. Fixing it means either branching the handler on the concrete `TemporalError` subclass, or having pipelex wrap `WorkflowAlreadyStartedError` into a classified `PipelexError` upstream so it never reaches this handler as a bare error.
+
+2. **HTTP 500 contradicts `retryable = true`.** `error_domain = RUNTIME` maps to HTTP 500, but a 500 tells a status-respecting HTTP client "server bug, do not retry" while the body says "retry me." A transport failure against an unreachable dependency is semantically a 503. `error_domain_to_http_status` (upstream) only ever returns 422/500 — surfacing a 503 would require either a new mapping upstream or an API-side status override in this handler.
+
+**Decision needed:** (a) keep the blanket 500 / transient / retryable rule as the pragmatic default and accept the two mismatches, or (b) branch the `TemporalError` handler on subclass and/or pin a 503 for genuine transport-unavailability. Option (b) touches the upstream `error_domain → HTTP status` mapping and is cross-repo. The Phase 2 implementation ships option (a) until this is decided.
+
+The two settled design decisions ([RFC 7807 envelope](track-response-schema.md#decision-1--response-envelope-rfc-7807) and [verbose disclosure default](track-response-schema.md#decision-2--info-disclosure-default-verbose)) affect the body the handler returns but not the handler's shape.
 
 ## Related tracks
 
