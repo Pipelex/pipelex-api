@@ -119,9 +119,14 @@ async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
     try:
         graph_spec, _ = await dry_run_pipeline(mthds_contents=mthds_contents)
     except PipelexError as exc:
-        # Best-effort only: dry-run is a pipelex operation, so its failures are
-        # PipelexError subclasses. The bundle is already validated — a dry-run
-        # failure just means no graph, not a failed request.
+        # Best-effort only. The bundle is already validated, so an expected dry-run
+        # failure (mock_inputs can't satisfy a pipe, pipe resolution, etc.) is a
+        # PipelexError subclass and just means "no graph", not a failed request.
+        # The catch is intentionally narrow: a non-PipelexError escape — e.g. a
+        # KeyError/TypeError from pipelex's graph assembler — is a genuine bug, not
+        # an expected dry-run outcome, and is left to surface as a 500 via the
+        # global handler. pipelex's own assemble_graph_on_output lets such
+        # programming bugs propagate by design.
         log.warning(f"validate_mthds: dry-run did not produce a graph ({type(exc).__name__}); returning bundle without graph_spec")
 
     response_data = ValidateResponse(
