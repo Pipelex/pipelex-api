@@ -60,50 +60,53 @@ This is the implementation plan for the error-handling design captured in `wip/e
 Small, focused, sets up everything else. Order within the phase is free; the only invariant is that nothing in Phase 1+ assumes a Phase 0 piece is missing.
 
 - [ ] Add `ERROR_DISCLOSURE` env var plumbing. Two valid values: `verbose` (default) and `strict`. Read once at app startup (or via a lightweight settings module if one exists; otherwise inline in the handler). Reject unknown values with a startup-time error.
-- [ ] Add a `pipelex.dev/errors/` namespace constant in a small module (proposed: `api/error_uri.py`). Single function `error_type_uri(error_type: str) -> str` that returns the kebab-cased URI. Also returns a small `error_type_title(error_type: str) -> str` that produces a stable human title from the class name (e.g. `EnvVarNotFoundError` → `"Environment variable not set"`). For unknown classes, fall back to a humanized split of the camel case.
+- [ ] Add a `pipelex.dev/errors/` fallback namespace constant in a small module (proposed: `api/error_uri.py`). The module consumes `report.type_uri` and `report.title` directly from `ErrorReport` (set by pipelex items **#1** `PipelexError.title` and **#2** `PipelexError.type_uri`). Fallback behavior when those fields are `None` on an `ErrorReport`:
+    - `error_type_uri(error_type: str) -> str` — returns kebab-cased URI under `https://pipelex.dev/errors/`. Used when `report.type_uri is None`.
+    - `error_type_title(error_type: str) -> str` — returns a deterministic humanized split of the camel case (`EnvVarNotFoundError` → `"Env Var Not Found Error"`). Used when `report.title is None`.
+    - Rationale: the fallback exists so the API works against pipelex versions that haven't yet adopted items #1 / #2 on every class. Once full upstream coverage lands, the fallback is rarely exercised but stays as a backstop. **No curated title map API-side** (review amendment A4): curation belongs upstream on the class.
 - [ ] Add a request-id middleware in `api/middleware.py` (sibling of `request_body_size_middleware`):
     - [ ] Reads `X-Request-ID` from the inbound request if present; otherwise generates a ULID.
     - [ ] Validates inbound id (length cap, character set) and replaces with a fresh id on invalid input — never trust inbound ids blindly.
     - [ ] Stores on `request.state.request_id`.
     - [ ] Echoes `X-Request-ID` on every response (success and error).
-- [ ] Add a logging contextvar (proposed: `api/logging_context.py`) that exposes `request_id` to loggers for structured-log injection. A small adapter that any log site can call (`get_request_id()` returns `str | None`).
+- [ ] Add a logging contextvar (proposed: `api/logging_context.py`) that exposes both `request_id` AND `route_path` (the matched FastAPI route) to loggers AND to the 4xx helpers in Phase 3. Two getters: `get_request_id() -> str | None` and `get_route_path() -> str | None`. The middleware sets both at request entry; the contextvars are read from the global exception handlers, the 4xx helpers, and structured-log sites. **Review amendment Q1:** this avoids threading `Request` through helper signatures in Phase 3 — helpers stay parameter-clean, call-site diff stays tiny.
 - [ ] Register the request-id middleware in `api/main.py`. Confirm ordering relative to CORS and body-size middleware — request-id should run first so all downstream code (and exception handlers) see the id.
 - [ ] Unit tests:
-    - [ ] `tests/unit/test_error_uri.py` — exhaustively cover known error types and the unknown-class fallback.
-    - [ ] `tests/unit/test_request_id_middleware.py` — generates id when absent; echoes when present; rejects malformed; sets `request.state.request_id`; sets `X-Request-ID` response header.
+    - [ ] `tests/unit/test_error_uri.py` — `error_type_uri` kebab-casing and `error_type_title` humanized split for known + unknown class names.
+    - [ ] `tests/unit/test_logging_context.py` — `get_request_id()` and `get_route_path()` return `None` outside a request; return the set values inside.
+    - [ ] `tests/unit/test_request_id_middleware.py` — generates ULID when absent; echoes when present; rejects malformed; sets `request.state.request_id`; sets the contextvars (`request_id` + `route_path`); sets `X-Request-ID` response header.
 - [ ] `make fui && make c && make tp` clean.
 
 ---
 
 ## Phase 1 — RFC 7807 problem-document builder
 
-A pure module that turns an `ErrorReport` (and optional context) into a problem+json dict. No FastAPI imports. No I/O. All logic for field mapping and strict-mode redaction lives here so it can be unit-tested in isolation.
+A pure module that turns an `ErrorReport` (and optional context) into a problem+json dict. No FastAPI imports. No I/O. All logic for field mapping lives here so it can be unit-tested in isolation. Strict-mode redaction is delegated to pipelex item **#4** (`ErrorReport.to_strict_dict()`); the API only chooses which dict-source method to call.
 
 Proposed location: `api/problem_document.py`.
 
 - [ ] Define the public API:
     - [ ] `build_problem_document(report: ErrorReport, *, instance: str | None, request_id: str | None, disclosure_mode: Literal["verbose", "strict"]) -> dict[str, Any]`
     - [ ] `build_problem_document_from_api_error(error_type: ErrorType, message: str, status: int, instance: str | None, request_id: str | None) -> dict[str, Any]` — used by `raise_validation_error` etc. Always treated as `INPUT` domain.
+- [ ] Source the extension-member fields from the report. Switch on `disclosure_mode`:
+    - [ ] `verbose` → `report.to_dict()` (existing pipelex method).
+    - [ ] `strict` → `report.to_strict_dict()` (pipelex item **#4**). Domain-based redaction lives upstream — the API does not re-implement the rules.
 - [ ] Implement the RFC 7807 standard fields per the field-mapping table in `wip/error-handling/track-response-schema.md`:
-    - [ ] `type` from `error_type_uri(report.error_type)`.
-    - [ ] `title` from `error_type_title(report.error_type)`.
+    - [ ] `type` from `report.type_uri` (pipelex item #2), falling back to `error_type_uri(report.error_type)` when `None`.
+    - [ ] `title` from `report.title` (pipelex item #1), falling back to `error_type_title(report.error_type)` when `None`.
     - [ ] `status` from `report.http_status`.
-    - [ ] `detail` from `report.message` (subject to strict-mode redaction).
+    - [ ] `detail` from the `message` field of the source dict (`to_dict` or `to_strict_dict` — strict-mode replacement is already applied upstream).
     - [ ] `instance` from the caller-supplied route path.
-- [ ] Implement extension members (drop `None`-valued fields per `ErrorReport.to_dict()` semantics):
-    - [ ] `error_type`, `error_category`, `error_domain`, `retryable`, `user_action`, `model`, `provider`, `provider_metadata`.
+- [ ] Layer extension members on top (drop `None`-valued fields per `ErrorReport.to_dict()` semantics):
+    - [ ] `error_type`, `error_category`, `error_domain`, `retryable`, `user_action`, `model`, `provider`, `provider_metadata` — all sourced from the disclosure-aware dict.
     - [ ] `request_id` from the caller-supplied id (distinct from `provider_metadata.request_id`).
-- [ ] Implement strict-mode redaction per `wip/error-handling/track-response-schema.md` — *The strict mode, in detail* section:
-    - [ ] `INPUT` domain: unchanged (always verbose).
-    - [ ] `CONFIG` and `RUNTIME` domain: `detail` replaced with the fixed string; `user_action`, `provider`, `model`, `provider_metadata` dropped; `error_category`, `retryable`, `error_type`, `error_domain`, `request_id`, RFC 7807 standard fields retained.
 - [ ] Unit tests in `tests/unit/test_problem_document.py`. One `TestClass` per project rules; one test method per scenario:
     - [ ] Builds a problem document from a synthetic `EnvVarNotFoundError` (`CONFIG` domain).
     - [ ] Builds a problem document from a synthetic `LLMCompletionError` with `provider_metadata` carrying `retry_after_seconds` (verify all extension members present).
-    - [ ] Strict mode redacts `CONFIG`-domain `detail` and drops the right fields.
-    - [ ] Strict mode preserves `INPUT`-domain detail.
+    - [ ] **Dispatch:** `disclosure_mode="verbose"` calls `to_dict`; `disclosure_mode="strict"` calls `to_strict_dict`. Use pytest-mock to assert the call. The redaction rules themselves are pipelex's responsibility (item #4 unit tests cover them upstream); the API only proves it selects the right method.
+    - [ ] **Fallback:** when `report.title is None`, the problem document's `title` falls back to `error_type_title(report.error_type)`. Same for `type` URI fallback.
     - [ ] API-error variant produces a valid problem document with `error_domain = "input"`.
     - [ ] `None`-valued fields are dropped, not emitted as `null`.
-    - [ ] Use `parametrize` for the redaction matrix (domain × mode → which fields survive).
 - [ ] `make fui && make c && make tp` clean.
 
 ---
@@ -154,7 +157,8 @@ Wire three app-level handlers in `api/main.py`. Each handler consumes the Phase 
     - [ ] `ERROR_DISCLOSURE=strict` redacts `detail` for `CONFIG` errors, preserves `INPUT`.
     - [ ] Simulated `LLMCompletionError` with `provider_metadata.retry_after_seconds = 12.0` → 429, `Retry-After: 12` header.
     - [ ] `Exception` subclass triggers the fallback handler → 500 with `error_type = "InternalServerError"`, response body does NOT include the original exception class name.
-    - [ ] `TemporalError` triggers the dedicated handler with the expected synthetic classification.
+    - [ ] **TemporalError dispatch (T4):** `WorkflowExecutionError` (a `PipelexError` subclass) goes through the `PipelexError` handler, NOT the `TemporalError` handler. A bare `temporalio.exceptions.RPCError` (or another non-`PipelexError` `TemporalError` subclass) goes through the dedicated `TemporalError` handler with the synthetic transport-transient classification.
+    - [ ] **Handler-of-handlers (T3):** monkey-patch a `PipelexError` subclass so `to_error_report()` itself raises; confirm the `Exception` fallback catches it and returns a sanitized 500 — not FastAPI's default bodyless 500. Without this test, a corrupt `to_error_report` silently breaks every error response.
     - [ ] `X-Request-ID` is present on every response.
     - [ ] Inbound `X-Request-ID` is echoed (proves the middleware integration).
 - [ ] `make fui && make c && make tp` clean.
@@ -187,9 +191,11 @@ _To be filled in by the agent reaching this checkpoint._
 
 ---
 
-## Phase 3 — Route cleanup and 4xx helper migration
+## Phase 3 — Route cleanup, 4xx helper migration, inline-HTTPException migration
 
 The subtraction phase. Risky because it touches every route file; the global handler must be in place and working (Checkpoint B verified) before this phase runs.
+
+**Scope note (review amendment A1 + A2):** This phase also migrates direct `HTTPException` sites that today bypass the 4xx helpers and emit the old `{"detail": {...}}` shape — `api/middleware.py` `_too_large_response()`, `api/routes/storage.py:157-163` (403 ownership), `api/routes/storage.py:173-179` (500 presign), and the seven `HTTPException` sites in `api/security.py` (5×401, 2×500). The design originally punted on auth migration as a separate track; per CLAUDE.md's "no backward compatibility" rule, we migrate it here instead so clients see one error shape everywhere. RFC 7807 supports the `WWW-Authenticate: Bearer` header — moving the body to `application/problem+json` does not break the auth challenge.
 
 - [ ] Strip per-route `try / except ENDPOINT_HANDLED_EXCEPTIONS` blocks in:
     - [ ] `api/routes/pipelex/pipeline.py` (both `/execute` and `/start`)
@@ -205,17 +211,37 @@ The subtraction phase. Risky because it touches every route file; the global han
     - [ ] `api/routes/storage.py`
     - [ ] Decision per design: trust pipelex's wrapping; if `OSError`/`BotoCoreError`/`ClientError` ever leak, the `Exception` fallback catches them and the leak is a pipelex bug. Do **not** keep a narrow catch defensively.
 - [ ] Audit `ValueError` / `TypeError` / `RuntimeError` catch sites for each route. For each occurrence:
-    - [ ] If pipelex should wrap it but doesn't → note it in `wip/error-handling/upstream-followups.md` (create this file if it doesn't exist). File an upstream issue if appropriate.
+    - [ ] If pipelex should wrap it but doesn't → append to `wip/error-handling/pipelex-changes.md` (already seeded with the 9 companion items; just add new ones as discovered). File an upstream pipelex issue if appropriate.
     - [ ] If the API boundary itself raises it (e.g. Pydantic coercion at the route) → catch the **specific** exception (not the union) and call `raise_validation_error(...)`.
-    - [ ] Otherwise → let it fall through to the `Exception` fallback. Document the call site in `upstream-followups.md`.
+    - [ ] Otherwise → let it fall through to the `Exception` fallback. Document the call site in `pipelex-changes.md`.
 - [ ] In `api/errors.py`:
     - [ ] Delete `ENDPOINT_HANDLED_EXCEPTIONS` and `STORAGE_HANDLED_EXCEPTIONS`.
     - [ ] Delete `raise_internal_error`.
-    - [ ] Update `raise_validation_error`, `raise_bad_request`, `raise_payload_too_large` to emit RFC 7807 problem documents via `build_problem_document_from_api_error`. Three signature changes:
-        - [ ] Each helper now needs the `Request` (to get `request.state.request_id` and `request.url.path`). Pass it explicitly or read from a context — pick whichever is cleaner.
+    - [ ] Update `raise_validation_error`, `raise_bad_request`, `raise_payload_too_large` to emit RFC 7807 problem documents via `build_problem_document_from_api_error`.
+        - [ ] Helpers read `request_id` and `route_path` from the Phase 0 contextvars (`api/logging_context.py`) — **no signature change** (review amendment Q1). Call sites are unchanged.
         - [ ] Status code stays the same (422 / 400 / 413).
-        - [ ] Body shape changes from `{"detail": {"error_type", "message"}}` to RFC 7807.
-- [ ] Update every call site of `raise_validation_error` / `raise_bad_request` / `raise_payload_too_large` to pass the `Request` (or the equivalent context).
+        - [ ] Body shape changes from `{"detail": {"error_type", "message"}}` to RFC 7807 problem document.
+        - [ ] Response `Content-Type` is `application/problem+json`.
+    - [ ] Add new helpers (review amendments A1 + A2):
+        - [ ] `raise_forbidden(message: str, error_type: ErrorType = ErrorType.FORBIDDEN) -> NoReturn` — 403 RFC 7807. Used by `api/routes/storage.py` ownership-mismatch.
+        - [ ] `raise_internal_server_error(message: str, error_type: ErrorType) -> NoReturn` — 500 RFC 7807 for API-owned 500s (NOT for pipelex domain errors, which go through the global handler). Used by `api/routes/storage.py` presign-failure and `api/security.py` SERVER_MISCONFIGURED cases.
+        - [ ] `raise_unauthenticated(message: str, error_type: ErrorType = ErrorType.UNAUTHENTICATED) -> NoReturn` — 401 RFC 7807 with `WWW-Authenticate: Bearer` header. Used by all `api/security.py` 401 sites. (RFC 7807 fully supports the challenge header — moving the body to `application/problem+json` does not break OAuth/JWT clients that parse the `WWW-Authenticate` header.)
+
+### A1 — migrate inline `HTTPException` sites
+
+- [ ] `api/middleware.py` `_too_large_response()` (lines 13-22): build an RFC 7807 problem document inline (the middleware owns the response without going through a route, so it cannot use the 4xx helpers directly — they'd need a route context that the middleware doesn't have on the early-reject path). Set `Content-Type: application/problem+json`. Set the `X-Request-ID` header on the response if the contextvar is populated (the request-id middleware should run first; see Phase 0 middleware ordering checkbox).
+- [ ] `api/routes/storage.py:157-163` (403 ownership mismatch): replace direct `HTTPException(...)` with `raise_forbidden(...)`.
+- [ ] `api/routes/storage.py:173-179` (500 presign-failure): replace direct `HTTPException(...)` with `raise_internal_server_error(...)`. (Note: pipelex's storage layer should be the canonical author of `StorageError`-style failures; the API should NOT raise a pipelex error here. The 500 is API-authored — the storage backend returned a non-presigned URL, which is an API-layer configuration check, not a pipelex domain error.)
+- [ ] `api/security.py` — migrate all 7 `HTTPException` sites (review amendment A2):
+    - [ ] Lines 93-96 (`verify_jwt`, 500 missing `JWT_SECRET_KEY`) → `raise_internal_server_error(message, error_type=ErrorType.SERVER_MISCONFIGURED)`.
+    - [ ] Lines 118-122 (`verify_jwt`, 401 missing `user_id` claim) → `raise_unauthenticated(message, error_type=ErrorType.INVALID_TOKEN)`.
+    - [ ] Lines 125-129 (`verify_jwt`, 401 `user_id` not a UUID) → `raise_unauthenticated(message, error_type=ErrorType.INVALID_TOKEN)`.
+    - [ ] Lines 136-140 (`verify_jwt`, 401 expired token) → `raise_unauthenticated(message, error_type=ErrorType.TOKEN_EXPIRED)`.
+    - [ ] Lines 143-147 (`verify_jwt`, 401 invalid token) → `raise_unauthenticated(message, error_type=ErrorType.INVALID_TOKEN)`.
+    - [ ] Lines 159-162 (`verify_api_key`, 500 missing `API_KEY`) → `raise_internal_server_error(message, error_type=ErrorType.SERVER_MISCONFIGURED)`.
+    - [ ] Lines 166-170 (`verify_api_key`, 401 key mismatch) → `raise_unauthenticated(message, error_type=ErrorType.INVALID_TOKEN)`.
+    - [ ] Confirm `WWW-Authenticate: Bearer` header is emitted on every 401 response (the helper adds it; verify in tests).
+- [ ] Update existing tests on these paths to assert the new RFC 7807 shape (covered by the T1/T2/T5 regression checkboxes in the e2e section below, and explicitly enumerated in the old-shape audit checkbox).
 - [ ] Update existing tests that assert the old `{"detail": {...}}` shape to assert the new RFC 7807 shape. Likely candidates: every e2e test that exercises 4xx paths.
 - [ ] Update the module docstring at the top of `api/errors.py` to describe the new world (no more catch tuples, helpers emit problem documents).
 - [ ] e2e coverage in `tests/e2e/`:
@@ -223,6 +249,10 @@ The subtraction phase. Risky because it touches every route file; the global han
     - [ ] `/pipeline/execute` with an invalid pipe code → expected error from pipelex propagates correctly.
     - [ ] `raise_validation_error` path returns RFC 7807 with `error_domain = "input"`.
     - [ ] At least one storage route happy path still works (no regression from removing `STORAGE_HANDLED_EXCEPTIONS`).
+    - [ ] **REGRESSION T1**: a request body > `MAX_REQUEST_BODY_BYTES` returns 413 `application/problem+json` (not the old `{"detail": {...}}` shape). Header `X-Request-ID` present.
+    - [ ] **REGRESSION T2**: storage 403 ownership-mismatch returns RFC 7807. Header `X-Request-ID` present.
+    - [ ] **REGRESSION T5**: every error-emitting route includes `X-Request-ID` on the response. Parametrize across 422 / 400 / 403 / 413 / 500.
+- [ ] **REGRESSION — old-shape audit**: `grep -rn '"detail"' tests/` and enumerate every test asserting `{"detail": {"error_type", "message"}}`. Update each to assert the new RFC 7807 shape. The list of updated files goes into the "What landed" note at Checkpoint C, so the audit's completeness is visible at review time. (Skill rule: regressions are mandatory tests — no AskUserQuestion gate.)
 - [ ] `make fui && make c && make tp` clean.
 - [ ] Run `make gha-tests` to confirm the no-inference CI tier still passes.
 
@@ -238,9 +268,9 @@ The subtraction phase. Risky because it touches every route file; the global han
     - `POST /api/v1/pipeline/start` without `COMPLETION_CALLBACK_SECRET` → response is RFC 7807 problem+json, 500, `detail` names the env var. **This is the original bug — fixed.**
     - A deliberately bad request body to a 422 path → response is RFC 7807 problem+json, 422.
     - The new path through the global handler is the only one in play; the old `raise_internal_error` no longer exists.
-4. **Check `wip/error-handling/upstream-followups.md`.** If any catch sites were noted as "pipelex should wrap this," confirm the upstream issues / notes are filed. Move forward only when there's no half-finished investigation lurking.
+4. **Check `wip/error-handling/pipelex-changes.md`.** Confirm: (a) any new pipelex gaps discovered during the catch-site audit have been added to the tracking table, and (b) Stage 1 items (1, 2, 3) and Stage 2 item (4) are at or near merge — the API has just consumed all of them in Phases 0-1. If any are still in flight, note it here so Phase 4 entry knows the dependency status.
 5. **Update Status block.** Last checkpoint = "C." Current phase = "Phase 3 complete, sync path complete, ready for Phase 4."
-6. **Append a "What landed" note** under this checkpoint heading. Include: which routes were cleaned up, anything surprising in the catch-site audit, list of upstream pipelex follow-ups raised.
+6. **Append a "What landed" note** under this checkpoint heading. Include: which routes were cleaned up, anything surprising in the catch-site audit, and the current status of `wip/error-handling/pipelex-changes.md` items (which Stage 1-2 items landed, which Stage 3+ items are in flight).
 7. **Commit.** Conventional message: `error-handling: phase 3 — route cleanup, 4xx helpers emit problem documents`.
 
 ### What landed (fill in at Checkpoint C)
@@ -255,27 +285,34 @@ _To be filled in by the agent reaching this checkpoint._
 
 ## Phase 4 — Temporal webhook recovery
 
-Async failures must surface to callers with the same RFC 7807 shape as the synchronous path. The recovery primitive is `pipelex.base_exceptions.recover_error_report`.
+Async failures must surface to callers with the same RFC 7807 shape as the synchronous path. The recovery primitive is `pipelex.temporal.tprl.temporal_error.recover_error_report`.
 
-- [ ] **First task: locate the workflow-completion observer.** Open question from the design: is it pipelex's `WorkflowExecutor` (upstream code) or an API-side background worker (this repo)? Read `api/routes/pipelex/pipeline.py` (the `_completion_signature` flow), the `make_temporal_pipe_run` call, and pipelex's `WorkflowExecutor` to find out. Document the answer in this checkbox before proceeding.
-- [ ] If the observer is in pipelex:
-    - [ ] Confirm pipelex already calls `recover_error_report` and posts the webhook. If yes, this phase is mostly a payload-shape audit — verify the webhook body matches the synchronous RFC 7807 problem document.
-    - [ ] If pipelex needs to be updated, file the upstream change and pause this phase until it lands.
-- [ ] If the observer is in this repo:
-    - [ ] Find / build the workflow-completion observer (likely a background task or async polling).
-    - [ ] On failed-state completion: call `recover_error_report(exc)` → `ErrorReport | None`.
-    - [ ] Build the webhook payload `{pipeline_run_id, status: "failed", error: <problem document>}` using `build_problem_document(...)`.
-    - [ ] On `None` recovery: emit the explicit unrecoverable problem document per `wip/error-handling/track-temporal-recovery.md` — never silent.
-    - [ ] POST to each `callback_url` with `X-Completion-Signature` and a stable `Content-Type: application/json` (or `application/problem+json` for the failure case — pick one and document).
-- [ ] Wire structured logging on the webhook delivery itself:
-    - [ ] `event = "webhook_delivery"` on success, `"webhook_failure"` on non-2xx.
-    - [ ] `request_id` of the original `/pipeline/start` call (this needs to be persisted into the workflow input or fetched by `pipeline_run_id`).
-    - [ ] `pipeline_run_id`, `callback_url`, response status, and (on failure) the recovered error classification fields.
+**Scope note (review amendment A3) — Phase split:** During plan review the workflow-completion observer was located at `pipelex/pipe_run/delivery_executor.py:238 _notify_webhook`. Today it composes the webhook payload as `{pipeline_run_id, status, result_url}` with **no `error` field**, and `recover_error_report(...)` is **not called** by `delivery_executor`. The pipelex change to fix this is item **#5** in `wip/error-handling/pipelex-changes.md` — landing in parallel with this work, not as a separate timeline. Phase 4 is split into **4a (verify pipelex item #5 landed)** and **4b (API-side audit)**.
+
+### Phase 4a — Verify pipelex item #5 is landed
+
+This phase consumes item **#5** from `wip/error-handling/pipelex-changes.md` (`DeliveryExecutor.execute(error_report=...)`), which is implemented in parallel with the API work. See `pipelex-changes.md` for the full specification.
+
+- [ ] Confirm pipelex item #5 has landed. Spec-check: `DeliveryExecutor.execute(...)` accepts `error_report: ErrorReport | None = None`; `_notify_webhook` includes `error: <error_report.to_dict()>` in the payload on `FAILED` status when `error_report` is provided; recovery responsibility stays with the caller (worker/observer), not `DeliveryExecutor` itself.
+- [ ] Update pipelex version pin in `pyproject.toml` to the commit / version that lands item #5. Re-pin `mthds` if its pipelex constraint moves.
+- [ ] Update `wip/error-handling/pipelex-changes.md` tracking table — set item #5 Status to "Landed" with the PR link / commit hash.
+- [ ] Confirm Stage 1 items (#1 `PipelexError.title`, #2 `PipelexError.type_uri`, #3 first-class `request_id`) and Stage 2 item (#4 `ErrorReport.to_strict_dict()`) are also landed by this point — they were consumed in API Phases 0 and 1. If any are still in flight, document the local workaround being used.
+
+### Phase 4b — API-side audit (gated on 4a)
+
+- [ ] Confirm the workflow-completion observer location: `pipelex/pipe_run/delivery_executor.py:_notify_webhook` (verified during plan review on 2026-05-20). The API supplies `callback_urls` via `WebhookTarget`; pipelex composes and posts.
+- [ ] **Render decision — pinned: option 2 (raw `ErrorReport` dict in webhook).** Reason: the `ErrorReport` dict IS the structured data — RFC 7807 is a presentational layer over it, and the webhook receiver may or may not want the envelope (a non-HTTP consumer like a queue, a log shipper, or a batch processor probably doesn't). The sync HTTP response renders to RFC 7807 because HTTP wants it; the webhook payload stays structurally faithful to the source. Document this asymmetry clearly in `wip/error-handling/track-temporal-recovery.md`. **Future escape hatch:** pipelex item **#6** (`ErrorReport.to_problem_document(...)`) lands later in `pipelex-changes.md` — if a future use case demands "RFC 7807 everywhere," `_notify_webhook` can call that method to render upstream without re-architecting.
+- [ ] On `status = FAILED` with a recovered `ErrorReport`: confirm the webhook payload includes `error: <error_report.to_dict()>`. Field-by-field parity with the sync RFC 7807 extension members (because the sync response builds them from the same `to_dict()`).
+- [ ] On `status = FAILED` with `error_report is None` (recovery returned `None`): emit the explicit unrecoverable payload per `wip/error-handling/track-temporal-recovery.md` — `error: {error_type: "WorkflowFailureUnrecoverable", error_domain: "runtime", retryable: false, message: "Workflow failed but the structured error could not be recovered."}`. Never silent.
+- [ ] Wire structured logging on the webhook delivery (existing log line at `pipelex/pipe_run/delivery_executor.py:261` — `Webhook delivery completed: ...`):
+    - [ ] Extend to emit `event = "webhook_delivery"` on 2xx, `event = "webhook_failure"` on non-2xx (already raised as `WebhookDeliveryError` at lines 262-267).
+    - [ ] Include `request_id` of the original `/pipeline/start` call. Consumed from the first-class field added by pipelex item **#3** (workflow input carries `request_id: str | None`). The API populates it at `make_temporal_pipe_run(...)` dispatch time in `api/routes/pipelex/pipeline.py:96-107`, reading it from the request-id contextvar set by the Phase 0 middleware. **No webhook.payload piggyback needed** once item #3 lands.
+    - [ ] Include `pipeline_run_id`, `callback_url`, response status, and (on failure) the recovered error classification fields.
 - [ ] Tests in `tests/unit/test_webhook_recovery.py`:
     - [ ] Simulated `WorkflowExecutionError` carrying a packed `ErrorReport` dict → recovery yields the same classification.
     - [ ] Simulated `WorkflowExecutionError` with a malformed details dict → `recover_error_report` returns `None`, the unrecoverable payload is emitted.
-    - [ ] Webhook payload shape matches the synchronous response shape (RFC 7807 problem document inside the `error` field).
-    - [ ] Strict-mode disclosure applies to the webhook payload too.
+    - [ ] **T6 — cross-path consistency (REGRESSION):** same source `ErrorReport` → both the sync handler and the webhook composer produce identical body content for the error fields, modulo `instance`, `request_id`, and timestamps. Automates the manual check from Checkpoint D step 2. (Skill rule: regression test, mandatory.)
+    - [ ] Strict-mode disclosure: the chosen behavior is pinned here. If option 2 (consumer-side rendering) is selected, the test confirms the webhook always carries the raw `ErrorReport` regardless of `ERROR_DISCLOSURE` mode (the receiver chooses what to render).
 - [ ] e2e or integration test (if feasible): trigger a real workflow failure on a test Temporal instance, observe the webhook payload. If a real Temporal instance is not available in this repo's test infra, document the gap and rely on the unit tests.
 - [ ] `make fui && make c && make tp` clean.
 
@@ -285,8 +322,8 @@ Async failures must surface to callers with the same RFC 7807 shape as the synch
 
 **Stop. Do this in order.**
 
-1. **Verify.** `make fui && make c && make tp` green. New unit tests for webhook recovery pass.
-2. **Manual cross-path consistency check.** Confirm: the JSON in a webhook `error` field for failure X is byte-identical (modulo `instance`, `request_id`, and timing) to the JSON returned by `/pipeline/execute` for the same failure X. If they differ, identify why and fix.
+1. **Verify.** Both 4a (upstream pipelex change merged + version pinned in this repo) and 4b (API-side audit + tests) are complete. `make fui && make c && make tp` green. New unit tests for webhook recovery pass.
+2. **Manual cross-path consistency check.** Confirm: the structured error content in a webhook `error` field for failure X matches (modulo `instance`, `request_id`, and timing) the structured fields in the RFC 7807 problem document returned by `/pipeline/execute` for the same failure X. The T6 regression test automates this; the manual check is the smell-test backstop. If they differ, identify why and fix before signing off.
 3. **Update Status block.** Last checkpoint = "D." Current phase = "Phase 4 complete; async path consistent with sync. Ready for documentation."
 4. **Append a "What landed" note** under this checkpoint heading.
 5. **Commit.** Conventional message: `error-handling: phase 4 — temporal webhook recovery`.
@@ -313,14 +350,16 @@ Code work is done. Documentation makes the contract usable for clients and makes
 - [ ] `type` URI doc pages — minimum viable:
     - [ ] Decision: ship a single generic page at `https://pipelex.dev/errors/` describing the schema, **or** stub one page per error class with redirect to the generic page until per-class pages are written. **Recommended:** generic page only at this stage; per-class pages can grow incrementally. Document the decision.
 - [ ] `CHANGELOG.md` entry capturing:
-    - [ ] The breaking change: error response shape moved from `{"detail": {...}}` to RFC 7807 `application/problem+json`.
-    - [ ] The new fields available to clients.
+    - [ ] The breaking change: error response shape moved from `{"detail": {...}}` to RFC 7807 `application/problem+json` across **every** API endpoint — pipelex domain errors, validation errors, auth errors (401/403), payload-size limits (413), and the catch-all 500.
+    - [ ] The new fields available to clients (`error_type`, `error_category`, `error_domain`, `retryable`, `user_action`, `provider_metadata`, `request_id`, plus the RFC 7807 standard fields).
     - [ ] The `ERROR_DISCLOSURE` env var and its default.
+    - [ ] `WWW-Authenticate: Bearer` still appears on 401 responses; only the body shape changed.
+    - [ ] **Known limitation:** the webhook completion payload carries the raw `ErrorReport` dict under `error`, not an RFC 7807 problem document. Sync HTTP responses render to RFC 7807 because HTTP wants it; the webhook stays structurally faithful to the source so non-HTTP receivers (queues, log shippers, batch processors) don't have to unwrap an envelope. See `wip/error-handling/track-temporal-recovery.md` for rationale.
 - [ ] Update `CLAUDE.md` if any conventions changed (e.g. the rule about per-route error handling).
 - [ ] Archive the design directory:
     - [ ] Rename `wip/error-handling/` to `wip/error-handling-archive/` (or move under a top-level `archive/`, depending on the repo's convention).
     - [ ] Update the README.md inside the archived directory to mark it as historical-reference-only.
-    - [ ] If `wip/error-handling/upstream-followups.md` exists, decide whether to keep it as a live tracker (rename to `docs/upstream-followups.md` if so).
+    - [ ] `wip/error-handling/pipelex-changes.md` is the live cross-repo tracking doc — keep it active. Decide where it lives long-term: stays under `wip/` if pipelex-side work is still in flight at the time of archive, or moves to `docs/pipelex-companion-changes.md` if all 9 items are landed.
 - [ ] `make fui && make c && make tp` clean.
 - [ ] Final commit. Conventional message: `error-handling: phase 5 — documentation, changelog, archive design`.
 
@@ -341,4 +380,44 @@ For the agent's reference, so it doesn't get pulled into adjacent work mid-phase
 - A synchronous status-polling endpoint `GET /api/v1/pipeline/{run_id}`. Designed in `track-temporal-recovery.md` for shape consistency but out of scope to implement here.
 - OpenTelemetry / distributed tracing. The `X-Request-ID` plumbing is a strict subset and can grow into trace context later.
 - Dashboards and alert rules. The structured-log fields are the foundation; the operator can build whatever they want on top.
-- Auth-error refactors. Authentication errors in `api/security.py` use standard FastAPI 401/403 and stay as-is.
+- ~~Auth-error refactors.~~ **Now in scope** (review amendment A2): Phase 3 migrates the 7 `HTTPException` sites in `api/security.py` to RFC 7807. `WWW-Authenticate: Bearer` is preserved on 401 responses; only the body changes.
+- Default `Retry-After` header for internal-capacity errors (where `provider_metadata.retry_after_seconds` is absent). *(Review amendment Q2: out of scope; revisit if observed to matter in practice. Cooperating proxies can already act on the provider-emitted header.)*
+- Webhook signature scope expansion (`X-Completion-Signature` covering the full payload). *(Captured as item #9 in `wip/error-handling/pipelex-changes.md` — independent track, lands on its own timeline rather than gating this PR.)*
+
+Note: items previously listed here as "upstream pipelex work for later" — `PipelexError.title` / `type_uri`, `ErrorReport.to_strict_dict()`, first-class `request_id` on workflow input — are now **in active scope** via `wip/error-handling/pipelex-changes.md`. They land in parallel with this API plan.
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
+| Codex Review | `/codex review` | Independent 2nd opinion | 0 | — | — |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | AMENDED | 7 findings + 6 test gaps surfaced; 7 amendments applied to plan |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | — |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
+
+**Amendments applied to the plan (2026-05-20):**
+- **A1 (MEDIUM-HIGH) — applied.** Phase 3 now explicitly migrates the three direct `HTTPException` sites: `api/middleware.py` `_too_large_response()`, `api/routes/storage.py:157-163` (403 ownership), `api/routes/storage.py:173-179` (500 presign). New helpers `raise_forbidden` and `raise_internal_server_error` added to `api/errors.py`.
+- **A2 (MEDIUM) — applied** *(updated after first round: user override of design carve-out, in line with CLAUDE.md's "no backward compatibility" rule)*. All 7 `HTTPException` sites in `api/security.py` migrate to RFC 7807 in Phase 3 via two new helpers `raise_unauthenticated` (401 + `WWW-Authenticate: Bearer`) and `raise_internal_server_error` (already added for A1). Clients see one error shape across every endpoint.
+- **A3 (HIGH) — applied.** Phase 4 split into 4a (verify pipelex item #5 from `wip/error-handling/pipelex-changes.md` is landed — `DeliveryExecutor.execute(error_report=...)`) and 4b (API-side audit). The pipelex change is being done in parallel with the API work, not deferred. Render decision pinned: webhook carries raw `ErrorReport` dict (consumer renders RFC 7807 if needed); sync HTTP response renders to RFC 7807 because HTTP wants it. Rationale documented in Phase 4b. Future escape hatch via pipelex item #6 (`ErrorReport.to_problem_document()`) lands later in `pipelex-changes.md`.
+- **A4 (LOW-MEDIUM) — applied + extended.** Phase 0 drops the curated `error_type_title` map; the API now reads `report.title` and `report.type_uri` directly from the upstream `ErrorReport` (pipelex items #1 and #2 in `pipelex-changes.md`), with humanize-from-classname as a fallback. Curation moves to the class definition upstream, where it belongs.
+- **Q1 (MEDIUM) — applied.** Phase 0 contextvar now carries `request_id` AND `route_path`; Phase 3 4xx helpers read from the contextvar instead of taking `Request`. Helper signatures and call sites unchanged.
+- **T1, T2, T5 (CRITICAL regression tests) — applied.** Phase 3 e2e now explicitly tests 413 RFC 7807 shape, storage 403 ownership RFC 7807 shape, and `X-Request-ID` parametrized across 422/400/403/413/500. Old-shape audit checkbox enumerates the test files to update.
+- **T3 (handler-of-handlers), T4 (TemporalError dispatch) — applied.** Phase 2 tests now cover both `WorkflowExecutionError` vs bare `RPCError` dispatch and the monkey-patched `to_error_report()` failure path.
+- **T6 (cross-path consistency regression) — applied.** Phase 4b automates the Checkpoint D manual consistency check as a test.
+
+**UNRESOLVED:** None. The plan is now coherent for Phase 0 start.
+
+**VERDICT:** CLEARED FOR IMPLEMENTATION — amendments applied. Pipelex companion work is captured in `wip/error-handling/pipelex-changes.md` (9 items across 6 stages, being done in parallel rather than deferred). The dependency graph between the two plans:
+
+- **API Phase 0** consumes pipelex items **#1, #2, #3** (Stage 1 of `pipelex-changes.md`). Land first.
+- **API Phase 1** consumes pipelex item **#4** (Stage 2). Land before API Phase 1.
+- **API Phase 4a** consumes pipelex item **#5** (Stage 3). Land before API Phase 4.
+- API Phases 2-3, 4b, 5 have no hard pipelex dependencies — they can run in parallel with the remaining pipelex stages.
+
+If pipelex stages 1-3 progress on schedule, API Phase 0 can start as soon as items #1, #2, #3 are merged. If they slip, API Phase 0 can still proceed by humanizing class names locally (the original A4 fallback) and consuming the upstream class attributes once they land — small migration cost, no hard block.
+
+**Audit trail — original findings (for future review consistency):**
+- A1: `api/middleware.py:13-22`, `api/routes/storage.py:157-163`, `:173-179` bypass the 4xx helpers.
+- A3: `pipelex/pipe_run/delivery_executor.py:238 _notify_webhook` composes `{pipeline_run_id, status, result_url}` with no `error` field; `recover_error_report` is not called.
+- Q1: `_decode_body` and `_validate_extras` in `api/routes/pipelex/pipeline.py` would otherwise need a `Request` parameter; contextvar approach keeps them pure.
