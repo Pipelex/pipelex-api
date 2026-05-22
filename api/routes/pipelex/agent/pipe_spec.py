@@ -3,12 +3,11 @@
 import json
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pipelex.builder.operations.pipe_ops import parse_pipe_spec, pipe_spec_to_toml
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from api.error_types import ErrorType
-from api.errors import ENDPOINT_HANDLED_EXCEPTIONS, raise_internal_error
+from api.errors import raise_validation_error
 from api.limits import MAX_AGENT_SPEC_BYTES
 
 router = APIRouter(tags=["agent"])
@@ -36,7 +35,12 @@ class BuildPipeSpecResponse(BaseModel):
 
 @router.post("/build/pipe-spec")
 async def build_pipe_spec(request_data: BuildPipeSpecRequest) -> BuildPipeSpecResponse:
-    """Convert a JSON pipe spec to TOML format."""
+    """Convert a JSON pipe spec to TOML format.
+
+    A malformed spec surfaces as a Pydantic `ValidationError` — an API-owned
+    422. Pipelex domain failures propagate untouched to the global
+    `PipelexError` handler in `api.main`.
+    """
     try:
         pipe_spec = parse_pipe_spec(request_data.pipe_type, request_data.spec)
         toml_content = pipe_spec_to_toml(pipe_spec)
@@ -47,15 +51,5 @@ async def build_pipe_spec(request_data: BuildPipeSpecRequest) -> BuildPipeSpecRe
             pipe_type=request_data.pipe_type,
             toml=toml_content,
         )
-
     except ValidationError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "error_type": ErrorType.VALIDATION_ERROR,
-                "message": str(exc),
-            },
-        ) from exc
-
-    except ENDPOINT_HANDLED_EXCEPTIONS as exc:
-        raise_internal_error(exc, context="build_pipe_spec failed")
+        raise_validation_error(message=str(exc))

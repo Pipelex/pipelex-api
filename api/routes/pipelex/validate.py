@@ -3,6 +3,7 @@ from typing import Any
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pipelex import log
+from pipelex.base_exceptions import PipelexError
 from pipelex.core.bundles.pipelex_bundle_blueprint import PipelexBundleBlueprint
 from pipelex.core.concepts.concept_representation_generator import ConceptRepresentationFormat
 from pipelex.core.pipes.pipe_abstract import PipeAbstract
@@ -11,7 +12,6 @@ from pipelex.pipe_run.dry_run_pipeline import dry_run_pipeline
 from pipelex.pipeline.validate_bundle import ValidateBundleError, validate_bundle
 from pydantic import BaseModel, Field, field_validator
 
-from api.errors import ENDPOINT_HANDLED_EXCEPTIONS
 from api.limits import MAX_MTHDS_FILE_BYTES, MAX_MTHDS_FILES_PER_REQUEST
 
 router = APIRouter(tags=["validate"])
@@ -118,7 +118,10 @@ async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
     graph_spec: GraphSpec | None = None
     try:
         graph_spec, _ = await dry_run_pipeline(mthds_contents=mthds_contents)
-    except ENDPOINT_HANDLED_EXCEPTIONS as exc:
+    except PipelexError as exc:
+        # Best-effort only: dry-run is a pipelex operation, so its failures are
+        # PipelexError subclasses. The bundle is already validated — a dry-run
+        # failure just means no graph, not a failed request.
         log.warning(f"validate_mthds: dry-run did not produce a graph ({type(exc).__name__}); returning bundle without graph_spec")
 
     response_data = ValidateResponse(

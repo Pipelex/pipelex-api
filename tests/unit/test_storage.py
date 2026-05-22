@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 
+from api.main import register_exception_handlers
 from api.routes.storage import (
     expires_at_from_presigned,
     is_presigned,
@@ -42,6 +43,7 @@ def _build_client(user: RequestUser | None, mocker: MockerFixture, storage_url: 
     """Build a FastAPI TestClient with auth and storage provider mocked."""
     app = FastAPI()
     app.include_router(storage_router)
+    register_exception_handlers(app)
 
     async def _override_user() -> RequestUser | None:
         return user
@@ -131,7 +133,9 @@ class TestStorageEndpoint:
         client = _build_client(None, mocker, PRESIGNED_URL)
         response = client.post("/resolve-storage-url", json={"uri": UPLOAD_URI})
         assert response.status_code == 401
-        assert response.json()["detail"]["error_type"] == "Unauthenticated"
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.headers["WWW-Authenticate"] == "Bearer"
+        assert response.json()["error_type"] == "Unauthenticated"
 
     def test_anonymous_user_returns_401(self, mocker: MockerFixture):
         user = RequestUser(user_id="anonymous")
@@ -146,7 +150,8 @@ class TestStorageEndpoint:
         response = client.post("/resolve-storage-url", json={"uri": STRANGER_URI})
 
         assert response.status_code == 403
-        assert response.json()["detail"]["error_type"] == "Forbidden"
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "Forbidden"
 
     def test_malformed_uri_returns_400(self, mocker: MockerFixture):
         user = RequestUser(user_id=USER_A)
@@ -155,7 +160,7 @@ class TestStorageEndpoint:
         response = client.post("/resolve-storage-url", json={"uri": f"pipelex-storage://{USER_A}/../secret.pdf"})
 
         assert response.status_code == 400
-        assert response.json()["detail"]["error_type"] == "InvalidUri"
+        assert response.json()["error_type"] == "InvalidUri"
 
     def test_signed_urls_disabled_returns_500(self, mocker: MockerFixture):
         """When storage falls back to a non-presigned URL, endpoint must 500 (not hand out a broken URL)."""
@@ -165,7 +170,8 @@ class TestStorageEndpoint:
         response = client.post("/resolve-storage-url", json={"uri": UPLOAD_URI})
 
         assert response.status_code == 500
-        assert response.json()["detail"]["error_type"] == "PresignFailed"
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "PresignFailed"
 
     def test_storage_returns_none_returns_500(self, mocker: MockerFixture):
         user = RequestUser(user_id=USER_A)
@@ -174,7 +180,7 @@ class TestStorageEndpoint:
         response = client.post("/resolve-storage-url", json={"uri": UPLOAD_URI})
 
         assert response.status_code == 500
-        assert response.json()["detail"]["error_type"] == "PresignFailed"
+        assert response.json()["error_type"] == "PresignFailed"
 
     def test_extra_fields_rejected(self, mocker: MockerFixture):
         user = RequestUser(user_id=USER_A)

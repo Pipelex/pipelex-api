@@ -8,6 +8,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 
+from api.main import register_exception_handlers
 from api.security import RequestUser, get_request_user, verify_api_key, verify_jwt
 from tests.unit._constants import RoutePath
 
@@ -34,12 +35,14 @@ async def _ping_api_key(_token: Annotated[str, Depends(verify_api_key)]) -> dict
 def _build_jwt_client() -> TestClient:
     app = FastAPI()
     app.add_api_route(RoutePath.WHOAMI, _whoami_jwt, methods=["GET"])
+    register_exception_handlers(app)
     return TestClient(app)
 
 
 def _build_api_key_client() -> TestClient:
     app = FastAPI()
     app.add_api_route(RoutePath.PING, _ping_api_key, methods=["GET"])
+    register_exception_handlers(app)
     return TestClient(app)
 
 
@@ -67,8 +70,8 @@ class TestSecurityVerifiers:
         token = jwt.encode({"sub": "google#abc"}, JWT_SECRET, algorithm="HS256")
         response = client.get(RoutePath.WHOAMI, headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 401
-        body = response.json()
-        assert isinstance(body["detail"], dict)
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "InvalidToken"
 
     def test_jwt_missing_user_id_claim_rejected(self, mocker: MockerFixture):
         """No `user_id` claim means no caller identifier — reject."""
@@ -77,8 +80,7 @@ class TestSecurityVerifiers:
         token = jwt.encode({"iat": 0}, JWT_SECRET, algorithm="HS256")
         response = client.get(RoutePath.WHOAMI, headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 401
-        body = response.json()
-        assert isinstance(body["detail"], dict)
+        assert response.json()["error_type"] == "InvalidToken"
 
     @pytest.mark.parametrize(
         "non_uuid_user_id",
@@ -105,14 +107,16 @@ class TestSecurityVerifiers:
         token = jwt.encode({"user_id": non_uuid_user_id}, JWT_SECRET, algorithm="HS256")
         response = client.get(RoutePath.WHOAMI, headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 401
-        assert response.json()["detail"]["error_type"] == "InvalidToken"
+        assert response.json()["error_type"] == "InvalidToken"
 
     def test_jwt_invalid_token_rejected(self, mocker: MockerFixture):
         mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
         client = _build_jwt_client()
         response = client.get(RoutePath.WHOAMI, headers={"Authorization": "Bearer not.a.real.token"})
         assert response.status_code == 401
-        assert response.json()["detail"]["error_type"] == "InvalidToken"
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.headers["WWW-Authenticate"] == "Bearer"
+        assert response.json()["error_type"] == "InvalidToken"
 
     def test_jwt_wrong_secret_rejected(self, mocker: MockerFixture):
         mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
@@ -140,14 +144,17 @@ class TestSecurityVerifiers:
         client = _build_api_key_client()
         response = client.get(RoutePath.PING, headers={"Authorization": "Bearer wrong-key"})
         assert response.status_code == 401
-        assert response.json()["detail"]["error_type"] == "InvalidToken"
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.headers["WWW-Authenticate"] == "Bearer"
+        assert response.json()["error_type"] == "InvalidToken"
 
     def test_api_key_missing_env_returns_500(self, mocker: MockerFixture):
         mocker.patch("api.security.get_optional_env", return_value=None)
         client = _build_api_key_client()
         response = client.get(RoutePath.PING, headers={"Authorization": "Bearer anything"})
         assert response.status_code == 500
-        assert response.json()["detail"]["error_type"] == "ServerMisconfigured"
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "ServerMisconfigured"
 
     @pytest.mark.parametrize("missing_header", [True, False])
     def test_api_key_missing_header_rejected(self, mocker: MockerFixture, missing_header: bool):

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Annotated, Any, cast
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from kajson import kajson
+from mthds.client.exceptions import PipelineRequestError
 from mthds.client.pipeline import PipelineRequest, PipelineState
 from pipelex.config import get_config
 from pipelex.pipe_run.delivery_assignment import DeliveryAssignment, StorageTarget, WebhookTarget
@@ -19,7 +20,7 @@ from pydantic import ValidationError
 from typing_extensions import override
 
 from api.error_types import ErrorType
-from api.errors import ENDPOINT_HANDLED_EXCEPTIONS, raise_internal_error, raise_validation_error
+from api.errors import raise_validation_error
 from api.routes.pipelex.utils import get_current_iso_timestamp
 from api.schemas.models import PipelineApiExtras
 
@@ -168,29 +169,38 @@ async def _parse_request(request: Request) -> tuple[PipelineRequest, PipelineApi
     body = await request.body()
     request_data = _decode_body(body)
     extras = _validate_extras(request_data)
-    pipeline_request = PipelineRequest.from_body(request_data)
+    try:
+        pipeline_request = PipelineRequest.from_body(request_data)
+    except (PipelineRequestError, ValidationError) as exc:
+        # `from_body` rejects a body where neither `pipe_code` nor
+        # `mthds_contents` is supplied (PipelineRequestError) and a body whose
+        # fields fail Pydantic coercion (ValidationError) — both are caller
+        # mistakes, not server faults, so they map to a 422 rather than
+        # escaping to the generic-500 fallback.
+        raise_validation_error(message=str(exc))
     return pipeline_request, extras
 
 
 @router.post("/pipeline/execute", response_model=PipelexPipelineExecuteResponse)
 async def execute(request: Request) -> JSONResponse:
-    """Execute a pipeline and wait for completion."""
+    """Execute a pipeline and wait for completion.
+
+    Pipelex domain failures propagate untouched: the global `PipelexError`
+    handler in `api.main` turns them into an RFC 7807 problem response.
+    """
     pipeline_request, _extras = await _parse_request(request)
-    try:
-        runner = ApiRunner(user_id=_get_user_id(request))
-        response = await runner.execute_pipeline(
-            pipe_code=pipeline_request.pipe_code,
-            mthds_contents=pipeline_request.mthds_contents,
-            inputs=pipeline_request.inputs,
-            output_name=pipeline_request.output_name,
-            output_multiplicity=pipeline_request.output_multiplicity,
-            dynamic_output_concept_ref=pipeline_request.dynamic_output_concept_ref,
-        )
-        return JSONResponse(
-            content=response.model_dump(mode="json", serialize_as_any=True, by_alias=True),
-        )
-    except ENDPOINT_HANDLED_EXCEPTIONS as exc:
-        raise_internal_error(exc, context="pipeline_execute failed")
+    runner = ApiRunner(user_id=_get_user_id(request))
+    response = await runner.execute_pipeline(
+        pipe_code=pipeline_request.pipe_code,
+        mthds_contents=pipeline_request.mthds_contents,
+        inputs=pipeline_request.inputs,
+        output_name=pipeline_request.output_name,
+        output_multiplicity=pipeline_request.output_multiplicity,
+        dynamic_output_concept_ref=pipeline_request.dynamic_output_concept_ref,
+    )
+    return JSONResponse(
+        content=response.model_dump(mode="json", serialize_as_any=True, by_alias=True),
+    )
 
 
 @router.post("/pipeline/start", response_model=PipelexPipelineStartResponse)
@@ -198,19 +208,20 @@ async def start(
     request: Request,
     parsed: Annotated[tuple[PipelineRequest, PipelineApiExtras], Depends(_parse_request)],
 ) -> PipelexPipelineStartResponse:
-    """Start a pipeline execution asynchronously without waiting for completion."""
+    """Start a pipeline execution asynchronously without waiting for completion.
+
+    Pipelex domain failures propagate untouched: the global `PipelexError`
+    handler in `api.main` turns them into an RFC 7807 problem response.
+    """
     pipeline_request, extras = parsed
-    try:
-        runner = ApiRunner(user_id=_get_user_id(request))
-        return await runner.start_pipeline(
-            pipe_code=pipeline_request.pipe_code,
-            mthds_contents=pipeline_request.mthds_contents,
-            inputs=pipeline_request.inputs,
-            output_name=pipeline_request.output_name,
-            output_multiplicity=pipeline_request.output_multiplicity,
-            dynamic_output_concept_ref=pipeline_request.dynamic_output_concept_ref,
-            pipeline_run_id=extras.pipeline_run_id,
-            callback_urls=extras.callback_urls,
-        )
-    except ENDPOINT_HANDLED_EXCEPTIONS as exc:
-        raise_internal_error(exc, context="pipeline_start failed")
+    runner = ApiRunner(user_id=_get_user_id(request))
+    return await runner.start_pipeline(
+        pipe_code=pipeline_request.pipe_code,
+        mthds_contents=pipeline_request.mthds_contents,
+        inputs=pipeline_request.inputs,
+        output_name=pipeline_request.output_name,
+        output_multiplicity=pipeline_request.output_multiplicity,
+        dynamic_output_concept_ref=pipeline_request.dynamic_output_concept_ref,
+        pipeline_run_id=extras.pipeline_run_id,
+        callback_urls=extras.callback_urls,
+    )

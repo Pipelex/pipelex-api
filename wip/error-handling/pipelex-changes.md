@@ -338,6 +338,24 @@ The change spans both repos: `pipelex-api` updates `_completion_signature` to ta
 
 ---
 
+## Stage 7 — Post-implementation audit findings
+
+Items surfaced *after* the main companion work landed, during the `pipelex-api` Phase 3 catch-site audit. They are quality improvements, not blockers — the API already handles the current behavior correctly.
+
+### 10. `EnvVarNotFoundError` should carry `error_domain = ErrorDomain.CONFIG`
+
+> **Discovered during `pipelex-api` Phase 3 (2026-05-22). Not started.**
+
+**Where:** `pipelex/system/environment.py` (the `EnvVarNotFoundError` class) — or its parent `ToolError`.
+
+**What.** `EnvVarNotFoundError` is currently domain-less: it is a `ToolError`, and neither `ToolError` nor `EnvVarNotFoundError` sets `error_domain`. Its `ErrorReport` therefore has `error_domain = None`, and the RFC 7807 problem document the API emits has no `error_domain` member. A missing required environment variable is the textbook `CONFIG`-domain failure — an operator, not the caller, fixes it. Setting `error_domain = ErrorDomain.CONFIG` on `EnvVarNotFoundError` would make it classify correctly. HTTP status is unaffected — `error_domain_to_http_status(None)` and `error_domain_to_http_status(CONFIG)` both map to 500.
+
+**Why.** The API's own 5xx helper (`raise_internal_server_error`) already classifies API-authored config faults as `CONFIG`. A pipelex-authored missing-env-var error reading as domain-less is an inconsistency: a client filtering on `error_domain` to tell caller-fixable from operator-fixable failures gets no signal for the single most common operator-fixable failure (a deployment that forgot to set a secret — the original bug this whole effort started from).
+
+**Surfaced by.** `pipelex-api` Phase 1 reconciliation finding #1; filed by the Phase 3 catch-site audit.
+
+---
+
 ## What NOT to push upstream
 
 Things that look like they belong in pipelex but actually stay API-side.
@@ -363,5 +381,6 @@ Things that look like they belong in pipelex but actually stay API-side.
 | 7 | Per-class `type` URI doc pages | 4 | `docs/errors/` | ✅ Landed | #931 |
 | 8 | `query_pipeline_state(...)` | 5 | `temporal/tprl/workflow_caller.py` (new) | Not started — future-facing, no consumer yet | — |
 | 9 | Webhook signing | 6 | see `_for_api/wip/security/webhook-signing.md` | Open — separate track | — |
+| 10 | `EnvVarNotFoundError` → `error_domain = CONFIG` | 7 | `system/environment.py` | Not started — discovered in pipelex-api Phase 3 audit | — |
 
-Stages 1–4 (#1–#7) are landed — the `pipelex-api` plan is unblocked: Phase 0 consumes #1+#2, Phase 1 consumes #4 (`to_dict(disclosure_mode=)`) and #6 (`to_problem_document`), Phase 4 consumes #5. Only #8 (future, no consumer yet) and #9 (webhook signing — separate track) remain.
+Stages 1–4 (#1–#7) are landed — the `pipelex-api` plan is unblocked: Phase 0 consumes #1+#2, Phase 1 consumes #4 (`to_dict(disclosure_mode=)`) and #6 (`to_problem_document`), Phase 4 consumes #5. Only #8 (future, no consumer yet), #9 (webhook signing — separate track) and #10 (post-Phase-3 audit finding, non-blocking) remain.

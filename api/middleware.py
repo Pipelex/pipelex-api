@@ -12,19 +12,28 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from api.error_types import ErrorType
 from api.limits import MAX_REQUEST_BODY_BYTES, MAX_REQUEST_BODY_MIB
-from api.logging_context import bound_request_context
+from api.logging_context import bound_request_context, get_request_id, get_route_path
+from api.problem_document import PROBLEM_JSON_MEDIA_TYPE, build_problem_document_from_api_error
 
 
 def _too_large_response() -> JSONResponse:
-    return JSONResponse(
-        status_code=413,
-        content={
-            "detail": {
-                "error_type": ErrorType.PAYLOAD_TOO_LARGE,
-                "message": f"Request body exceeds {MAX_REQUEST_BODY_MIB} MiB limit",
-            }
-        },
+    """Build the 413 RFC 7807 problem response for an over-limit request body.
+
+    The body-size check runs in middleware, before routing, so it cannot go
+    through the `api.errors` helpers — a middleware must `return` a response,
+    not raise. It builds the same problem document directly.
+    `RequestIdMiddleware` runs outermost, so the request-scoped contextvars are
+    already bound and feed `instance` / `request_id`; that middleware's `send`
+    wrapper also stamps the `X-Request-ID` header onto this response.
+    """
+    document = build_problem_document_from_api_error(
+        ErrorType.PAYLOAD_TOO_LARGE,
+        f"Request body exceeds {MAX_REQUEST_BODY_MIB} MiB limit",
+        413,
+        instance=get_route_path(),
+        request_id=get_request_id(),
     )
+    return JSONResponse(status_code=413, content=document, media_type=PROBLEM_JSON_MEDIA_TYPE)
 
 
 async def request_body_size_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:

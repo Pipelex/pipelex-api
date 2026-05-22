@@ -26,14 +26,12 @@ from temporalio.exceptions import TemporalError
 
 from api.disclosure import resolve_disclosure_mode
 from api.error_uri import error_type_uri
+from api.errors import ApiError
 from api.middleware import RequestIdMiddleware, request_body_size_middleware
-from api.problem_document import build_problem_document
+from api.problem_document import PROBLEM_JSON_MEDIA_TYPE, build_problem_document
 from api.routes import router as api_router
 from api.routes.health import router as health_router
 from api.security import get_auth_dependency
-
-# Content type for every error response — RFC 7807 problem documents.
-PROBLEM_JSON_MEDIA_TYPE = "application/problem+json"
 
 
 @asynccontextmanager
@@ -297,15 +295,37 @@ async def handle_unexpected_error(request: Request, exc: Exception) -> Response:
     return JSONResponse(status_code=500, content=document, media_type=PROBLEM_JSON_MEDIA_TYPE)
 
 
-def register_exception_handlers(app: FastAPI) -> None:
-    """Register the three app-level exception handlers on `app`.
+async def handle_api_error(_request: Request, exc: Exception) -> Response:
+    """Render an API-authored `ApiError` as an RFC 7807 problem response.
 
-    Resolution is most-specific-first: a `PipelexError` (including
-    `WorkflowExecutionError`) → `handle_pipelex_error`; a non-pipelex
-    `TemporalError` → `handle_temporal_error`; anything else →
-    `handle_unexpected_error`. Shared by the production app below and by the
-    Phase 2 unit tests, which register the same handlers on a throwaway app.
+    `ApiError` is raised by the `raise_*` helpers in `api.errors` for the API's
+    own 4xx/5xx — request validation, auth, payload limits, misconfiguration.
+    The problem document is built at raise time (under the request-scoped
+    logging contextvars); this handler only serializes it and re-attaches any
+    `WWW-Authenticate` challenge header. `exc` is typed `Exception` to match
+    Starlette's handler contract; FastAPI only routes an `ApiError` here, so
+    the cast is sound.
     """
+    api_error = cast("ApiError", exc)
+    return JSONResponse(
+        status_code=api_error.status_code,
+        content=api_error.document,
+        media_type=PROBLEM_JSON_MEDIA_TYPE,
+        headers=api_error.headers,
+    )
+
+
+def register_exception_handlers(app: FastAPI) -> None:
+    """Register the four app-level exception handlers on `app`.
+
+    Resolution is most-specific-first: an API-authored `ApiError` →
+    `handle_api_error`; a `PipelexError` (including `WorkflowExecutionError`) →
+    `handle_pipelex_error`; a non-pipelex `TemporalError` →
+    `handle_temporal_error`; anything else → `handle_unexpected_error`. Shared
+    by the production app below and by the unit tests, which register the same
+    handlers on a throwaway app.
+    """
+    app.add_exception_handler(ApiError, handle_api_error)
     app.add_exception_handler(PipelexError, handle_pipelex_error)
     app.add_exception_handler(TemporalError, handle_temporal_error)
     app.add_exception_handler(Exception, handle_unexpected_error)

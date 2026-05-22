@@ -8,9 +8,9 @@ This is the implementation plan for the error-handling design captured in `wip/e
 
 ## Status (update at every checkpoint)
 
-- **Current phase:** Phase 2 complete, ready for Phase 3
-- **Last checkpoint reached:** B
-- **Next checkpoint:** Checkpoint C — end of Phase 3
+- **Current phase:** Phase 3 complete, sync path complete, ready for Phase 4
+- **Last checkpoint reached:** C
+- **Next checkpoint:** Checkpoint D — end of Phase 4
 - **Branch:** `feature/Adapt-to-pipelex-update` (error-handling work continues on this branch — prior `feat(error-handling)` commits already live here)
 
 ## Dependency status — pipelex companion work (reconciled 2026-05-22)
@@ -280,64 +280,65 @@ The subtraction phase. Risky because it touches every route file; the global han
 
 **Scope note (review amendment A1 + A2):** This phase also migrates direct `HTTPException` sites that today bypass the 4xx helpers and emit the old `{"detail": {...}}` shape — `api/middleware.py` `_too_large_response()`, `api/routes/storage.py:157-163` (403 ownership), `api/routes/storage.py:173-179` (500 presign), and the seven `HTTPException` sites in `api/security.py` (5×401, 2×500). The design originally punted on auth migration as a separate track; per CLAUDE.md's "no backward compatibility" rule, we migrate it here instead so clients see one error shape everywhere. RFC 7807 supports the `WWW-Authenticate: Bearer` header — moving the body to `application/problem+json` does not break the auth challenge.
 
-- [ ] Strip per-route `try / except ENDPOINT_HANDLED_EXCEPTIONS` blocks in:
-    - [ ] `api/routes/pipelex/pipeline.py` (both `/execute` and `/start`)
-    - [ ] `api/routes/pipelex/validate.py`
-    - [ ] `api/routes/pipelex/build/inputs.py`
-    - [ ] `api/routes/pipelex/build/output.py`
-    - [ ] `api/routes/pipelex/build/runner.py`
-    - [ ] `api/routes/pipelex/agent/concept.py`
-    - [ ] `api/routes/pipelex/agent/pipe_spec.py`
-    - [ ] `api/routes/pipelex/agent/models.py`
-- [ ] Strip per-route `try / except STORAGE_HANDLED_EXCEPTIONS` blocks in:
-    - [ ] `api/routes/uploader.py`
-    - [ ] `api/routes/storage.py`
-    - [ ] Decision per design: trust pipelex's wrapping; if `OSError`/`BotoCoreError`/`ClientError` ever leak, the `Exception` fallback catches them and the leak is a pipelex bug. Do **not** keep a narrow catch defensively.
-- [ ] Audit `ValueError` / `TypeError` / `RuntimeError` catch sites for each route. For each occurrence:
-    - [ ] If pipelex should wrap it but doesn't → append to `wip/error-handling/pipelex-changes.md` (already seeded with the 9 companion items; just add new ones as discovered). File an upstream pipelex issue if appropriate.
-    - [ ] If the API boundary itself raises it (e.g. Pydantic coercion at the route) → catch the **specific** exception (not the union) and call `raise_validation_error(...)`.
-    - [ ] Otherwise → let it fall through to the `Exception` fallback. Document the call site in `pipelex-changes.md`.
-- [ ] In `api/errors.py`:
-    - [ ] Delete `ENDPOINT_HANDLED_EXCEPTIONS` and `STORAGE_HANDLED_EXCEPTIONS`.
-    - [ ] Delete `raise_internal_error`.
-    - [ ] Update `raise_validation_error`, `raise_bad_request`, `raise_payload_too_large` to emit RFC 7807 problem documents via `build_problem_document_from_api_error`.
-        - [ ] Helpers read `request_id` and `route_path` from the Phase 0 contextvars (`api/logging_context.py`) — **no signature change** (review amendment Q1). Call sites are unchanged.
-        - [ ] Status code stays the same (422 / 400 / 413).
-        - [ ] Body shape changes from `{"detail": {"error_type", "message"}}` to RFC 7807 problem document.
-        - [ ] Response `Content-Type` is `application/problem+json`.
-    - [ ] Add new helpers (review amendments A1 + A2):
-        - [ ] `raise_forbidden(message: str, error_type: ErrorType = ErrorType.FORBIDDEN) -> NoReturn` — 403 RFC 7807. Used by `api/routes/storage.py` ownership-mismatch.
-        - [ ] `raise_internal_server_error(message: str, error_type: ErrorType) -> NoReturn` — 500 RFC 7807 for API-owned 500s (NOT for pipelex domain errors, which go through the global handler). Used by `api/routes/storage.py` presign-failure and `api/security.py` SERVER_MISCONFIGURED cases.
-        - [ ] `raise_unauthenticated(message: str, error_type: ErrorType = ErrorType.UNAUTHENTICATED) -> NoReturn` — 401 RFC 7807 with `WWW-Authenticate: Bearer` header. Used by all `api/security.py` 401 sites. (RFC 7807 fully supports the challenge header — moving the body to `application/problem+json` does not break OAuth/JWT clients that parse the `WWW-Authenticate` header.)
+- [x] Strip per-route `try / except ENDPOINT_HANDLED_EXCEPTIONS` blocks in:
+    - [x] `api/routes/pipelex/pipeline.py` (both `/execute` and `/start`)
+    - [x] `api/routes/pipelex/validate.py` *(the dry-run block is a genuine best-effort recover-and-continue, not error shaping — kept, but narrowed `except ENDPOINT_HANDLED_EXCEPTIONS` → `except PipelexError`.)*
+    - [x] `api/routes/pipelex/build/inputs.py` *(kept `try/finally` for library teardown — the sanctioned cleanup pattern.)*
+    - [x] `api/routes/pipelex/build/output.py` *(kept `try/finally`.)*
+    - [x] `api/routes/pipelex/build/runner.py` *(kept `try/finally`.)*
+    - [x] `api/routes/pipelex/agent/concept.py` *(kept the `except ValidationError` — API-owned 422 — migrated to `raise_validation_error`.)*
+    - [x] `api/routes/pipelex/agent/pipe_spec.py` *(same as concept.py.)*
+    - [x] `api/routes/pipelex/agent/models.py`
+- [x] Strip per-route `try / except STORAGE_HANDLED_EXCEPTIONS` blocks in:
+    - [x] `api/routes/uploader.py`
+    - [x] `api/routes/storage.py`
+    - [x] Decision per design: trust pipelex's wrapping; if `OSError`/`BotoCoreError`/`ClientError` ever leak, the `Exception` fallback catches them and the leak is a pipelex bug. Do **not** keep a narrow catch defensively.
+- [x] Audit `ValueError` / `TypeError` / `RuntimeError` catch sites for each route. For each occurrence:
+    - [x] If pipelex should wrap it but doesn't → append to `wip/error-handling/pipelex-changes.md`. *(One new item filed: #10 — `EnvVarNotFoundError` should carry `error_domain = CONFIG`.)*
+    - [x] If the API boundary itself raises it (e.g. Pydantic coercion at the route) → catch the **specific** exception (not the union) and call `raise_validation_error(...)`. *(`_parse_request` now catches `PipelineRequestError` / `ValidationError` from `PipelineRequest.from_body`; `models.py` already caught `ValueError` from `ModelCategory(...)` specifically; `concept.py` / `pipe_spec.py` keep their `except ValidationError`.)*
+    - [x] Otherwise → let it fall through to the `Exception` fallback. Document the call site in `pipelex-changes.md`. *(No genuinely-unknown leak sites remained after the audit.)*
+- [x] In `api/errors.py`:
+    - [x] Delete `ENDPOINT_HANDLED_EXCEPTIONS` and `STORAGE_HANDLED_EXCEPTIONS`.
+    - [x] Delete `raise_internal_error`.
+    - [x] Update `raise_validation_error`, `raise_bad_request`, `raise_payload_too_large` to emit RFC 7807 problem documents via `build_problem_document_from_api_error`.
+        - [x] Helpers read `request_id` and `route_path` from the Phase 0 contextvars (`api/logging_context.py`) — **no signature change** (review amendment Q1). Call sites are unchanged.
+        - [x] Status code stays the same (422 / 400 / 413).
+        - [x] Body shape changes from `{"detail": {"error_type", "message"}}` to RFC 7807 problem document.
+        - [x] Response `Content-Type` is `application/problem+json`. *(Carried on a new `ApiError` exception + `handle_api_error` global handler — `HTTPException`'s default handler cannot emit a flat problem document; see the "What landed" note.)*
+    - [x] Add new helpers (review amendments A1 + A2):
+        - [x] `raise_forbidden(message: str, error_type: ErrorType = ErrorType.FORBIDDEN) -> NoReturn` — 403 RFC 7807. Used by `api/routes/storage.py` ownership-mismatch.
+        - [x] `raise_internal_server_error(message: str, error_type: ErrorType) -> NoReturn` — 500 RFC 7807 for API-owned 500s (NOT for pipelex domain errors, which go through the global handler). Used by `api/routes/storage.py` presign-failure, `api/routes/version.py`, and `api/security.py` SERVER_MISCONFIGURED cases.
+        - [x] `raise_unauthenticated(message: str, error_type: ErrorType = ErrorType.UNAUTHENTICATED) -> NoReturn` — 401 RFC 7807 with `WWW-Authenticate: Bearer` header. Used by all `api/security.py` 401 sites. (RFC 7807 fully supports the challenge header — moving the body to `application/problem+json` does not break OAuth/JWT clients that parse the `WWW-Authenticate` header.)
 
 ### A1 — migrate inline `HTTPException` sites
 
-- [ ] `api/middleware.py` `_too_large_response()` (lines 13-22): build an RFC 7807 problem document inline (the middleware owns the response without going through a route, so it cannot use the 4xx helpers directly — they'd need a route context that the middleware doesn't have on the early-reject path). Set `Content-Type: application/problem+json`. Set the `X-Request-ID` header on the response if the contextvar is populated (the request-id middleware should run first; see Phase 0 middleware ordering checkbox).
-- [ ] `api/routes/storage.py:157-163` (403 ownership mismatch): replace direct `HTTPException(...)` with `raise_forbidden(...)`.
-- [ ] `api/routes/storage.py:173-179` (500 presign-failure): replace direct `HTTPException(...)` with `raise_internal_server_error(...)`. (Note: pipelex's storage layer should be the canonical author of `StorageError`-style failures; the API should NOT raise a pipelex error here. The 500 is API-authored — the storage backend returned a non-presigned URL, which is an API-layer configuration check, not a pipelex domain error.)
-- [ ] `api/security.py` — migrate all 7 `HTTPException` sites (review amendment A2):
-    - [ ] Lines 93-96 (`verify_jwt`, 500 missing `JWT_SECRET_KEY`) → `raise_internal_server_error(message, error_type=ErrorType.SERVER_MISCONFIGURED)`.
-    - [ ] Lines 118-122 (`verify_jwt`, 401 missing `user_id` claim) → `raise_unauthenticated(message, error_type=ErrorType.INVALID_TOKEN)`.
-    - [ ] Lines 125-129 (`verify_jwt`, 401 `user_id` not a UUID) → `raise_unauthenticated(message, error_type=ErrorType.INVALID_TOKEN)`.
-    - [ ] Lines 136-140 (`verify_jwt`, 401 expired token) → `raise_unauthenticated(message, error_type=ErrorType.TOKEN_EXPIRED)`.
-    - [ ] Lines 143-147 (`verify_jwt`, 401 invalid token) → `raise_unauthenticated(message, error_type=ErrorType.INVALID_TOKEN)`.
-    - [ ] Lines 159-162 (`verify_api_key`, 500 missing `API_KEY`) → `raise_internal_server_error(message, error_type=ErrorType.SERVER_MISCONFIGURED)`.
-    - [ ] Lines 166-170 (`verify_api_key`, 401 key mismatch) → `raise_unauthenticated(message, error_type=ErrorType.INVALID_TOKEN)`.
-    - [ ] Confirm `WWW-Authenticate: Bearer` header is emitted on every 401 response (the helper adds it; verify in tests).
-- [ ] Update existing tests on these paths to assert the new RFC 7807 shape (covered by the T1/T2/T5 regression checkboxes in the e2e section below, and explicitly enumerated in the old-shape audit checkbox).
-- [ ] Update existing tests that assert the old `{"detail": {...}}` shape to assert the new RFC 7807 shape. Likely candidates: every e2e test that exercises 4xx paths.
-- [ ] Update the module docstring at the top of `api/errors.py` to describe the new world (no more catch tuples, helpers emit problem documents).
-- [ ] e2e coverage in `tests/e2e/`:
-    - [ ] `/pipeline/start` with no `COMPLETION_CALLBACK_SECRET` → 500 problem+json, `error_domain = "config"`, `detail` names the env var. (The original bug, verified end-to-end.)
-    - [ ] `/pipeline/execute` with an invalid pipe code → expected error from pipelex propagates correctly.
-    - [ ] `raise_validation_error` path returns RFC 7807 with `error_domain = "input"`.
-    - [ ] At least one storage route happy path still works (no regression from removing `STORAGE_HANDLED_EXCEPTIONS`).
-    - [ ] **REGRESSION T1**: a request body > `MAX_REQUEST_BODY_BYTES` returns 413 `application/problem+json` (not the old `{"detail": {...}}` shape). Header `X-Request-ID` present.
-    - [ ] **REGRESSION T2**: storage 403 ownership-mismatch returns RFC 7807. Header `X-Request-ID` present.
-    - [ ] **REGRESSION T5**: every error-emitting route includes `X-Request-ID` on the response. Parametrize across 422 / 400 / 403 / 413 / 500.
-- [ ] **REGRESSION — old-shape audit**: `grep -rn '"detail"' tests/` and enumerate every test asserting `{"detail": {"error_type", "message"}}`. Update each to assert the new RFC 7807 shape. The list of updated files goes into the "What landed" note at Checkpoint C, so the audit's completeness is visible at review time. (Skill rule: regressions are mandatory tests — no AskUserQuestion gate.)
-- [ ] `make fui && make c && make tp` clean.
-- [ ] Run `make gha-tests` to confirm the no-inference CI tier still passes.
+- [x] `api/middleware.py` `_too_large_response()`: builds an RFC 7807 problem document inline via `build_problem_document_from_api_error` (the middleware must `return` a response, not raise, so it cannot use the `raise_*` helpers). `Content-Type: application/problem+json`. `X-Request-ID` is stamped by `RequestIdMiddleware`'s send wrapper on every response.
+- [x] `api/routes/storage.py` (403 ownership mismatch): replaced direct `HTTPException(...)` with `raise_forbidden(...)`.
+- [x] `api/routes/storage.py` (500 presign-failure): replaced direct `HTTPException(...)` with `raise_internal_server_error(...)`.
+- [x] `api/security.py` — migrated all 7 `HTTPException` sites (review amendment A2):
+    - [x] `verify_jwt`, 500 missing `JWT_SECRET_KEY` → `raise_internal_server_error(..., error_type=ErrorType.SERVER_MISCONFIGURED)`.
+    - [x] `verify_jwt`, 401 missing `user_id` claim → `raise_unauthenticated(..., error_type=ErrorType.INVALID_TOKEN)`.
+    - [x] `verify_jwt`, 401 `user_id` not a UUID → `raise_unauthenticated(..., error_type=ErrorType.INVALID_TOKEN)`.
+    - [x] `verify_jwt`, 401 expired token → `raise_unauthenticated(..., error_type=ErrorType.TOKEN_EXPIRED)`.
+    - [x] `verify_jwt`, 401 invalid token → `raise_unauthenticated(..., error_type=ErrorType.INVALID_TOKEN)`.
+    - [x] `verify_api_key`, 500 missing `API_KEY` → `raise_internal_server_error(..., error_type=ErrorType.SERVER_MISCONFIGURED)`.
+    - [x] `verify_api_key`, 401 key mismatch → `raise_unauthenticated(..., error_type=ErrorType.INVALID_TOKEN)`.
+    - [x] Confirmed `WWW-Authenticate: Bearer` is emitted on every 401 — asserted in `test_security_verifiers.py`, `test_storage.py`, `test_uploader.py`, `test_error_responses.py`, and verified on the real server.
+- [x] **Beyond A1's enumeration:** A1 named only the storage + middleware sites, but the Phase 5 changelog commits to RFC 7807 "across **every** API endpoint". The audit found three more files with inline `HTTPException` on the old shape — `api/routes/uploader.py` (401/400/413), `api/routes/storage.py` (401/400), `api/routes/version.py` (2×500) — all migrated to the helpers so the contract is uniform. See the "What landed" note.
+- [x] Updated existing tests on these paths to assert the new RFC 7807 shape.
+- [x] Updated every test asserting the old `{"detail": {...}}` shape to assert the new RFC 7807 shape.
+- [x] Updated the module docstring at the top of `api/errors.py` (and `api/error_types.py`) to describe the new world.
+- [x] e2e / regression coverage (landed in `tests/unit/` as TestClient integration tests, consistent with the existing suite — there is no real-Temporal e2e infra in this repo):
+    - [x] `/pipeline/start` original-bug class verified: a `PipelexError` raised inside `pipeline_run_setup` propagates through the cleaned route to the global handler → RFC 7807 500 (confirmed on the real server with `PipeNotFoundError`; `EnvVarNotFoundError` shares that exact handler path and is covered by `test_exception_handlers.py` + `test_problem_document.py`).
+    - [x] `/pipeline/execute` with an invalid pipe code → pipelex error propagates correctly (real-server check).
+    - [x] `raise_validation_error` path returns RFC 7807 with `error_domain = "input"` (`test_error_responses.py`).
+    - [x] Storage route happy paths still work — no regression from removing `STORAGE_HANDLED_EXCEPTIONS` (`test_storage.py`, `test_uploader.py`).
+    - [x] **REGRESSION T1**: a request body > `MAX_REQUEST_BODY_BYTES` returns 413 `application/problem+json` with `X-Request-ID` (`test_error_responses.py`).
+    - [x] **REGRESSION T2**: storage 403 ownership-mismatch returns RFC 7807 with `X-Request-ID` (`test_error_responses.py`).
+    - [x] **REGRESSION T5**: every error-emitting route includes `X-Request-ID` — asserted across the 422/400/403/413/500/401 cases in `test_error_responses.py`.
+- [x] **REGRESSION — old-shape audit**: `grep -rn '"detail"' tests/` enumerated and updated. Files updated: `test_pipeline_routes.py`, `test_build_and_agent_routes.py`, `test_storage.py`, `test_uploader.py`, `test_security_verifiers.py`, `test_simple_routes.py`. (`test_problem_document.py` and `test_exception_handlers.py` already used `detail` as the RFC 7807 field — unchanged.)
+- [x] `make fui && make c && make tp` clean — 160 passed.
+- [x] `make gha-tests` clean — 160 passed.
 
 ---
 
@@ -358,7 +359,39 @@ The subtraction phase. Risky because it touches every route file; the global han
 
 ### What landed (fill in at Checkpoint C)
 
-_To be filled in by the agent reaching this checkpoint._
+**The shape of the change:** every API error response — pipelex domain errors, API-authored 4xx, auth 401/403, the 413 payload limit, the catch-all 500 — is now a single RFC 7807 `application/problem+json` document. The old `{"detail": {"error_type", "message"}}` envelope is gone from the entire surface. Per-route `try/except` error-shaping is gone; routes call into pipelex and let exceptions propagate to the four global handlers.
+
+**Files modified — `api/`:**
+
+- `api/errors.py` — full rewrite. Deleted `ENDPOINT_HANDLED_EXCEPTIONS`, `STORAGE_HANDLED_EXCEPTIONS`, `raise_internal_error`. Added the `ApiError` exception class and `_raise_api_error`; `raise_validation_error` / `raise_bad_request` / `raise_payload_too_large` now emit RFC 7807; added `raise_forbidden` (403), `raise_unauthenticated` (401 + `WWW-Authenticate: Bearer`), `raise_internal_server_error` (500). Module docstring rewritten.
+- `api/problem_document.py` — added the `PROBLEM_JSON_MEDIA_TYPE` constant (moved here from `api/main.py` so middleware can use it without a circular import); added an `error_domain: ErrorDomain | None = ErrorDomain.INPUT` parameter to `build_problem_document_from_api_error` so an API-owned 500 can classify `CONFIG`.
+- `api/main.py` — added `handle_api_error` and registered it as a fourth global handler (`register_exception_handlers` now wires `ApiError` → `PipelexError` → `TemporalError` → `Exception`). Imports `PROBLEM_JSON_MEDIA_TYPE` from `api.problem_document`.
+- `api/middleware.py` — `_too_large_response()` builds an RFC 7807 document inline.
+- `api/security.py` — all 7 `HTTPException` sites migrated to `raise_unauthenticated` / `raise_internal_server_error`; dropped the now-unused `HTTPException` / `status` imports.
+- `api/error_types.py` — module docstring updated (no more `{"detail": {...}}`, no `raise_internal_error`).
+- `api/routes/pipelex/pipeline.py` — stripped both per-route `try/except` blocks; `_parse_request` now catches `PipelineRequestError` / `ValidationError` from `PipelineRequest.from_body` and maps them to a 422 (fixes Checkpoint B reconciliation #1 — those used to escape as a sanitized 500).
+- `api/routes/pipelex/validate.py` — dry-run best-effort catch narrowed `ENDPOINT_HANDLED_EXCEPTIONS` → `PipelexError`.
+- `api/routes/pipelex/build/{inputs,output,runner}.py` — stripped the `except`; kept `try/finally` for library teardown.
+- `api/routes/pipelex/agent/{concept,pipe_spec}.py` — stripped the `ENDPOINT_HANDLED_EXCEPTIONS` catch; kept `except ValidationError` migrated to `raise_validation_error`.
+- `api/routes/pipelex/agent/models.py` — stripped the `try/except` around `list_models`.
+- `api/routes/uploader.py`, `api/routes/storage.py` — stripped the `STORAGE_HANDLED_EXCEPTIONS` catches; migrated every inline `HTTPException` (401/400/413/403/500) to the helpers.
+- `api/routes/version.py` — both `HTTPException` 500 sites migrated to `raise_internal_server_error`.
+
+**Files modified — `tests/`:** `test_pipeline_routes.py`, `test_build_and_agent_routes.py`, `test_storage.py`, `test_uploader.py`, `test_security_verifiers.py`, `test_simple_routes.py` — old `{"detail": {...}}` assertions updated to the flat RFC 7807 shape; each `_build_client` helper now calls `register_exception_handlers(app)`. `test_problem_document.py` — added a test for the `error_domain` override.
+
+**Files created:** `tests/unit/test_error_responses.py` — Phase 3 regression suite (T1 413, T2 storage-403, T5 `X-Request-ID` on every error, validation→`input`-domain, 500→`config`-domain, `WWW-Authenticate` challenge, inbound-id echo) over a production-faithful app.
+
+**Verification:** `make fui` clean; `make c` clean (ruff format + lint, pyright 0 errors, mypy success); `make tp` — 160 passed; `make gha-tests` — 160 passed. Manual `make run` checks confirmed `application/problem+json` with `X-Request-ID` for a 422 (malformed JSON), a 422 (invalid model category), a 401 (`/upload`, with `WWW-Authenticate: Bearer`), and a 500 — the last via `/pipeline/start` with a bad pipe code, which produced `PipeNotFoundError` → RFC 7807 500 through the global `PipelexError` handler, proving the per-route catch removal works end-to-end.
+
+**Reconciliation findings — read before Phase 4:**
+
+1. **The 4xx/5xx helpers needed a dedicated exception + handler, not bare `HTTPException`.** FastAPI's default `HTTPException` handler wraps the body as `{"detail": <whatever>}` — it cannot emit a flat RFC 7807 document, and it does not set `application/problem+json`. So the helpers raise a new `ApiError` (carrying a pre-built problem document + status + headers) and `api/main.py` registers a fourth handler, `handle_api_error`, that renders it. This mirrors the existing 3-handler architecture and is why `register_exception_handlers` now wires four handlers.
+2. **A1's file enumeration was incomplete; the full surface was migrated.** Review amendment A1 named only `api/middleware.py` and `api/routes/storage.py`. The catch-site audit found inline `HTTPException` on the old shape in three more files — `api/routes/uploader.py` (401/400/413), `api/routes/storage.py` (401/400, beyond the 403/500 A1 listed), `api/routes/version.py` (2×500). The Phase 5 changelog commits to RFC 7807 "across **every** API endpoint" and explicitly lists 401/403/413 — so all of them were migrated. This honors the settled design intent; A1 simply under-listed the files.
+3. **`build_problem_document_from_api_error` gained an `error_domain` parameter.** A1/A2 added `raise_internal_server_error`, but a 500 server-config fault is not `INPUT` domain (the caller cannot fix a missing `JWT_SECRET_KEY`). The Phase 1 builder hardcoded `INPUT`; Phase 3 parameterized it (`INPUT` default for 4xx, `CONFIG` for the 500 helper). A genuine, necessary extension of Phase 1 code — not relitigation.
+4. **`EnvVarNotFoundError` domain gap filed upstream.** The catch-site audit confirmed `EnvVarNotFoundError` is domain-less (Phase 1 reconciliation #1). Filed as item #10 in `wip/error-handling/pipelex-changes.md` — `EnvVarNotFoundError` should carry `error_domain = CONFIG`. Non-blocking; the API renders it correctly today (HTTP 500, `error_domain` member simply absent).
+5. **`PipelineRequestError` is resolved API-side, no upstream item.** `mthds.client.exceptions.PipelineRequestError` (an `mthds`-package error, not a `PipelexError`) is raised by `PipelineRequest.from_body` on an empty/malformed body. It is a caller-input error; `_parse_request` now catches it explicitly at the API boundary and maps it to a 422 — the "API boundary should catch it" branch of the audit. No `pipelex`-library change is warranted (it is an `mthds` error, and the API boundary is the right place to classify it).
+6. **e2e tests live in `tests/unit/`, not a new `tests/e2e/`.** The plan named `tests/e2e/`, but the entire existing suite is TestClient integration tests under `tests/unit/` with the Pipelex-setup autouse fixture in `tests/unit/conftest.py`. The Phase 3 regression tests are the same kind of test; they landed in `tests/unit/test_error_responses.py` to reuse that fixture and stay consistent. A true real-Temporal e2e harness does not exist in this repo — the original-bug class is verified by the manual `make run` check plus the Phase 1/2 unit coverage of the identical handler path.
+7. **`pipelex-changes.md` status:** Stage 1 (#1, #2, #3) and Stage 2 (#4) are landed and consumed by Phases 0–1 — confirmed against the pinned `pipelex==0.29.1` (the `../_for_api` worktree). Item #6 (`to_problem_document`) is landed and consumed by Phase 1. Item #5 (`DeliveryExecutor.execute(error_report=...)`), the Phase 4a dependency, is marked Landed in the tracking table — Phase 4a must spec-check it. New item #10 filed (see finding 4); #8 / #9 / #10 remain open, none blocking Phase 4.
 
 ### Cold-start prompt template for Phase 4
 

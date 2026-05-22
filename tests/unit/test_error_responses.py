@@ -1,0 +1,129 @@
+"""Phase 3 regression tests — every API error path emits one RFC 7807 shape.
+
+Builds a production-faithful app (the real routers, the four global exception
+handlers, `RequestIdMiddleware`, the body-size middleware) and asserts that
+4xx/5xx responses across the surface are `application/problem+json` with the
+RFC 7807 fields and an `X-Request-ID` header — never the old
+`{"detail": {...}}` envelope. Covers regression checks T1 (413), T2 (storage
+403) and T5 (`X-Request-ID` on every error response).
+"""
+
+from importlib.metadata import PackageNotFoundError
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from pytest_mock import MockerFixture
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from api.main import register_exception_handlers
+from api.middleware import REQUEST_ID_HEADER, RequestIdMiddleware, request_body_size_middleware
+from api.problem_document import PROBLEM_JSON_MEDIA_TYPE
+from api.routes import router as api_router
+from api.security import RequestUser, get_request_user
+
+USER_A = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"
+USER_B = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"
+FILE_HASH = "cccccccc-cccc-4ccc-cccc-cccccccccccc"
+
+
+def _build_client(*, user: RequestUser | None = None) -> TestClient:
+    """Wire a production-faithful app: real routers, handlers, both middlewares.
+
+    `RequestIdMiddleware` wraps the whole app exactly as in `api.main`, so the
+    request-id contextvars are bound and `X-Request-ID` is stamped on every
+    response. `get_request_user` is overridden so storage routes see the
+    caller identity the test wants.
+    """
+    app = FastAPI(redirect_slashes=False)
+    app.add_middleware(BaseHTTPMiddleware, dispatch=request_body_size_middleware)
+    app.include_router(api_router, prefix="/api/v1")
+    register_exception_handlers(app)
+
+    async def _override_user() -> RequestUser | None:
+        return user
+
+    app.dependency_overrides[get_request_user] = _override_user
+    return TestClient(RequestIdMiddleware(app))
+
+
+class TestErrorResponses:
+    def test_validation_error_is_rfc7807_input_domain(self):
+        # /models with an unknown category → raise_validation_error → 422.
+        response = _build_client().get("/api/v1/models?type=not-a-real-category")
+        assert response.status_code == 422
+        assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
+        body = response.json()
+        assert body["error_type"] == "InvalidModelCategory"
+        assert body["error_domain"] == "input"
+        assert body["instance"] == "/api/v1/models"
+        assert body["status"] == 422
+        assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
+
+    def test_bad_request_is_rfc7807(self):
+        # A malformed storage URI → raise_bad_request → 400.
+        client = _build_client(user=RequestUser(user_id=USER_A))
+        response = client.post("/api/v1/resolve-storage-url", json={"uri": f"pipelex-storage://{USER_A}/../secret.pdf"})
+        assert response.status_code == 400
+        assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
+        body = response.json()
+        assert body["error_type"] == "InvalidUri"
+        assert body["error_domain"] == "input"
+        assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
+
+    def test_storage_ownership_mismatch_is_rfc7807(self):
+        # REGRESSION T2: a cross-user storage URI → raise_forbidden → 403.
+        client = _build_client(user=RequestUser(user_id=USER_A))
+        stranger_uri = f"pipelex-storage://{USER_B}/assets/{FILE_HASH}.pdf"
+        response = client.post("/api/v1/resolve-storage-url", json={"uri": stranger_uri})
+        assert response.status_code == 403
+        assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
+        body = response.json()
+        assert body["error_type"] == "Forbidden"
+        assert body["status"] == 403
+        assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
+
+    def test_payload_too_large_is_rfc7807(self):
+        # REGRESSION T1: a body over the cap → 413 via the body-size middleware.
+        response = _build_client().get(
+            "/api/v1/pipelex_version",
+            headers={"content-length": str(200 * 1024 * 1024)},
+        )
+        assert response.status_code == 413
+        assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
+        body = response.json()
+        assert body["error_type"] == "PayloadTooLarge"
+        assert body["error_domain"] == "input"
+        assert body["status"] == 413
+        assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
+
+    def test_internal_server_error_is_rfc7807_config_domain(self, mocker: MockerFixture):
+        # Absent package metadata → raise_internal_server_error → 500 CONFIG.
+        mocker.patch("api.routes.version.version", side_effect=PackageNotFoundError("pipelex"))
+        response = _build_client().get("/api/v1/pipelex_version")
+        assert response.status_code == 500
+        assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
+        body = response.json()
+        assert body["error_type"] == "PackageNotFound"
+        assert body["error_domain"] == "config"
+        assert body["status"] == 500
+        assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
+
+    def test_unauthenticated_carries_www_authenticate_challenge(self):
+        # An unauthenticated upload → raise_unauthenticated → 401 + challenge.
+        response = _build_client(user=None).post("/api/v1/upload", json={"filename": "a.txt", "data": "aGk="})
+        assert response.status_code == 401
+        assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
+        assert response.headers["WWW-Authenticate"] == "Bearer"
+        body = response.json()
+        assert body["error_type"] == "Unauthenticated"
+        assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
+
+    def test_inbound_request_id_is_echoed_into_error_body(self):
+        # A caller-supplied X-Request-ID rides through to the response body.
+        response = _build_client().get(
+            "/api/v1/models?type=not-a-real-category",
+            headers={REQUEST_ID_HEADER: "inbound-correlation-303"},
+        )
+        assert response.status_code == 422
+        assert response.headers[REQUEST_ID_HEADER] == "inbound-correlation-303"
+        assert response.json()["request_id"] == "inbound-correlation-303"

@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 
+from api.main import register_exception_handlers
 from api.routes import router as api_router
 
 VALID_MTHDS = (
@@ -23,6 +24,7 @@ VALID_MTHDS = (
 def _build_client() -> TestClient:
     app = FastAPI()
     app.include_router(api_router, prefix="/api/v1")
+    register_exception_handlers(app)
     return TestClient(app)
 
 
@@ -66,7 +68,8 @@ class TestBuildAndAgentRoutes:
         mocker.patch("api.routes.pipelex.agent.models.list_models")
         response = client.get("/api/v1/models?type=not-a-real-category")
         assert response.status_code == 422
-        assert response.json()["detail"]["error_type"] == "InvalidModelCategory"
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "InvalidModelCategory"
 
     @pytest.mark.parametrize(
         ("path", "payload"),

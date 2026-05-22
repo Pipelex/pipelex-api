@@ -6,7 +6,6 @@ from pipelex.hub import get_library_manager, get_required_pipe, set_current_libr
 from pipelex.pipeline.validate_bundle import validate_bundle
 from pydantic import BaseModel, Field, field_validator
 
-from api.errors import ENDPOINT_HANDLED_EXCEPTIONS, raise_internal_error
 from api.limits import MAX_MTHDS_FILE_BYTES, MAX_MTHDS_FILES_PER_REQUEST, MAX_PIPE_CODE_LEN
 
 router = APIRouter(tags=["build"])
@@ -33,7 +32,12 @@ class BuildInputsRequest(BaseModel):
 
 @router.post("/build/inputs")
 async def build_inputs(request_data: BuildInputsRequest) -> Any:
-    """Generate example input JSON for a pipe."""
+    """Generate example input JSON for a pipe.
+
+    Pipelex domain failures propagate untouched: the global `PipelexError`
+    handler in `api.main` turns them into an RFC 7807 problem response. The
+    `try`/`finally` guarantees the library is torn down on both paths.
+    """
     library_manager = get_library_manager()
     library_id: str | None = None
 
@@ -49,9 +53,6 @@ async def build_inputs(request_data: BuildInputsRequest) -> Any:
         inputs_json_str = the_pipe.inputs.render_inputs(indent=2)
 
         return json.loads(inputs_json_str)
-
-    except ENDPOINT_HANDLED_EXCEPTIONS as exc:
-        raise_internal_error(exc, context=f"build_inputs for pipe '{request_data.pipe_code}'")
     finally:
         if library_id is not None:
             library_manager.teardown(library_id=library_id)

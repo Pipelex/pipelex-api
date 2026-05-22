@@ -1,7 +1,7 @@
 """Unit tests for the RFC 7807 problem-document builder."""
 
 import pytest
-from pipelex.base_exceptions import DisclosureMode, ErrorReport, PipelexConfigError
+from pipelex.base_exceptions import DisclosureMode, ErrorDomain, ErrorReport, PipelexConfigError
 from pipelex.cogt.inference.error_classification import ProviderErrorMetadata, UserAction, UserActionKind
 from pipelex.cogt.inference.provider_name import ProviderName
 from pipelex.system.environment import EnvVarNotFoundError
@@ -107,6 +107,22 @@ class TestProblemDocument:
         assert doc["request_id"] == "REQ9"
         assert doc["error_type"] == "ValidationError"
         assert doc["error_domain"] == "input"
+
+    def test_api_error_variant_config_domain_for_server_fault(self):
+        # An API-owned 5xx (a missing secret, an unconfigured backend) classifies
+        # CONFIG, not INPUT — an operator, not the caller, fixes it.
+        doc = build_problem_document_from_api_error(
+            ErrorType.SERVER_MISCONFIGURED,
+            "Server configuration error: API_KEY not configured",
+            500,
+            instance="/api/v1/upload",
+            request_id="REQ-CFG",
+            error_domain=ErrorDomain.CONFIG,
+        )
+        assert doc["status"] == 500
+        assert doc["title"] == "Server misconfigured"
+        assert doc["error_type"] == "ServerMisconfigured"
+        assert doc["error_domain"] == "config"
 
     def test_none_valued_fields_dropped(self):
         report = EnvVarNotFoundError("missing X").to_error_report()

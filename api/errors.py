@@ -1,119 +1,113 @@
-"""Error helpers — centralized, structured HTTPException responses.
+"""API-authored error helpers — RFC 7807 problem responses for the 4xx/5xx the API owns.
 
-The project standard is to return errors as `{"detail": {"error_type": str, "message": str}}`.
-These helpers enforce that shape consistently across routes and avoid leaking
-raw exception strings (which can carry stack traces, file paths, or upstream
-internals) to clients.
+These cover failures the API detects at its own boundary — request validation,
+auth, payload-size limits, server misconfiguration — as opposed to pipelex
+domain errors, which carry an `ErrorReport` and are translated by the global
+`PipelexError` handler in `api.main`.
 
-The `ENDPOINT_HANDLED_EXCEPTIONS` and `STORAGE_HANDLED_EXCEPTIONS` tuples
-collect every exception type endpoint handlers explicitly catch and convert
-into a structured 500. Anything outside these tuples bubbles up to FastAPI's
-default exception handler (which still produces JSON, just without our
-structured detail). When a recurring exception type starts leaking through,
-add it here — never widen a catch to bare `Exception`.
-
-Note: Pydantic `ValidationError` is intentionally NOT in these tuples. Routes
-that accept JSON-derived structured input handle it explicitly with a 422
-response (see `agent/concept.py`, `agent/pipe_spec.py`).
+Each helper builds an RFC 7807 problem document (`build_problem_document_from_api_error`)
+and raises `ApiError`. The `handle_api_error` handler registered in `api.main`
+renders it as `application/problem+json`. Routes do NOT catch pipelex
+exceptions themselves — anything that is not an API-authored `ApiError`
+propagates to the global handlers. There are no catch tuples here anymore:
+the global `PipelexError` / `Exception` handlers are the single translation
+point for everything the API does not author itself.
 """
 
-from typing import NoReturn
+from typing import Any, NoReturn
 
-from botocore.exceptions import BotoCoreError, ClientError
-from fastapi import HTTPException
-from pipelex import log
-from pipelex.base_exceptions import PipelexError
-from temporalio.exceptions import TemporalError
+from pipelex.base_exceptions import ErrorDomain
 
 from api.error_types import ErrorType
-
-# Exceptions every pipeline / build / agent endpoint can legitimately
-# encounter when calling into the pipelex runtime.
-#
-#   PipelexError    — base class for all pipelex domain errors. Covers
-#                     ValidateBundleError, PipelexInterpreterError, CogtError
-#                     (LLM/inference), PipeExecutionError, PipelineExecutionError,
-#                     PipeNotFoundError, ToolError, etc.
-#   TemporalError   — base class for temporalio errors (RPCError, ApplicationError).
-#                     Raised by `runner.start_pipeline()` when Temporal connectivity
-#                     or workflow dispatch fails. Does NOT inherit from PipelexError.
-#   ValueError      — Pydantic JSON coercion, builder input validation,
-#                     LLMPromptBlueprintValueError (a plain ValueError subclass).
-#   TypeError       — pipe operator factories raise on bad blueprint shapes,
-#                     e.g. ConstructFieldBlueprintTypeError.
-#   RuntimeError    — image generation worker race / state errors in pipelex.
-ENDPOINT_HANDLED_EXCEPTIONS: tuple[type[Exception], ...] = (
-    PipelexError,
-    TemporalError,
-    ValueError,
-    TypeError,
-    RuntimeError,
-)
-
-# Storage backends (local FS, S3) layer additional exception types on top of
-# the pipelex domain. Used by `/upload` and `/resolve-storage-url`.
-#   PipelexError    — pipelex storage providers wrap most backend errors into
-#                     StorageError → ToolError → PipelexError.
-#   OSError         — local-FS provider raises FileNotFoundError, PermissionError,
-#                     ConnectionError, etc., all OSError subclasses.
-#   BotoCoreError /
-#   ClientError     — defensive: should be wrapped by the pipelex S3 provider,
-#                     but listed here so accidental leakage never hits FastAPI's
-#                     default 500.
-STORAGE_HANDLED_EXCEPTIONS: tuple[type[Exception], ...] = (
-    PipelexError,
-    OSError,
-    BotoCoreError,
-    ClientError,
-)
+from api.logging_context import get_request_id, get_route_path
+from api.problem_document import build_problem_document_from_api_error
 
 
-def raise_internal_error(exc: BaseException, context: str) -> NoReturn:
-    """Convert an arbitrary exception into a 500 with a structured detail.
+class ApiError(Exception):
+    """An API-authored error carrying a ready-rendered RFC 7807 problem document.
 
-    Logs the full traceback through the pipelex logger so configured
-    formatting / sinks are honored. Returns only the exception class name and
-    a short, generic message to the client. The caller's `context` is logged
-    but NOT exposed in the response.
+    Raised by the `raise_*` helpers below; rendered by `handle_api_error` in
+    `api.main` as `application/problem+json`. Distinct from a pipelex
+    `PipelexError`: there is no `ErrorReport` behind it — the failure is the
+    API's own request validation, auth, or configuration check. The problem
+    document is built at raise time so the handler only has to serialize it.
     """
-    log.error(f"{context}: {type(exc).__name__}", include_exception=True)
-    raise HTTPException(
-        status_code=500,
-        detail={
-            "error_type": type(exc).__name__,
-            "message": "Internal server error",
-        },
-    ) from exc
+
+    def __init__(self, *, status_code: int, document: dict[str, Any], headers: dict[str, str] | None = None) -> None:
+        self.status_code = status_code
+        self.document = document
+        self.headers: dict[str, str] = headers or {}
+        super().__init__(str(document.get("detail", "")))
+
+
+def _raise_api_error(
+    *,
+    error_type: ErrorType,
+    message: str,
+    status: int,
+    error_domain: ErrorDomain,
+    headers: dict[str, str] | None = None,
+) -> NoReturn:
+    """Build the RFC 7807 document and raise `ApiError`.
+
+    `instance` and `request_id` come from the request-scoped logging
+    contextvars (`api.logging_context`), bound by `RequestIdMiddleware`, so the
+    helpers stay parameter-clean and call sites need no `Request`.
+    """
+    document = build_problem_document_from_api_error(
+        error_type,
+        message,
+        status,
+        instance=get_route_path(),
+        request_id=get_request_id(),
+        error_domain=error_domain,
+    )
+    raise ApiError(status_code=status, document=document, headers=headers)
 
 
 def raise_validation_error(message: str, error_type: ErrorType = ErrorType.VALIDATION_ERROR) -> NoReturn:
-    """Raise a 422 with structured detail."""
-    raise HTTPException(
-        status_code=422,
-        detail={
-            "error_type": error_type,
-            "message": message,
-        },
-    )
+    """Raise a 422 RFC 7807 problem response for invalid caller input."""
+    _raise_api_error(error_type=error_type, message=message, status=422, error_domain=ErrorDomain.INPUT)
 
 
 def raise_bad_request(message: str, error_type: ErrorType = ErrorType.BAD_REQUEST) -> NoReturn:
-    """Raise a 400 with structured detail."""
-    raise HTTPException(
-        status_code=400,
-        detail={
-            "error_type": error_type,
-            "message": message,
-        },
-    )
+    """Raise a 400 RFC 7807 problem response for a malformed request."""
+    _raise_api_error(error_type=error_type, message=message, status=400, error_domain=ErrorDomain.INPUT)
 
 
 def raise_payload_too_large(message: str) -> NoReturn:
-    """Raise a 413 with structured detail."""
-    raise HTTPException(
-        status_code=413,
-        detail={
-            "error_type": ErrorType.PAYLOAD_TOO_LARGE,
-            "message": message,
-        },
+    """Raise a 413 RFC 7807 problem response for an over-limit payload."""
+    _raise_api_error(error_type=ErrorType.PAYLOAD_TOO_LARGE, message=message, status=413, error_domain=ErrorDomain.INPUT)
+
+
+def raise_forbidden(message: str, error_type: ErrorType = ErrorType.FORBIDDEN) -> NoReturn:
+    """Raise a 403 RFC 7807 problem response for an authorization failure."""
+    _raise_api_error(error_type=error_type, message=message, status=403, error_domain=ErrorDomain.INPUT)
+
+
+def raise_unauthenticated(message: str, error_type: ErrorType = ErrorType.UNAUTHENTICATED) -> NoReturn:
+    """Raise a 401 RFC 7807 problem response, with the `WWW-Authenticate: Bearer` challenge.
+
+    RFC 7807 fully supports the challenge header: moving the body to
+    `application/problem+json` does not break an OAuth/JWT client that parses
+    `WWW-Authenticate`.
+    """
+    _raise_api_error(
+        error_type=error_type,
+        message=message,
+        status=401,
+        error_domain=ErrorDomain.INPUT,
+        headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+def raise_internal_server_error(message: str, error_type: ErrorType) -> NoReturn:
+    """Raise a 500 RFC 7807 problem response for an API-owned server fault.
+
+    For the API's own configuration / invariant failures — a missing secret, a
+    storage backend that cannot presign, absent package metadata. NOT for
+    pipelex domain errors, which carry an `ErrorReport` and are handled by the
+    global `PipelexError` handler. Classified `CONFIG` domain: an operator, not
+    the caller, fixes it.
+    """
+    _raise_api_error(error_type=error_type, message=message, status=500, error_domain=ErrorDomain.CONFIG)

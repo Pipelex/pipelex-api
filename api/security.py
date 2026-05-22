@@ -8,7 +8,7 @@ import re
 from typing import Annotated, Any
 
 import jwt
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pipelex import log
 from pipelex.system.environment import get_optional_env
@@ -16,6 +16,7 @@ from pipelex.types import StrEnum
 from pydantic import BaseModel, Field
 
 from api.error_types import ErrorType
+from api.errors import raise_internal_server_error, raise_unauthenticated
 
 # JWT Configuration (only used when AUTH_MODE=jwt)
 JWT_ALGORITHM = "HS256"
@@ -90,10 +91,7 @@ async def verify_jwt(
     jwt_secret = get_optional_env("JWT_SECRET_KEY")
     if not jwt_secret:
         log.error("JWT_SECRET_KEY environment variable is not set")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error_type": ErrorType.SERVER_MISCONFIGURED, "message": "Server configuration error: JWT_SECRET_KEY not configured"},
-        )
+        raise_internal_server_error("Server configuration error: JWT_SECRET_KEY not configured", error_type=ErrorType.SERVER_MISCONFIGURED)
 
     token = credentials.credentials
 
@@ -115,36 +113,20 @@ async def verify_jwt(
         user_id = payload.get("user_id")
         if not user_id:
             log.warning("JWT missing user_id claim")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"error_type": ErrorType.INVALID_TOKEN, "message": "Invalid token: missing user_id claim"},
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+            raise_unauthenticated("Invalid token: missing user_id claim", error_type=ErrorType.INVALID_TOKEN)
         if not isinstance(user_id, str) or not USER_ID_UUID_REGEX.match(user_id):
             log.warning(f"JWT user_id claim is not a UUID: {user_id!r}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"error_type": ErrorType.INVALID_TOKEN, "message": "Invalid token: user_id claim must be a UUID"},
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+            raise_unauthenticated("Invalid token: user_id claim must be a UUID", error_type=ErrorType.INVALID_TOKEN)
         _set_request_user(request, user_id=user_id)
 
         return payload
 
-    except jwt.ExpiredSignatureError as exc:
+    except jwt.ExpiredSignatureError:
         log.warning("JWT token has expired")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error_type": ErrorType.TOKEN_EXPIRED, "message": "Token expired"},
-            headers={"WWW-Authenticate": "Bearer"},
-        ) from exc
+        raise_unauthenticated("Token expired", error_type=ErrorType.TOKEN_EXPIRED)
     except jwt.InvalidTokenError as exc:
         log.warning(f"JWT validation failed: {exc!s}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error_type": ErrorType.INVALID_TOKEN, "message": "Invalid token"},
-            headers={"WWW-Authenticate": "Bearer"},
-        ) from exc
+        raise_unauthenticated("Invalid token", error_type=ErrorType.INVALID_TOKEN)
 
 
 async def verify_api_key(credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)]) -> str:
@@ -156,18 +138,11 @@ async def verify_api_key(credentials: Annotated[HTTPAuthorizationCredentials, De
 
     if not api_key:
         log.error("API_KEY environment variable is not set")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error_type": ErrorType.SERVER_MISCONFIGURED, "message": "Server configuration error: API_KEY not configured"},
-        )
+        raise_internal_server_error("Server configuration error: API_KEY not configured", error_type=ErrorType.SERVER_MISCONFIGURED)
 
     if credentials.credentials != api_key:
         log.warning("API key mismatch")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error_type": ErrorType.INVALID_TOKEN, "message": "Invalid authentication token"},
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise_unauthenticated("Invalid authentication token", error_type=ErrorType.INVALID_TOKEN)
 
     return credentials.credentials
 

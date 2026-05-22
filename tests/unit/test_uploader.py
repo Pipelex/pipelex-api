@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 
+from api.main import register_exception_handlers
 from api.routes.uploader import MAX_UPLOAD_BASE64_CHARS
 from api.routes.uploader import router as uploader_router
 from api.security import RequestUser, get_request_user
@@ -24,6 +25,7 @@ def _build_client(
     """Build a FastAPI TestClient with auth and storage provider mocked. Returns (client, store_mock)."""
     app = FastAPI()
     app.include_router(uploader_router)
+    register_exception_handlers(app)
 
     async def _override_user() -> RequestUser | None:
         return user
@@ -42,21 +44,23 @@ class TestUploadEndpoint:
         client, _ = _build_client(None, mocker)
         response = client.post("/upload", json={"filename": "a.txt", "data": VALID_B64})
         assert response.status_code == 401
-        assert response.json()["detail"]["error_type"] == "Unauthenticated"
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.headers["WWW-Authenticate"] == "Bearer"
+        assert response.json()["error_type"] == "Unauthenticated"
 
     def test_anonymous_user_returns_401(self, mocker: MockerFixture):
         user = RequestUser(user_id="anonymous")
         client, _ = _build_client(user, mocker)
         response = client.post("/upload", json={"filename": "a.txt", "data": VALID_B64})
         assert response.status_code == 401
-        assert response.json()["detail"]["error_type"] == "Unauthenticated"
+        assert response.json()["error_type"] == "Unauthenticated"
 
     def test_invalid_base64_returns_400(self, mocker: MockerFixture):
         user = RequestUser(user_id=USER_A)
         client, _ = _build_client(user, mocker)
         response = client.post("/upload", json={"filename": "a.txt", "data": INVALID_B64})
         assert response.status_code == 400
-        assert response.json()["detail"]["error_type"] == "InvalidBase64"
+        assert response.json()["error_type"] == "InvalidBase64"
 
     def test_oversized_payload_rejected_at_validation(self, mocker: MockerFixture):
         user = RequestUser(user_id=USER_A)

@@ -13,6 +13,7 @@ from mthds.client.pipeline import PipelineState
 from pipelex.pipeline.pipeline_response import PipelexPipelineStartResponse
 from pytest_mock import MockerFixture
 
+from api.main import register_exception_handlers
 from api.routes.pipelex.pipeline import router as pipeline_router
 
 VALID_MTHDS = (
@@ -35,6 +36,7 @@ def _build_client(mocker: MockerFixture) -> tuple[TestClient, Any, Any]:
     """
     app = FastAPI()
     app.include_router(pipeline_router, prefix="/api/v1")
+    register_exception_handlers(app)
 
     fake_execute_response = mocker.MagicMock()
     fake_execute_response.model_dump.return_value = {
@@ -79,7 +81,8 @@ class TestPipelineRoutes:
             headers={"content-type": "application/json"},
         )
         assert response.status_code == 422
-        assert response.json()["detail"]["error_type"] == "InvalidJSON"
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "InvalidJSON"
 
     def test_execute_rejects_invalid_json(self, mocker: MockerFixture):
         client, _, _ = _build_client(mocker)
@@ -89,7 +92,7 @@ class TestPipelineRoutes:
             headers={"content-type": "application/json"},
         )
         assert response.status_code == 422
-        assert response.json()["detail"]["error_type"] == "InvalidJSON"
+        assert response.json()["error_type"] == "InvalidJSON"
 
     def test_start_happy_path(self, mocker: MockerFixture):
         client, _, start_mock = _build_client(mocker)
@@ -125,7 +128,7 @@ class TestPipelineRoutes:
             json={"pipe_code": "echo", "callback_urls": [bad_url]},
         )
         assert response.status_code == 422
-        assert response.json()["detail"]["error_type"] == "InvalidCallbackUrls"
+        assert response.json()["error_type"] == "InvalidCallbackUrls"
         start_mock.assert_not_awaited()
 
     def test_start_rejects_too_many_callbacks(self, mocker: MockerFixture):
