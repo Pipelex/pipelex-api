@@ -8,9 +8,9 @@ This is the implementation plan for the error-handling design captured in `wip/e
 
 ## Status (update at every checkpoint)
 
-- **Current phase:** Phase 1 complete, ready for Phase 2
-- **Last checkpoint reached:** A
-- **Next checkpoint:** Checkpoint B — end of Phase 2
+- **Current phase:** Phase 2 complete, ready for Phase 3
+- **Last checkpoint reached:** B
+- **Next checkpoint:** Checkpoint C — end of Phase 3
 - **Branch:** `feature/Adapt-to-pipelex-update` (error-handling work continues on this branch — prior `feat(error-handling)` commits already live here)
 
 ## Dependency status — pipelex companion work (reconciled 2026-05-22)
@@ -187,33 +187,33 @@ Proposed location: `api/problem_document.py`.
 
 Wire three app-level handlers in `api/main.py`. Each handler consumes the Phase 1 builder and emits a structured log entry. Routes are **not** modified in this phase — that's Phase 3. This separation keeps the diff reviewable.
 
-- [ ] In `api/main.py`, register handlers via `app.add_exception_handler(...)` or the decorator form. Pick one form and use it consistently.
-- [ ] Handler for `pipelex.base_exceptions.PipelexError`:
-    - [ ] Calls `exc.to_error_report()`.
-    - [ ] Calls `build_problem_document(...)` with `instance = request.url.path`, `request_id = request.state.request_id`, `disclosure_mode` from env.
-    - [ ] Builds a `JSONResponse` with `media_type="application/problem+json"`, `status_code = report.http_status`.
-    - [ ] Emits `Retry-After: <int(ceil(retry_after_seconds))>` when `report.provider_metadata` exists and has `retry_after_seconds`.
-    - [ ] Emits the `X-Request-ID` header (the middleware already does it, but the handler must not strip it).
-    - [ ] Emits a structured log entry. Level is `error` by default and `warning` when `report.error_domain == ErrorDomain.INPUT`. See observability fields list in `wip/error-handling/track-observability.md`.
-- [ ] Handler for `temporalio.exceptions.TemporalError`:
-    - [ ] Authors a minimal `ErrorReport`-shaped dict directly (do not invoke `to_error_report`, since `TemporalError` is not a `PipelexError`). Or: build the problem document by hand with `error_type = "TemporalTransportError"`, `error_domain = "runtime"`, `error_category = "transient"`, `retryable = true`, `status = 500`.
-    - [ ] Same response shape, headers, and structured log as the `PipelexError` handler.
-    - [ ] **Open question for this phase:** does pipelex's `WorkflowExecutionError` (a `PipelexError`) take precedence here? It does — the `PipelexError` handler catches it first because it's more specific. Document the answer in the inline comment.
-- [ ] Handler for `Exception` (fallback catch-all):
-    - [ ] Logs at `error` level with the full traceback. Include `error_type = type(exc).__name__` in the log structured fields, but **not** in the response body.
-    - [ ] Returns a fixed sanitized problem document: `type = "https://docs.pipelex.com/latest/errors/internal-server-error/"`, `title = "Internal server error"`, `status = 500`, `detail = "An unexpected error occurred. The request id is included for support."`, `error_type = "InternalServerError"`, `error_domain = "runtime"`, `retryable = false`, `request_id`. This handler is one of the two legitimate `except Exception` locations per project rules; add a one-line comment justifying it.
-- [ ] Wire the log emission. Determine whether the existing `pipelex` `log` object renders structured fields in JSON when configured for a JSON sink, and confirm fields are extractable. If the existing logger does not support structured fields natively, accept a degraded "key=value in the message" rendering for now and file a followup. Do not block this phase on perfect structured logging.
-- [ ] Integration tests in `tests/unit/test_exception_handlers.py` against a small test FastAPI app (or against the real app via `TestClient`):
-    - [ ] `PipelexError` subclass produces a problem+json response with correct fields.
-    - [ ] `EnvVarNotFoundError` → 500, `error_domain = "config"`, `detail` carries the env var name (verbose mode).
-    - [ ] `ERROR_DISCLOSURE=strict` redacts `detail` for `CONFIG` errors, preserves `INPUT`.
-    - [ ] Simulated `LLMCompletionError` with `provider_metadata.retry_after_seconds = 12.0` → 429, `Retry-After: 12` header.
-    - [ ] `Exception` subclass triggers the fallback handler → 500 with `error_type = "InternalServerError"`, response body does NOT include the original exception class name.
-    - [ ] **TemporalError dispatch (T4):** `WorkflowExecutionError` (a `PipelexError` subclass) goes through the `PipelexError` handler, NOT the `TemporalError` handler. A bare `temporalio.exceptions.RPCError` (or another non-`PipelexError` `TemporalError` subclass) goes through the dedicated `TemporalError` handler with the synthetic transport-transient classification.
-    - [ ] **Handler-of-handlers (T3):** monkey-patch a `PipelexError` subclass so `to_error_report()` itself raises; confirm the `Exception` fallback catches it and returns a sanitized 500 — not FastAPI's default bodyless 500. Without this test, a corrupt `to_error_report` silently breaks every error response.
-    - [ ] `X-Request-ID` is present on every response.
-    - [ ] Inbound `X-Request-ID` is echoed (proves the middleware integration).
-- [ ] `make fui && make c && make tp` clean.
+- [x] In `api/main.py`, register handlers via `app.add_exception_handler(...)` or the decorator form. Pick one form and use it consistently. *(Landed: `register_exception_handlers(app)` calls `app.add_exception_handler(...)` for all three — one function shared by the production app and the Phase 2 tests.)*
+- [x] Handler for `pipelex.base_exceptions.PipelexError`:
+    - [x] Calls `exc.to_error_report()`.
+    - [x] Calls `build_problem_document(...)` with `instance = request.url.path`, `request_id = request.state.request_id`, `disclosure_mode` from env. *(`request_id` read via `getattr(request.state, "request_id", None)` so a request that never hit the middleware degrades gracefully; `disclosure_mode` from the `api.main.ERROR_DISCLOSURE_MODE` module global, read at call time.)*
+    - [x] Builds a `JSONResponse` with `media_type="application/problem+json"`, `status_code = report.http_status`.
+    - [x] Emits `Retry-After: <int(ceil(retry_after_seconds))>` when `report.provider_metadata` exists and has `retry_after_seconds`.
+    - [x] Emits the `X-Request-ID` header (the middleware already does it, but the handler must not strip it). *(The handler sets no `X-Request-ID`; `RequestIdMiddleware`'s send wrapper adds it to every response — confirmed on the real app for both the success and 500 paths.)*
+    - [x] Emits a structured log entry. Level is `error` by default and `warning` when `report.error_domain == ErrorDomain.INPUT`. See observability fields list in `wip/error-handling/track-observability.md`.
+- [x] Handler for `temporalio.exceptions.TemporalError`:
+    - [x] Authors an `ErrorReport` directly — `error_type = "TemporalTransportError"`, `error_domain = "runtime"`, `error_category = "transient"`, `retryable = true`, `status = 500` — and funnels it through the same `_problem_response` path as the `PipelexError` handler. *(Built a real `ErrorReport`, not a hand-rolled dict, so render + log are shared code.)*
+    - [x] Same response shape, headers, and structured log as the `PipelexError` handler.
+    - [x] **Open question — resolved:** pipelex's `WorkflowExecutionError` IS a `PipelexError` (via `TemporalFlowError`) and is NOT a `temporalio.TemporalError`, so the more-specific `PipelexError` handler catches it first. Documented in the `handle_pipelex_error` / `handle_temporal_error` docstrings; covered by the T4 test.
+- [x] Handler for `Exception` (fallback catch-all):
+    - [x] Logs at `error` level with the full traceback. Includes `error_type = type(exc).__name__` in the log structured fields, but **not** in the response body.
+    - [x] Returns a fixed sanitized problem document: `type = "https://docs.pipelex.com/latest/errors/internal-server-error/"`, `title = "Internal server error"`, `status = 500`, `detail = "An unexpected error occurred. The request id is included for support."`, `error_type = "InternalServerError"`, `error_domain = "runtime"`, `retryable = false`, `request_id`. One-line comment justifies the `except Exception` equivalent.
+- [x] Wire the log emission. *(The pipelex `log` object renders a single message string, not indexed key/value fields — `_emit_error_log` flattens the field map to a greppable `key=value` run. Degraded-by-design, plan-sanctioned; see the followup note under "What landed".)*
+- [x] Integration tests in `tests/unit/test_exception_handlers.py` — one `TestClass`, a throwaway app carrying the production handlers + `RequestIdMiddleware` so the tests mirror production:
+    - [x] `PipelexError` subclass produces a problem+json response with correct fields.
+    - [x] `EnvVarNotFoundError` → 500, `detail` carries the env var name (verbose mode). *(Reconciliation #1: `EnvVarNotFoundError` is domain-less — the test asserts `error_domain` is **absent**, not `"config"`; `PipelexConfigError` covers a genuine `error_domain = "config"`.)*
+    - [x] `ERROR_DISCLOSURE=strict` redacts `detail` for a non-caller-facing error, preserves a caller-facing one. *(Reconciliation: STRICT keys on the `caller_facing_message` flag, not `error_domain`; the test pairs a `CONFIG` error — redacted — with an `INPUT` caller-facing error — preserved.)*
+    - [x] Simulated `LLMCompletionError` with `provider_metadata.retry_after_seconds = 12.0` → 429, `Retry-After: 12` header.
+    - [x] `Exception` subclass triggers the fallback handler → 500 with `error_type = "InternalServerError"`, response body does NOT include the original exception class name.
+    - [x] **TemporalError dispatch (T4):** `WorkflowExecutionError` (a `PipelexError` subclass) goes through the `PipelexError` handler, NOT the `TemporalError` handler. A non-`PipelexError` `TemporalError` subclass goes through the dedicated `TemporalError` handler with the synthetic transport-transient classification.
+    - [x] **Handler-of-handlers (T3):** a `PipelexError` subclass whose `to_error_report()` itself raises; the `Exception` fallback catches it and returns a sanitized 500 — not FastAPI's default bodyless 500.
+    - [x] `X-Request-ID` is present on every response (parametrized across all error routes).
+    - [x] Inbound `X-Request-ID` is echoed (proves the middleware integration).
+- [x] `make fui && make c && make tp` clean.
 
 ---
 
@@ -235,7 +235,38 @@ Wire three app-level handlers in `api/main.py`. Each handler consumes the Phase 
 
 ### What landed (fill in at Checkpoint B)
 
-_To be filled in by the agent reaching this checkpoint._
+**Files modified:**
+
+- `api/main.py` — added the three global exception handlers, their helpers (`_request_id_of`, `_retry_after_header`, `_emit_error_log`, `_log_error_report`, `_problem_response`), and `register_exception_handlers`; called `register_exception_handlers(fastapi_app)` after router registration. The existing app init, CORS / body-size middleware, and router registration are unchanged.
+
+**Files created:**
+
+- `tests/unit/test_exception_handlers.py` — integration tests over a throwaway app carrying the production handlers + `RequestIdMiddleware`.
+
+**Public API surface added (`api.main`):**
+
+- `PROBLEM_JSON_MEDIA_TYPE` — the `application/problem+json` content-type constant.
+- `handle_pipelex_error`, `handle_temporal_error`, `handle_unexpected_error` — the three handlers (module-level so the tests register them on a test app).
+- `register_exception_handlers(app: FastAPI) -> None` — registers all three; called by `api.main` for the production app and by the Phase 2 tests.
+
+**Behavior:**
+
+- `PipelexError` (incl. `WorkflowExecutionError`) → `to_error_report()` → RFC 7807 `application/problem+json`, status from `report.http_status` (provider-429 passthrough included), `Retry-After` header when the provider supplied a hint, structured log (`warning` for `INPUT` domain, `error` + traceback otherwise).
+- bare `temporalio.TemporalError` → API-authored `ErrorReport` (`TemporalTransportError`, `runtime` / `transient` / retryable) → same render + log path.
+- anything else → sanitized 500 problem document; real class name + traceback go to the log only, never the body.
+
+**Verification:** `make fui` clean; `make c` clean (ruff format + lint, pyright 0 errors, mypy success); `make tp` — 147 passed. Manual real-server check (`uvicorn api.main:app`): `GET /` → 200 with `X-Request-ID`; `POST /api/v1/pipeline/execute` with `{}` → the global fallback fired on the real app — `500 application/problem+json`, sanitized body, `request_id` echoing the `X-Request-ID` header, plus a structured `event=api_error error_type=PipelineRequestError error_category=unknown error_domain=runtime status=500` log line with traceback.
+
+**Checkpoint B step 3 — dual-state confirmed (expected):** the per-route `try / except ENDPOINT_HANDLED_EXCEPTIONS` blocks are still in place, so a `PipelexError` raised *inside* a route's try (e.g. `/pipeline/start` missing `COMPLETION_CALLBACK_SECRET`) is still caught per-route and still returns the old `{"detail": {...}}` shape — confirmed on the real app via the malformed-JSON 422 (`raise_validation_error`, old shape). The new global handlers fire only for failures that escape a per-route catch (e.g. `_parse_request` raising before the route's try — the `{}` case above). Phase 3 deletes the per-route catches; nothing was reordered or hacked.
+
+**Reconciliation findings — read before Phase 3:**
+
+1. **`mthds.client.exceptions.PipelineRequestError` escapes as a generic 500.** `_parse_request` → `PipelineRequest.from_body(...)` raises `PipelineRequestError` (an `mthds` package error, NOT a `PipelexError`) on a malformed/empty body. It is genuinely an `INPUT` error but currently funnels to the `Exception` fallback as a sanitized 500. Phase 3's catch-site audit should catch it in `_parse_request` and call `raise_validation_error(...)` (422) — handle it under the Phase 3 `ValueError`/`TypeError`/`RuntimeError` audit step.
+2. **Structured logging is degraded by design (followup).** The pipelex `log` object renders a single message string, not indexed key/value fields. `_emit_error_log` flattens the field map to a greppable `key=value` run — the plan explicitly sanctioned this ("accept a degraded rendering, file a followup"). **Followup:** when a JSON log sink lands, swap `_emit_error_log`'s string rendering for native structured emission. No API behavior depends on the rendering.
+3. **`disclosure_mode` is a module global, read at call time.** The handlers read `api.main.ERROR_DISCLOSURE_MODE` dynamically (not captured at registration), so a test overrides it with `mocker.patch("api.main.ERROR_DISCLOSURE_MODE", ...)`.
+4. **Per-request-body observability fields deferred.** `user_id` / `pipe_code` / `pipeline_run_id` (observability track "when known") need request-body context the global handler does not have. The structured log carries the report-derived + correlation fields (`event`, `request_id`, `route`, `error_type`, `error_category`, `error_domain`, `retryable`, `status`, `provider`, `model`, `provider_status_code`, `provider_request_id`). Enriching with body-derived fields is a natural Phase 3/5 follow-up.
+
+**Deferred to later phases (as planned):** Phase 3 strips the per-route try/except blocks, deletes the catch tuples + `raise_internal_error`, and migrates the 4xx / inline-`HTTPException` sites to RFC 7807. Phase 4 wires the Temporal webhook recovery.
 
 ### Cold-start prompt template for Phase 3
 
