@@ -8,7 +8,8 @@ from pipelex.system.environment import get_optional_env
 from pipelex.system.runtime import IntegrationMode
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from api.middleware import request_body_size_middleware
+from api.disclosure import resolve_disclosure_mode
+from api.middleware import RequestIdMiddleware, request_body_size_middleware
 from api.routes import router as api_router
 from api.routes.health import router as health_router
 from api.security import get_auth_dependency
@@ -39,10 +40,15 @@ def _resolve_cors_origins() -> tuple[list[str], bool]:
     return origins, True
 
 
-app = FastAPI(redirect_slashes=False, lifespan=lifespan)
+# Resolve and validate ERROR_DISCLOSURE once, at import/startup: an unrecognized
+# value raises here and the app fails to boot rather than silently defaulting.
+# The resolved mode drives how much of an error report reaches a client.
+ERROR_DISCLOSURE_MODE = resolve_disclosure_mode()
+
+fastapi_app = FastAPI(redirect_slashes=False, lifespan=lifespan)
 
 cors_origins, cors_allow_credentials = _resolve_cors_origins()
-app.add_middleware(
+fastapi_app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=cors_allow_credentials,
@@ -50,15 +56,23 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
-app.add_middleware(BaseHTTPMiddleware, dispatch=request_body_size_middleware)
+fastapi_app.add_middleware(BaseHTTPMiddleware, dispatch=request_body_size_middleware)
 
-app.include_router(health_router)
+fastapi_app.include_router(health_router)
 
 # Register all other routes WITH authentication (auto-selects based on AUTH_MODE env var: none/jwt/api_key)
 auth_dependency = get_auth_dependency()
-app.include_router(api_router, prefix="/api/v1", dependencies=[Depends(auth_dependency)])
+fastapi_app.include_router(api_router, prefix="/api/v1", dependencies=[Depends(auth_dependency)])
 
 
-@app.get("/")
+@fastapi_app.get("/")
 async def root() -> dict[str, str]:
     return {"message": "Pipelex API"}
+
+
+# RequestIdMiddleware wraps the *entire* FastAPI app — including Starlette's
+# ServerErrorMiddleware, which `add_middleware` could only ever nest inside.
+# This is what makes it genuinely outermost: the request-id contextvars are
+# bound, and `X-Request-ID` is echoed, on every response — the catch-all 500
+# included. `app` is the ASGI entrypoint (uvicorn loads `api.main:app`).
+app = RequestIdMiddleware(fastapi_app)

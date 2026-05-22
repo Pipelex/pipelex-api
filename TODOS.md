@@ -8,10 +8,10 @@ This is the implementation plan for the error-handling design captured in `wip/e
 
 ## Status (update at every checkpoint)
 
-- **Current phase:** not started
-- **Last checkpoint reached:** none
-- **Next checkpoint:** Checkpoint A — end of Phase 1
-- **Branch:** `feature/Adapt-to-pipelex-update` (current branch; may move to a dedicated branch when starting Phase 0)
+- **Current phase:** Phase 1 complete, ready for Phase 2
+- **Last checkpoint reached:** A
+- **Next checkpoint:** Checkpoint B — end of Phase 2
+- **Branch:** `feature/Adapt-to-pipelex-update` (error-handling work continues on this branch — prior `feat(error-handling)` commits already live here)
 
 ## Dependency status — pipelex companion work (reconciled 2026-05-22)
 
@@ -73,23 +73,25 @@ Before starting Phase 0, do a short reconciliation pass over the inline referenc
 
 Small, focused, sets up everything else. Order within the phase is free; the only invariant is that nothing in Phase 1+ assumes a Phase 0 piece is missing.
 
-- [ ] Add `ERROR_DISCLOSURE` env var plumbing. Two valid values: `verbose` (default) and `strict`. Read once at app startup (or via a lightweight settings module if one exists; otherwise inline in the handler). Reject unknown values with a startup-time error.
-- [ ] **(Defensive only — see the Dependency status block: `report.type_uri` / `report.title` are required, always-populated fields, so this fallback module is not needed for correctness. Keep it as a thin backstop or drop the item.)** Add a `docs.pipelex.com/latest/errors/` fallback namespace constant in a small module (proposed: `api/error_uri.py`). The module consumes `report.type_uri` and `report.title` directly from `ErrorReport` (set by pipelex items **#1** `PipelexError.title()` and **#2** `PipelexError.type_uri()`). Fallback behavior if those fields are ever absent:
+- [x] Add `ERROR_DISCLOSURE` env var plumbing. Two valid values: `verbose` (default) and `strict`. Read once at app startup (or via a lightweight settings module if one exists; otherwise inline in the handler). Reject unknown values with a startup-time error. *(Landed: `api/disclosure.py` — `resolve_disclosure_mode()` returns a `DisclosureMode`, raises `InvalidErrorDisclosureError` on a bad value; `api/main.py` calls it at module/startup into `ERROR_DISCLOSURE_MODE`.)*
+- [x] **(Defensive only — see the Dependency status block: `report.type_uri` / `report.title` are required, always-populated fields, so this fallback module is not needed for correctness. Keep it as a thin backstop or drop the item.)** Add a `docs.pipelex.com/latest/errors/` fallback namespace constant in a small module (proposed: `api/error_uri.py`). The module consumes `report.type_uri` and `report.title` directly from `ErrorReport` (set by pipelex items **#1** `PipelexError.title()` and **#2** `PipelexError.type_uri()`). Fallback behavior if those fields are ever absent:
     - `error_type_uri(error_type: str) -> str` — returns kebab-cased URI under `https://docs.pipelex.com/latest/errors/`. Used when `report.type_uri is None`.
     - `error_type_title(error_type: str) -> str` — returns a deterministic humanized split of the camel case (`EnvVarNotFoundError` → `"Env Var Not Found Error"`). Used when `report.title is None`.
     - Rationale: the fallback exists so the API works against pipelex versions that haven't yet adopted items #1 / #2 on every class. Once full upstream coverage lands, the fallback is rarely exercised but stays as a backstop. **No curated title map API-side** (review amendment A4): curation belongs upstream on the class.
-- [ ] Add a request-id middleware in `api/middleware.py` (sibling of `request_body_size_middleware`):
-    - [ ] Reads `X-Request-ID` from the inbound request if present; otherwise generates a ULID.
-    - [ ] Validates inbound id (length cap, character set) and replaces with a fresh id on invalid input — never trust inbound ids blindly.
-    - [ ] Stores on `request.state.request_id`.
-    - [ ] Echoes `X-Request-ID` on every response (success and error).
-- [ ] Add a logging contextvar (proposed: `api/logging_context.py`) that exposes both `request_id` AND `route_path` (the matched FastAPI route) to loggers AND to the 4xx helpers in Phase 3. Two getters: `get_request_id() -> str | None` and `get_route_path() -> str | None`. The middleware sets both at request entry; the contextvars are read from the global exception handlers, the 4xx helpers, and structured-log sites. **Review amendment Q1:** this avoids threading `Request` through helper signatures in Phase 3 — helpers stay parameter-clean, call-site diff stays tiny.
-- [ ] Register the request-id middleware in `api/main.py`. Confirm ordering relative to CORS and body-size middleware — request-id should run first so all downstream code (and exception handlers) see the id.
-- [ ] Unit tests:
-    - [ ] `tests/unit/test_error_uri.py` — `error_type_uri` kebab-casing and `error_type_title` humanized split for known + unknown class names.
-    - [ ] `tests/unit/test_logging_context.py` — `get_request_id()` and `get_route_path()` return `None` outside a request; return the set values inside.
-    - [ ] `tests/unit/test_request_id_middleware.py` — generates ULID when absent; echoes when present; rejects malformed; sets `request.state.request_id`; sets the contextvars (`request_id` + `route_path`); sets `X-Request-ID` response header.
-- [ ] `make fui && make c && make tp` clean.
+    - *Reconciliation (landed): kept `api/error_uri.py` — not as a pipelex-`None` backstop (those fields are required) but as the genuine source of `type`/`title` for **API-authored** errors in Phase 1's `build_problem_document_from_api_error`, which have no `ErrorReport`. It reuses pipelex's own transforms (`URLs.error_docs_base`, `pascal_case_to_kebab`, `pascal_case_to_sentence`) so output is sentence-case — `"Env var not found error"`, consistent with `PipelexError.title()` — not the Title-Case the example sketched.*
+- [x] Add a request-id middleware in `api/middleware.py` (sibling of `request_body_size_middleware`): *(Landed as `RequestIdMiddleware` — a pure-ASGI middleware, not `BaseHTTPMiddleware`, so its contextvars reach the outermost `ServerErrorMiddleware` where the catch-all 500 handler runs.)*
+    - [x] Reads `X-Request-ID` from the inbound request if present; otherwise generates a ULID.
+    - [x] Validates inbound id (length cap, character set) and replaces with a fresh id on invalid input — never trust inbound ids blindly.
+    - [x] Stores on `request.state.request_id`.
+    - [x] Echoes `X-Request-ID` on every response (success and error).
+- [x] Add a logging contextvar (proposed: `api/logging_context.py`) that exposes both `request_id` AND `route_path` (the matched FastAPI route) to loggers AND to the 4xx helpers in Phase 3. Two getters: `get_request_id() -> str | None` and `get_route_path() -> str | None`. The middleware sets both at request entry; the contextvars are read from the global exception handlers, the 4xx helpers, and structured-log sites. **Review amendment Q1:** this avoids threading `Request` through helper signatures in Phase 3 — helpers stay parameter-clean, call-site diff stays tiny. *(Reconciliation: `route_path` holds the request URL path, set by the middleware at entry. The literal "matched FastAPI route template" is only known after routing — unavailable to a middleware. For this API every route path is static, so URL path == route template; both `instance` and the log `route` field are well served.)*
+- [x] Register the request-id middleware in `api/main.py`. Confirm ordering relative to CORS and body-size middleware — request-id should run first so all downstream code (and exception handlers) see the id. *(Registered last → outermost → runs first.)*
+- [x] Unit tests:
+    - [x] `tests/unit/test_error_uri.py` — `error_type_uri` kebab-casing and `error_type_title` humanized split for known + unknown class names.
+    - [x] `tests/unit/test_logging_context.py` — `get_request_id()` and `get_route_path()` return `None` outside a request; return the set values inside.
+    - [x] `tests/unit/test_request_id_middleware.py` — generates ULID when absent; echoes when present; rejects malformed; sets `request.state.request_id`; sets the contextvars (`request_id` + `route_path`); sets `X-Request-ID` response header.
+    - [x] *(Added) `tests/unit/test_disclosure.py` — `ERROR_DISCLOSURE` defaults to verbose, resolves valid values case-insensitively, rejects unknown values.*
+- [x] `make fui && make c && make tp` clean.
 
 ---
 
@@ -101,29 +103,29 @@ A pure module that turns an `ErrorReport` (and optional context) into a problem+
 
 Proposed location: `api/problem_document.py`.
 
-- [ ] Define the public API:
-    - [ ] `build_problem_document(report: ErrorReport, *, instance: str | None, request_id: str | None, disclosure_mode: Literal["verbose", "strict"]) -> dict[str, Any]`
-    - [ ] `build_problem_document_from_api_error(error_type: ErrorType, message: str, status: int, instance: str | None, request_id: str | None) -> dict[str, Any]` — used by `raise_validation_error` etc. Always treated as `INPUT` domain.
-- [ ] Source the extension-member fields from the report. Switch on `disclosure_mode`:
-    - [ ] `verbose` → `report.to_dict(disclosure_mode=DisclosureMode.VERBOSE)` (the default).
-    - [ ] `strict` → `report.to_dict(disclosure_mode=DisclosureMode.STRICT)` (pipelex item **#4**). Provenance-based redaction lives upstream — the API does not re-implement the rules. (Or, when delegating to `to_problem_document`, pass `disclosure_mode=` straight through.)
-- [ ] Implement the RFC 7807 standard fields per the field-mapping table in `wip/error-handling/track-response-schema.md`:
-    - [ ] `type` from `report.type_uri` (pipelex item #2), falling back to `error_type_uri(report.error_type)` when `None`.
-    - [ ] `title` from `report.title` (pipelex item #1), falling back to `error_type_title(report.error_type)` when `None`.
-    - [ ] `status` from `report.http_status`.
-    - [ ] `detail` from the `message` field of the source dict (`to_dict(disclosure_mode=...)` — strict-mode replacement is already applied upstream).
-    - [ ] `instance` from the caller-supplied route path.
-- [ ] Layer extension members on top (drop `None`-valued fields per `ErrorReport.to_dict()` semantics):
-    - [ ] `error_type`, `error_category`, `error_domain`, `retryable`, `user_action`, `model`, `provider`, `provider_metadata` — all sourced from the disclosure-aware dict.
-    - [ ] `request_id` from the caller-supplied id (distinct from `provider_metadata.request_id`).
-- [ ] Unit tests in `tests/unit/test_problem_document.py`. One `TestClass` per project rules; one test method per scenario:
-    - [ ] Builds a problem document from a synthetic `EnvVarNotFoundError` (`CONFIG` domain).
-    - [ ] Builds a problem document from a synthetic `LLMCompletionError` with `provider_metadata` carrying `retry_after_seconds` (verify all extension members present).
-    - [ ] **Dispatch:** the builder forwards `disclosure_mode` to the pipelex call unchanged — `"verbose"` → `DisclosureMode.VERBOSE`, `"strict"` → `DisclosureMode.STRICT`. Use pytest-mock to assert the right `disclosure_mode` is passed. The redaction rules themselves are pipelex's responsibility (item #4 unit tests cover them upstream); the API only proves it forwards the right mode.
-    - [ ] **Fallback:** when `report.title is None`, the problem document's `title` falls back to `error_type_title(report.error_type)`. Same for `type` URI fallback.
-    - [ ] API-error variant produces a valid problem document with `error_domain = "input"`.
-    - [ ] `None`-valued fields are dropped, not emitted as `null`.
-- [ ] `make fui && make c && make tp` clean.
+- [x] Define the public API: *(Landed in `api/problem_document.py`.)*
+    - [x] `build_problem_document(report: ErrorReport, *, instance: str | None, request_id: str | None, disclosure_mode: Literal["verbose", "strict"]) -> dict[str, Any]` *(Reconciliation: `disclosure_mode` is typed `DisclosureMode` — the pipelex enum — not `Literal["verbose","strict"]`. The caller already holds a `DisclosureMode`; passing the enum straight through avoids a needless string round-trip.)*
+    - [x] `build_problem_document_from_api_error(error_type: ErrorType, message: str, status: int, instance: str | None, request_id: str | None) -> dict[str, Any]` — used by `raise_validation_error` etc. Always treated as `INPUT` domain. *(`instance` / `request_id` are keyword-only.)*
+- [x] Source the extension-member fields from the report. Switch on `disclosure_mode`:
+    - [x] `verbose` → `report.to_dict(disclosure_mode=DisclosureMode.VERBOSE)` (the default).
+    - [x] `strict` → `report.to_dict(disclosure_mode=DisclosureMode.STRICT)` (pipelex item **#4**). Provenance-based redaction lives upstream — the API does not re-implement the rules. *(Done by delegating to `to_problem_document` — `disclosure_mode` is passed straight through.)*
+- [x] Implement the RFC 7807 standard fields per the field-mapping table in `wip/error-handling/track-response-schema.md`: *(For `build_problem_document` these are produced by `report.to_problem_document(...)` upstream — verified by the unit tests. Listed below as the spec of what that produces; `build_problem_document_from_api_error` builds them by hand.)*
+    - [x] `type` from `report.type_uri` (pipelex item #2), falling back to `error_type_uri(report.error_type)` when `None`. *(`type_uri` is a required field — the `None` fallback never fires; `error_type_uri` is instead the primary source for the API-error variant.)*
+    - [x] `title` from `report.title` (pipelex item #1), falling back to `error_type_title(report.error_type)` when `None`. *(Same: `title` is required; `error_type_title` is the API-error variant's source.)*
+    - [x] `status` from `report.http_status`.
+    - [x] `detail` from the `message` field of the source dict (`to_dict(disclosure_mode=...)` — strict-mode replacement is already applied upstream).
+    - [x] `instance` from the caller-supplied route path.
+- [x] Layer extension members on top (drop `None`-valued fields per `ErrorReport.to_dict()` semantics):
+    - [x] `error_type`, `error_category`, `error_domain`, `retryable`, `user_action`, `model`, `provider`, `provider_metadata` — all sourced from the disclosure-aware dict.
+    - [x] `request_id` from the caller-supplied id (distinct from `provider_metadata.request_id`).
+- [x] Unit tests in `tests/unit/test_problem_document.py`. One `TestClass` per project rules; one test method per scenario:
+    - [x] Builds a problem document from a synthetic `EnvVarNotFoundError` (`CONFIG` domain). *(Reconciliation: `EnvVarNotFoundError` is domain-less in this pipelex version — still HTTP 500, but no `error_domain` member. A separate `PipelexConfigError` case covers a genuine `error_domain = "config"`.)*
+    - [x] Builds a problem document from a synthetic `LLMCompletionError` with `provider_metadata` carrying `retry_after_seconds` (verify all extension members present). *(Built as a synthetic `ErrorReport` directly — the builder consumes an `ErrorReport`, not an exception.)*
+    - [x] **Dispatch:** the builder forwards `disclosure_mode` to the pipelex call unchanged. Use pytest-mock to assert the right `disclosure_mode` is passed. The redaction rules themselves are pipelex's responsibility (item #4 unit tests cover them upstream); the API only proves it forwards the right mode.
+    - [x] ~~**Fallback:** when `report.title is None`...~~ *Dropped — `ErrorReport.title` / `type_uri` are required, never-`None` fields, so this branch is unreachable. `error_type_uri` / `error_type_title` are exercised via the API-error variant test and `tests/unit/test_error_uri.py`.*
+    - [x] API-error variant produces a valid problem document with `error_domain = "input"`.
+    - [x] `None`-valued fields are dropped, not emitted as `null`.
+- [x] `make fui && make c && make tp` clean.
 
 ---
 
@@ -139,7 +141,41 @@ Proposed location: `api/problem_document.py`.
 
 ### What landed (fill in at Checkpoint A)
 
-_To be filled in by the agent reaching this checkpoint._
+**Files created:**
+
+- `api/logging_context.py` — request-id / route-path contextvars.
+- `api/disclosure.py` — `ERROR_DISCLOSURE` resolution.
+- `api/error_uri.py` — RFC 7807 `type` / `title` derivation.
+- `api/problem_document.py` — the RFC 7807 builder.
+- `tests/unit/test_logging_context.py`, `test_disclosure.py`, `test_error_uri.py`, `test_request_id_middleware.py`, `test_problem_document.py`.
+
+**Files modified:**
+
+- `api/middleware.py` — added `RequestIdMiddleware` (pure-ASGI), `generate_request_id()`, `REQUEST_ID_HEADER`, inbound-id validation. The existing `request_body_size_middleware` is untouched.
+- `api/main.py` — registered `RequestIdMiddleware` (last → outermost); resolves `ERROR_DISCLOSURE_MODE` at startup.
+
+**Public API surface added:**
+
+- `api.logging_context`: `get_request_id() -> str | None`, `get_route_path() -> str | None`, `bound_request_context(*, request_id, route_path)` context manager.
+- `api.disclosure`: `resolve_disclosure_mode() -> DisclosureMode`, `InvalidErrorDisclosureError`, `ERROR_DISCLOSURE_ENV_VAR`.
+- `api.error_uri`: `error_type_uri(error_type: str) -> str`, `error_type_title(error_type: str) -> str`.
+- `api.middleware`: `RequestIdMiddleware`, `generate_request_id() -> str`, `REQUEST_ID_HEADER`.
+- `api.main`: `ERROR_DISCLOSURE_MODE: DisclosureMode` module constant (startup-resolved; **Phase 2 consumes it** — registered handlers in `api/main.py` read it directly).
+- `api.problem_document`: `build_problem_document(report, *, instance, request_id, disclosure_mode)`, `build_problem_document_from_api_error(error_type, message, status, *, instance, request_id)`.
+
+**Verification:** `make fui` clean; `make c` clean (ruff format + lint, pyright 0 errors, mypy success); `make tp` — 124 passed. Sanity check confirmed: a synthetic `EnvVarNotFoundError` builds an RFC 7807 doc with `type`/`title`/`status:500`/`detail` correct, `detail` carrying the env var name in verbose mode.
+
+**Reconciliation findings — read before Phase 2/3:**
+
+1. **`EnvVarNotFoundError` is domain-less, NOT `CONFIG`.** It is a `ToolError`; neither `ToolError` nor `EnvVarNotFoundError` sets `error_domain`, so its `ErrorReport` has `error_domain = None`. The problem document therefore has **no `error_domain` member** — but `http_status` is still **500** (`error_domain_to_http_status(None) → 500`) and `detail` still names the env var. **Phase 2's test (checklist line: "`EnvVarNotFoundError` → 500, `error_domain = "config"`") and Phase 3's e2e ("`error_domain = "config"`, `detail` names the env var") are wrong against this pipelex version on the `error_domain` part only.** Phase 2/3 should: assert `error_domain` is *absent* for `EnvVarNotFoundError`, and/or use a genuine CONFIG-domain error (`PipelexConfigError` works — verified) to exercise `error_domain = "config"`. A missing env var arguably *should* be `ErrorDomain.CONFIG` upstream — a candidate new item for `wip/error-handling/pipelex-changes.md` (left for the Phase 3 catch-site audit to file).
+2. **`RequestIdMiddleware` is pure-ASGI and wraps the whole FastAPI app.** `api/main.py` does `app = RequestIdMiddleware(fastapi_app)`, **not** `add_middleware`. `add_middleware` would nest it *inside* Starlette's `ServerErrorMiddleware` (always the outermost layer); wrapping the app instead puts it genuinely outermost. So the `request_id` / `route_path` contextvars are bound, and `X-Request-ID` is echoed, on **every** response — including the catch-all 500 that `ServerErrorMiddleware` emits. (The first Phase 0 cut used `add_middleware`; the Checkpoint A code review caught that the catch-all 500 then lost both the header and the contextvars — now fixed.)
+3. **No Phase 2 workaround needed for `X-Request-ID`.** Because of the wrap in note 2, the `Exception` fallback handler (Phase 2) does **not** need to set `X-Request-ID` itself — the middleware's `send` wrapper covers every response, the catch-all 500 included. The handler still reads `request.state.request_id` for the response *body* and structured logs.
+4. **`route_path` contextvar holds the request URL path**, set at middleware entry — the literal "matched FastAPI route template" is unknowable to a middleware (routing happens downstream). Every route path in this API is static, so URL path == route template; both the RFC 7807 `instance` and the observability `route` field are well served.
+5. **`error_uri.py` kept but reframed.** Not the pipelex-`None` backstop the plan sketched — `ErrorReport.title` / `type_uri` are required, never-`None` fields. It is the genuine source of `type` / `title` for the API-authored-error variant (`build_problem_document_from_api_error`), which has no `ErrorReport`. Titles are sentence-case (`"Validation error"`) via pipelex's `pascal_case_to_sentence` transform — but, unlike `PipelexError.title()`, *without* stripping a trailing `Error` (an API `ErrorType` like `ValidationError` must keep the suffix). Not the Title-Case the plan example showed.
+6. **`build_problem_document`'s `disclosure_mode` is typed `DisclosureMode`** (the pipelex enum), not `Literal["verbose","strict"]` — the caller already holds a `DisclosureMode`. The Phase 1 "Fallback (title is None)" test was dropped as unreachable.
+7. **Tooling note:** pyright resolves the editable `pipelex` correctly only when given `--pythonpath` (the `make pyright` target does this) or with `VIRTUAL_ENV` set. A bare `pyright` invocation resolves a stale published `pipelex` and reports false "unknown symbol" errors — always verify types via `make c`.
+
+**Deferred to later phases (as planned):** Phase 2 global exception handlers, Phase 3 route cleanup / 4xx-helper migration / auth migration. `ERROR_DISCLOSURE_MODE` is resolved but not yet consumed — Phase 2 wires it in. The per-route `try/except` blocks are untouched (Phase 3).
 
 ### Cold-start prompt template for Phase 2
 
