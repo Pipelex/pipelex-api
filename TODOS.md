@@ -8,10 +8,43 @@ This is the implementation plan for the error-handling design captured in `wip/e
 
 ## Status (update at every checkpoint)
 
-- **Current phase:** Phase 3 complete, sync path complete, ready for Phase 4
+- **Current phase:** Phase 3 complete, sync path complete — **but see the review questions below before Phase 4**
 - **Last checkpoint reached:** C
 - **Next checkpoint:** Checkpoint D — end of Phase 4
+- **Before anything else:** triage the "Phase 3 review — open questions" section immediately below.
 - **Branch:** `feature/Adapt-to-pipelex-update` (error-handling work continues on this branch — prior `feat(error-handling)` commits already live here)
+
+## ⚠️ Before anything else — Phase 3 review, open questions
+
+A multi-agent code review ran at the end of Phase 3, **while the context window was heavily loaded** — so treat everything here as *leads to verify with fresh eyes*, not as confirmed defects. Some may be real bugs, some may be intended behavior that just needs a comment, some may be wrong. **Do this first, before starting Phase 4:** work through each question, decide one of {fix it / document it as intended / dismiss it as a non-issue}, and record the verdict. Then delete this section (or fold any survivors into a real Phase). All Phase 3 verification (`make c`, `make tp`, `make gha-tests`, manual `make run`) was green — none of these block a running server; they are correctness/contract/observability questions.
+
+Phase 3 commit under review: `7b758f6`. Diff: `git diff HEAD~1` (while it is still `HEAD`).
+
+1. **Did narrowing the `/validate` dry-run catch introduce a regression?** Phase 3 changed the best-effort dry-run block in `api/routes/pipelex/validate.py` from `except ENDPOINT_HANDLED_EXCEPTIONS` (`PipelexError, TemporalError, ValueError, TypeError, RuntimeError`) to `except PipelexError`. Can `dry_run_pipeline` raise a non-`PipelexError` (a `KeyError`/`AttributeError`/`TypeError` — pipelex's `assemble_graph_on_output` reportedly lets those propagate by design)? If yes, a request that used to return 200 (validated bundle, no graph) now 500s. Should this best-effort path catch the wider tuple again?
+
+2. **Should `RequestValidationError` get an RFC 7807 handler?** FastAPI's automatic request-body validation (`extra="forbid"`, `max_length`/`min_length`, missing/mistyped fields on `/upload`, `/resolve-storage-url`, `/validate`, `/build/*`) raises `RequestValidationError`, which still hits FastAPI's default handler → `{"detail": [...]}` / `application/json`, **not** RFC 7807. Is the Phase 5 changelog claim "RFC 7807 across every endpoint" — and the docstring of `tests/unit/test_error_responses.py` — accurate while this is true? Should `register_exception_handlers` also register a `RequestValidationError` handler?
+
+3. **Should the `HTTPBearer` missing-header rejection be migrated?** `api/security.py` uses `security = HTTPBearer()` (default `auto_error=True`). A missing/malformed `Authorization` header makes `HTTPBearer` itself raise a plain `HTTPException` *before* the migrated `verify_jwt`/`verify_api_key` code runs → old `{"detail": ...}` shape. Does the A2 "one auth-error shape" goal require `HTTPBearer(auto_error=False)` + `raise_unauthenticated`?
+
+4. **Should malformed-spec builder errors be 422 instead of 500?** `parse_pipe_spec` (invalid `pipe_type`) and `parse_concept_spec` (non-dict `structure`) reportedly raise bare `ValueError`/`AttributeError`/`TypeError` — not `ValidationError`, not `PipelexError` — so they escape the `except ValidationError` in `agent/concept.py` / `agent/pipe_spec.py` and become an opaque 500. Caller mistakes → should be 422. Catch specifically at the route, or file as a pipelex-wrapping gap? (The Phase 3 catch-site audit was meant to settle this class — was it missed?)
+
+5. **Do pipelex storage providers actually wrap all backend errors?** Phase 3 deleted `STORAGE_HANDLED_EXCEPTIONS` on the assumption (now a code comment) that storage failures surface as a pipelex `StorageError`. A review claims `LocalStorageProvider._store` leaks raw `OSError` (disk-full, permission) and `S3StorageProvider` leaks non-`ClientError` `BotoCoreError` (read/connect timeouts). Verify against the pinned pipelex. If true, the audit step says to file these in `wip/error-handling/pipelex-changes.md` — should new items be added?
+
+6. **Is `build/runner.py`'s library teardown actually guaranteed?** `build_runner` calls `open_library()` / `set_current_library()` *outside* the `try`, so the `finally` is skipped if `set_current_library` raises — yet the Phase 3 docstring claims "the try/finally guarantees the library is torn down on both paths". `build/inputs.py` and `build/output.py` use the safer `library_id: str | None = None` + open-inside-`try` pattern. Should `runner.py` match them, or is the docstring claim simply wrong and the window negligible?
+
+7. **Should API-authored problem documents carry `error_category` / `retryable`?** `build_problem_document_from_api_error` omits both, but pipelex `ErrorReport` documents *and* the catch-all `handle_unexpected_error` 500 include them — so two API 500s have different field sets. A 422 is meaningfully `retryable: false`. Is the `problem_document.py` docstring claim "shape-identical to a pipelex one on the wire" accurate? Should the API documents add `retryable` (and maybe `error_category`) for a uniform contract?
+
+8. **Should API-authored 500s be logged?** `handle_api_error` emits no log line, and `api/routes/version.py`'s `raise_internal_server_error` sites do not log before raising — so a `/pipelex_version` 500 produces *zero* operator log output. (`security.py` / `storage.py` 500 sites still log first.) Should `handle_api_error` emit a structured `event=api_error` line, at least for 5xx?
+
+9. **Is dropping per-route `user_id` / `key` log context acceptable?** The deleted storage `except` blocks logged `user=… key=…` on upload/storage-backend failures; the global handlers log only `route` + `request_id`. Is losing that correlation acceptable, or should the routes / global handler re-add it? (Checkpoint B reconciliation #4 already noted body-derived log fields as a deferred follow-up — is this the same item?)
+
+10. **Should `_decode_body` catch more than `(UnicodeDecodeError, ValueError)`?** `kajson.loads` reconstructs typed objects from `__class__`/`__module__` markers and can raise `ModuleNotFoundError`/`ImportError`/`AttributeError`/`TypeError` on a crafted body → escapes to a 500 instead of a 422. Widen the catch? Separately: is kajson instantiating arbitrary classes from an untrusted request body a security concern worth its own flag? (Pre-existing — not introduced by Phase 3 — but surfaced by the review.)
+
+11. **Is `/validate`'s legacy result envelope intended?** `/validate` still returns `{"success": false, "mthds_contents": …, "message": …}` for its 422 (`ValidateBundleError`) and 400 (no `main_pipe`) — not RFC 7807. Is this a deliberate "validation-result payload" (in which case add a comment saying so), or an endpoint the migration missed?
+
+12. **Are the 422-path tests strong enough?** Several tests (`test_extra_fields_rejected`, `test_uri_too_long_rejected`, the oversized/empty-input tests, `test_api_key_missing_header_rejected`) assert only the status code, so they pass regardless of body shape and give no coverage of the migration on exactly the surfaces in questions 2 and 3. Tighten them (assert `content-type` + `error_type`) once 2/3 are decided?
+
+13. **Is coupling test collection to `api.main` import acceptable?** Nine test modules now do `from api.main import register_exception_handlers`; importing `api.main` runs `resolve_disclosure_mode()` at module load, which raises on a bad `ERROR_DISCLOSURE` env value — crashing collection of all nine at once. Fine as fail-fast, or should `register_exception_handlers` move to a thinner module?
 
 ## Dependency status — pipelex companion work (reconciled 2026-05-22)
 
@@ -395,7 +428,7 @@ The subtraction phase. Risky because it touches every route file; the global han
 
 ### Cold-start prompt template for Phase 4
 
-> Pick up the error-handling implementation. Read `TODOS.md` (the status block, "What landed" under Checkpoint C) and `wip/error-handling/track-temporal-recovery.md`. The synchronous error path is complete; Phase 4 wires `recover_error_report` into the async / webhook-completion path so workflow failures reach callers with the same RFC 7807 shape. Start by mapping where the workflow-completion observer lives (pipelex's `WorkflowExecutor` vs an API-side background worker). Follow the Phase 4 checklist in `TODOS.md`.
+> Pick up the error-handling implementation. Read `TODOS.md` — **first the "⚠️ Before anything else — Phase 3 review, open questions" section near the top: triage every question there (fix / document-as-intended / dismiss) before touching Phase 4** — then the status block, "What landed" under Checkpoint C, and `wip/error-handling/track-temporal-recovery.md`. The synchronous error path is complete; Phase 4 wires `recover_error_report` into the async / webhook-completion path so workflow failures reach callers with the same RFC 7807 shape. Start by mapping where the workflow-completion observer lives (pipelex's `WorkflowExecutor` vs an API-side background worker). Follow the Phase 4 checklist in `TODOS.md`.
 
 ---
 
