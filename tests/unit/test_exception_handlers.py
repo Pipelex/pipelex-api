@@ -9,7 +9,7 @@ import re
 from typing import Any
 
 import pytest
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.testclient import TestClient
 from pipelex.base_exceptions import (
     INTERNAL_ERROR_PLACEHOLDER,
@@ -32,6 +32,7 @@ from api.error_types import ErrorType
 from api.errors import raise_internal_server_error, raise_validation_error
 from api.main import PROBLEM_JSON_MEDIA_TYPE, register_exception_handlers
 from api.middleware import REQUEST_ID_HEADER, RequestIdMiddleware
+from api.security import RequestUser
 
 # Crockford Base32, 26 chars — the ULID alphabet RequestIdMiddleware mints.
 _ULID_RE = re.compile(r"\A[0-9A-HJKMNP-TV-Z]{26}\Z")
@@ -222,6 +223,42 @@ class _RequestValidationBody(BaseModel):
 @_router.post("/needs-body")
 async def needs_body_route(_body: _RequestValidationBody) -> None:
     return None
+
+
+# A canonical user_id for the authenticated test routes — the same UUID shape
+# `api.security.USER_ID_UUID_REGEX` enforces in production, so the routes mirror
+# real auth state rather than a placeholder string.
+_TEST_USER_ID = "00000000-0000-0000-0000-000000000001"
+
+
+def _bind_test_user(request: Request) -> None:
+    """Set `request.state.user` the same shape `api.security._set_request_user` would.
+
+    The throwaway app does not run the real auth dependency — these routes stand
+    in for "auth succeeded" so the error-log enrichment can be exercised
+    without dragging in JWT validation.
+    """
+    request.state.user = RequestUser(user_id=_TEST_USER_ID)
+
+
+@_router.get("/authenticated-config-error")
+async def authenticated_config_error_route(request: Request) -> None:
+    _bind_test_user(request)
+    msg = "the gateway config is missing"
+    raise PipelexConfigError(msg)
+
+
+@_router.get("/authenticated-api-input-error")
+async def authenticated_api_input_error_route(request: Request) -> None:
+    _bind_test_user(request)
+    raise_validation_error("a caller-side mistake")
+
+
+@_router.get("/authenticated-unexpected-error")
+async def authenticated_unexpected_error_route(request: Request) -> None:
+    _bind_test_user(request)
+    msg = "something nobody anticipated"
+    raise RuntimeError(msg)
 
 
 def _build_client(*, raise_server_exceptions: bool = True) -> TestClient:
@@ -429,6 +466,58 @@ class TestExceptionHandlers:
         assert "retryable=False" in rendered
         assert "detail=a caller-side mistake" in rendered
         log_spy.error.assert_not_called()
+
+    def test_user_id_rides_authenticated_pipelex_error_log(self, mocker: MockerFixture):
+        # Phase 3 deleted the per-route `log.error(... user=...)` lines on
+        # storage / pipeline-backend failures; the global handler now reads
+        # `request.state.user` so the operator can still tie a `PipelexError`
+        # to the caller via the structured log alone — no cross-line grep on
+        # `request_id` required.
+        log_spy = mocker.patch("api.main.log")
+        response = _build_client().get("/authenticated-config-error")
+        assert response.status_code == 500
+        log_spy.error.assert_called_once()
+        rendered = log_spy.error.call_args.args[0]
+        assert f"user_id={_TEST_USER_ID}" in rendered
+        assert "error_type=PipelexConfigError" in rendered
+
+    def test_user_id_rides_authenticated_api_authored_log(self, mocker: MockerFixture):
+        # `handle_api_error` covers the API-authored 4xx surface (storage's
+        # `raise_bad_request`, `raise_forbidden`, `raise_payload_too_large`;
+        # uploader's same set). It must ride the same `user_id` correlation
+        # `_log_error_report` does so the contract is uniform — a caller
+        # mistake and a backend failure both name the caller.
+        log_spy = mocker.patch("api.main.log")
+        response = _build_client().get("/authenticated-api-input-error")
+        assert response.status_code == 422
+        log_spy.warning.assert_called_once()
+        rendered = log_spy.warning.call_args.args[0]
+        assert f"user_id={_TEST_USER_ID}" in rendered
+        assert "error_type=ValidationError" in rendered
+
+    def test_user_id_rides_authenticated_unexpected_error_log(self, mocker: MockerFixture):
+        # The catch-all 500 (`handle_unexpected_error`) is the one place a
+        # missing `user_id` is most expensive — by definition the failure
+        # was not classifiable upstream — so the same enrichment fires here.
+        log_spy = mocker.patch("api.main.log")
+        response = _build_client(raise_server_exceptions=False).get("/authenticated-unexpected-error")
+        assert response.status_code == 500
+        log_spy.error.assert_called_once()
+        rendered = log_spy.error.call_args.args[0]
+        assert f"user_id={_TEST_USER_ID}" in rendered
+        assert "error_type=RuntimeError" in rendered
+
+    def test_user_id_absent_from_unauthenticated_error_log(self, mocker: MockerFixture):
+        # Pre-auth or anonymous-AUTH_MODE paths have no `request.state.user`;
+        # `_user_id_of` returns `None` and `_emit_error_log` drops `None`-
+        # valued fields, so the rendered line carries no `user_id=` token —
+        # never `user_id=None`, which would be misleading noise.
+        log_spy = mocker.patch("api.main.log")
+        response = _build_client().get("/config-error")
+        assert response.status_code == 500
+        log_spy.error.assert_called_once()
+        rendered = log_spy.error.call_args.args[0]
+        assert "user_id=" not in rendered
 
     def test_request_validation_error_emits_structured_warning_log(self, mocker: MockerFixture):
         # FastAPI's automatic-validation 422 goes through

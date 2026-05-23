@@ -455,6 +455,41 @@ Note also: the project rule "crashing loudly on an unexpected exception is the d
 
 ---
 
+### 14. `ErrorDomain.is_input` (and siblings) — `@property` helpers for state checks
+
+**Where.** `pipelex/base_exceptions.py` — the `ErrorDomain` `StrEnum`.
+
+**Today.** Callers that need to single out one domain (e.g. "is this caller-input?") test equality:
+
+```python
+is_caller_error = report.error_domain == ErrorDomain.INPUT
+```
+
+**What needs to land.** `@property` helpers on `ErrorDomain` so callers read state through the enum:
+
+```python
+class ErrorDomain(StrEnum):
+    INPUT = "input"
+    CONFIG = "config"
+    RUNTIME = "runtime"
+
+    @property
+    def is_input(self) -> bool:
+        return self is ErrorDomain.INPUT
+
+    # Sibling helpers as needs arise (is_config, is_runtime).
+```
+
+Call sites then read `report.error_domain.is_input` — encapsulated, single source of truth, no enumeration drift across the codebase.
+
+**Why this rather than `match/case` at every call site.** The project's `python-standards.md` says "never test equality to an enum value; use match/case." But it also says: "to avoid heavy match/case code in awkward places, add @property methods to the enum class such as `is_foobar()`." The property pattern is the project's preferred remediation for single-state checks — it centralizes the decision (when a new enum value lands, the property author considers it once) and keeps call sites one-liners. A `match/case` rewrite at every site duplicates the enumeration and forces an exhaustive sweep when any new domain is added.
+
+**Why upstream not API-side.** `ErrorDomain` lives in `pipelex.base_exceptions`; every consumer (pipelex internals, `pipelex-api`, future runners) benefits from the same helper. An API-local `_is_input_domain(domain: ErrorDomain | None) -> bool` would solve `api/main.py:180,229` but leave every other consumer to roll its own.
+
+**Surfaced by.** `pipelex-api` Phase 3 review, question 9 code-review pass (`TODOS.md`). Two existing call sites in `api/main.py` (`_log_error_report` and `_log_api_authored_error`) are the canonical instances; they were left as `== ErrorDomain.INPUT` because the helper does not yet exist upstream. Once #14 lands, those two lines convert to `report.error_domain.is_input` / `error_domain.is_input` in a single follow-up commit.
+
+---
+
 ## What NOT to push upstream
 
 Things that look like they belong in pipelex but actually stay API-side.
@@ -484,5 +519,6 @@ Things that look like they belong in pipelex but actually stay API-side.
 | 11 | `parse_concept_spec` shape-validation of `structure` | 7 | `builder/operations/concept_ops.py` | Not started — discovered in pipelex-api Phase 3 review (Q4) | — |
 | 12 | `LocalStorageProvider` wrap `OSError` as `StorageError` | 7 | `tools/storage/local_storage_provider.py` | Not started — discovered in pipelex-api Phase 3 review (Q5) | — |
 | 13 | `S3StorageProvider` catch full `BotoCoreError` hierarchy | 7 | `tools/storage/s3_storage_provider.py` | Not started — discovered in pipelex-api Phase 3 review (Q5) | — |
+| 14 | `ErrorDomain.is_input` (and siblings) `@property` helpers | 7 | `base_exceptions.py` | Not started — discovered in pipelex-api Phase 3 review (Q9 code review) | — |
 
-Stages 1–4 (#1–#7) are landed — the `pipelex-api` plan is unblocked: Phase 0 consumes #1+#2, Phase 1 consumes #4 (`to_dict(disclosure_mode=)`) and #6 (`to_problem_document`), Phase 4 consumes #5. Only #8 (future, no consumer yet), #9 (webhook signing — separate track), and #10–#13 (post-Phase-3 audit findings, non-blocking) remain.
+Stages 1–4 (#1–#7) are landed — the `pipelex-api` plan is unblocked: Phase 0 consumes #1+#2, Phase 1 consumes #4 (`to_dict(disclosure_mode=)`) and #6 (`to_problem_document`), Phase 4 consumes #5. Only #8 (future, no consumer yet), #9 (webhook signing — separate track), and #10–#14 (post-Phase-3 audit findings, non-blocking) remain.

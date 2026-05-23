@@ -36,7 +36,7 @@ from api.middleware import RequestIdMiddleware, request_body_size_middleware
 from api.problem_document import PROBLEM_JSON_MEDIA_TYPE, build_problem_document, build_problem_document_from_api_error
 from api.routes import router as api_router
 from api.routes.health import router as health_router
-from api.security import get_auth_dependency
+from api.security import RequestUser, get_auth_dependency
 
 
 @asynccontextmanager
@@ -108,6 +108,24 @@ def _request_id_of(request: Request) -> str | None:
     return getattr(request.state, "request_id", None)
 
 
+def _user_id_of(request: Request) -> str | None:
+    """Return the authenticated caller's id, when one is on the request.
+
+    `api.security._set_request_user` stores a `RequestUser` on
+    `request.state.user` after a successful auth check (jwt, or
+    `TRUST_FORWARDED_IDENTITY_HEADERS=true`). The global error-log sites read
+    that here so an operator can tie a failure to a caller without grepping
+    multiple log lines by `request_id` — and without each route having to log
+    `user=<id>` itself before raising (which Phase 3 removed). Returns `None`
+    pre-auth, on the static-API-key surface (no per-caller identity), or for
+    `AUTH_MODE=none` without the forwarded-identity opt-in: `_emit_error_log`
+    drops `None`-valued fields, so the field is absent from the rendered line
+    rather than `user_id=None`.
+    """
+    user: RequestUser | None = getattr(request.state, "user", None)
+    return user.user_id if user is not None else None
+
+
 def _retry_after_header(report: ErrorReport) -> dict[str, str]:
     """Return a `Retry-After` header dict when a retry hint applies to this response.
 
@@ -153,12 +171,18 @@ def _log_error_report(report: ErrorReport, *, request: Request, request_id: str 
     `INPUT`-domain errors are the caller's mistake, not the operator's — they
     log at `warning` without a traceback. Everything else logs at `error` with
     the traceback. The fields mirror the response so the two never drift.
+    `user_id` rides every line when auth bound a caller — without it, the
+    storage / pipeline-backend leg of a failure carries only `request_id` and
+    `route`, and tying the failure to the caller requires correlating the
+    request id across unrelated log lines (Phase 3 deleted the per-route
+    `log.error(... user=...)` lines those failures used to emit).
     """
     is_caller_error = report.error_domain == ErrorDomain.INPUT
     fields: dict[str, Any] = {
         "event": "api_error",
         "request_id": request_id,
         "route": request.url.path,
+        "user_id": _user_id_of(request),
         "error_type": report.error_type,
         "error_category": report.error_category,
         "error_domain": report.error_domain,
@@ -207,6 +231,7 @@ def _log_api_authored_error(*, document: dict[str, Any], status: int, request: R
         "event": "api_error",
         "request_id": request_id,
         "route": request.url.path,
+        "user_id": _user_id_of(request),
         "error_type": document.get("error_type"),
         "error_domain": error_domain,
         "retryable": document.get("retryable"),
@@ -319,6 +344,7 @@ async def handle_unexpected_error(request: Request, exc: Exception) -> Response:
             "event": "api_error",
             "request_id": request_id,
             "route": request.url.path,
+            "user_id": _user_id_of(request),
             "error_type": type(exc).__name__,
             "error_category": "unknown",
             "error_domain": ErrorDomain.RUNTIME,
