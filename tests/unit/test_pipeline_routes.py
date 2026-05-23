@@ -92,6 +92,7 @@ class TestPipelineRoutes:
             headers={"content-type": "application/json"},
         )
         assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "InvalidJSON"
 
     @pytest.mark.parametrize(
@@ -170,6 +171,7 @@ class TestPipelineRoutes:
             json={"pipe_code": "echo", "callback_urls": [bad_url]},
         )
         assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "InvalidCallbackUrls"
         start_mock.assert_not_awaited()
 
@@ -182,5 +184,13 @@ class TestPipelineRoutes:
                 "callback_urls": [f"https://example.com/{idx}" for idx in range(20)],
             },
         )
+        # `callback_urls` exceeds `PipelineApiExtras.max_length`. The route
+        # validates extras explicitly (`_validate_extras`) and re-raises the
+        # resulting Pydantic `ValidationError` via `raise_validation_error`
+        # with the more-specific `InvalidCallbackUrls` error_type — so the
+        # response is RFC 7807 422 / `application/problem+json` but classified
+        # one level finer than the generic FastAPI automatic-validation path.
         assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "InvalidCallbackUrls"
         start_mock.assert_not_awaited()

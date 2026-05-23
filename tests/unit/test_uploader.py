@@ -53,6 +53,8 @@ class TestUploadEndpoint:
         client, _ = _build_client(user, mocker)
         response = client.post("/upload", json={"filename": "a.txt", "data": VALID_B64})
         assert response.status_code == 401
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.headers["WWW-Authenticate"] == "Bearer"
         assert response.json()["error_type"] == "Unauthenticated"
 
     def test_invalid_base64_returns_400(self, mocker: MockerFixture):
@@ -60,6 +62,7 @@ class TestUploadEndpoint:
         client, _ = _build_client(user, mocker)
         response = client.post("/upload", json={"filename": "a.txt", "data": INVALID_B64})
         assert response.status_code == 400
+        assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "InvalidBase64"
 
     def test_oversized_payload_rejected_at_validation(self, mocker: MockerFixture):

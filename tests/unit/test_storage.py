@@ -142,6 +142,9 @@ class TestStorageEndpoint:
         client = _build_client(user, mocker, PRESIGNED_URL)
         response = client.post("/resolve-storage-url", json={"uri": UPLOAD_URI})
         assert response.status_code == 401
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.headers["WWW-Authenticate"] == "Bearer"
+        assert response.json()["error_type"] == "Unauthenticated"
 
     def test_cross_user_returns_403(self, mocker: MockerFixture):
         user = RequestUser(user_id=USER_A)
@@ -160,6 +163,7 @@ class TestStorageEndpoint:
         response = client.post("/resolve-storage-url", json={"uri": f"pipelex-storage://{USER_A}/../secret.pdf"})
 
         assert response.status_code == 400
+        assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "InvalidUri"
 
     def test_signed_urls_disabled_returns_500(self, mocker: MockerFixture):
@@ -180,6 +184,7 @@ class TestStorageEndpoint:
         response = client.post("/resolve-storage-url", json={"uri": UPLOAD_URI})
 
         assert response.status_code == 500
+        assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "PresignFailed"
 
     def test_extra_fields_rejected(self, mocker: MockerFixture):

@@ -80,6 +80,8 @@ class TestSecurityVerifiers:
         token = jwt.encode({"iat": 0}, JWT_SECRET, algorithm="HS256")
         response = client.get(RoutePath.WHOAMI, headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 401
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.headers["WWW-Authenticate"] == "Bearer"
         assert response.json()["error_type"] == "InvalidToken"
 
     @pytest.mark.parametrize(
@@ -107,6 +109,8 @@ class TestSecurityVerifiers:
         token = jwt.encode({"user_id": non_uuid_user_id}, JWT_SECRET, algorithm="HS256")
         response = client.get(RoutePath.WHOAMI, headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 401
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.headers["WWW-Authenticate"] == "Bearer"
         assert response.json()["error_type"] == "InvalidToken"
 
     def test_jwt_invalid_token_rejected(self, mocker: MockerFixture):
@@ -124,6 +128,9 @@ class TestSecurityVerifiers:
         token = jwt.encode({"user_id": USER_ID_UUID}, "different-secret", algorithm="HS256")
         response = client.get(RoutePath.WHOAMI, headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 401
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.headers["WWW-Authenticate"] == "Bearer"
+        assert response.json()["error_type"] == "InvalidToken"
 
     def test_jwt_missing_secret_returns_500(self, mocker: MockerFixture):
         mocker.patch("api.security.get_optional_env", return_value=None)
@@ -131,6 +138,8 @@ class TestSecurityVerifiers:
         token = jwt.encode({"user_id": USER_ID_UUID}, "anything", algorithm="HS256")
         response = client.get(RoutePath.WHOAMI, headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 500
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "ServerMisconfigured"
 
     def test_api_key_happy_path(self, mocker: MockerFixture):
         mocker.patch("api.security.get_optional_env", return_value=API_KEY)
