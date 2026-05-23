@@ -92,3 +92,5 @@ class TestBuildAndAgentRoutes:
         client = _build_client()
         response = client.post(path, json=payload)
         assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "ValidationError"
