@@ -152,7 +152,29 @@ Phase 3 commit under review: `7b758f6`. Diff: `git diff HEAD~1` (while it is sti
 
    `make fui && make c && make tp` clean — 169 passed (no count change; only new assertions on existing tests plus tightened test_none_valued_fields_dropped). `make gha-tests` clean.
 
-8. **Should API-authored 500s be logged?** `handle_api_error` emits no log line, and `api/routes/version.py`'s `raise_internal_server_error` sites do not log before raising — so a `/pipelex_version` 500 produces *zero* operator log output. (`security.py` / `storage.py` 500 sites still log first.) Should `handle_api_error` emit a structured `event=api_error` line, at least for 5xx?
+8. ~~**Should API-authored 500s be logged?**~~ **✅ RESOLVED (2026-05-23) — verdict: fix it. Added `_log_api_authored_error` in `api/main.py` and wired it into both `handle_api_error` and `handle_request_validation_error`; every API-authored response — 4xx caller mistakes *and* 5xx operator faults, whether raised via `raise_*` or FastAPI's automatic-validation path — now emits one structured `event=api_error` log line whose shape mirrors `_log_error_report`. `/pipelex_version`'s 500 went from zero log output to a full structured `error` line with traceback. Landed in this commit.**
+
+   Premise verified empirically against the running app (before the fix): `TestClient(api.main.app).get('/api/v1/pipelex_version')` with `version()` patched to raise `PackageNotFoundError` produced a correct RFC 7807 500 response and **zero** log calls. `handle_api_error` only serialized; the `version.py` route raised without a preceding `log.error`. The same silence applies to any future `raise_internal_server_error` site that follows the existing pattern in `version.py` — and to *every* `raise_validation_error` / `raise_bad_request` / `raise_forbidden` / `raise_unauthenticated` / `raise_payload_too_large` site across the surface, none of which log either. The question's framing — "at least for 5xx" — is the minimum bar; the gap is wider, and the right fix is wider too.
+
+   Why fix all `ApiError` paths, not just 5xx: `_log_error_report` already logs *every* pipelex-derived response — INPUT 4xx at warning, others at error — so the two surfaces (pipelex vs API-authored) drift unless the API side does the same. Logging 4xx at warning is also how operators spot a misbehaving caller (a client spamming a 422 endpoint with malformed bodies) without grepping access logs separately. Cost is one warning per 4xx, which `_log_error_report` already pays for the pipelex 422 path. Why include `handle_request_validation_error` as well: it builds the same RFC 7807 document via `build_problem_document_from_api_error` and renders an identical wire shape — making the operator log shape uniform across both the explicit and the automatic-validation 422 paths is the consistent contract; per question 2's resolution, "RFC 7807 across every endpoint" is also the disclosed contract here.
+
+   Why not also touch the per-route `log.error` / `log.warning` lines in `security.py` and `storage.py`: those carry route-specific context (`user_id`, `key`, `uri_tail`, jwt-library exception text) that the global handler can't have. After this fix they produce a second log line; minor duplication but coherent. Whether to consolidate / propagate that context up is exactly question 9 — left to that resolution.
+
+   Action taken:
+   - `api/main.py`: added `_log_api_authored_error(*, document, status, request, request_id)` mirroring `_log_error_report` field-for-field — `event=api_error`, `request_id`, `route`, `error_type`, `error_domain`, `retryable`, `status`, `detail`. INPUT-domain → `warning` (no traceback); CONFIG (or any non-INPUT) → `error` with `include_exception=True`. `detail` is included because the document is API-authored and never redacted by STRICT mode (only pipelex domain errors are), so the operator-facing cause (`pipelex package metadata is not available`, `Server configuration error: JWT_SECRET_KEY not configured`) is preserved.
+   - `api/main.py`: `handle_api_error` now takes `request: Request` (was `_request`) and calls `_log_api_authored_error` before serializing. `handle_request_validation_error` factored `request_id` and calls `_log_api_authored_error` on the document it builds.
+   - Tests: added three to `tests/unit/test_exception_handlers.py` — `test_api_authored_500_emits_structured_error_log` (CONFIG → `log.error` + `include_exception=True`, full field assertions), `test_api_authored_4xx_emits_structured_warning_log` (INPUT → `log.warning`, no `include_exception`), `test_request_validation_error_emits_structured_warning_log` (FastAPI automatic-validation 422 → same warning shape as an explicit `raise_validation_error`). All three patch `api.main.log` and assert the rendered field string, level, and `include_exception` kwarg. Two throwaway routes added to the existing `_router` (`/api-input-error`, `/api-config-error`) plus a `_RequestValidationBody` schema + `/needs-body` route for the automatic-validation test.
+
+   Sanity check (the canonical case from the question): `TestClient(api.main.app).get('/api/v1/pipelex_version')` with `version()` patched to raise `PackageNotFoundError` now produces exactly one log call:
+
+   ```
+   [error] event=api_error request_id=01K... route=/api/v1/pipelex_version
+     error_type=PackageNotFound error_domain=config retryable=False status=500
+     detail=pipelex package metadata is not available
+     kw={'include_exception': True}
+   ```
+
+   `make fui && make c && make tp` clean — 172 passed (was 169).
 
 9. **Is dropping per-route `user_id` / `key` log context acceptable?** The deleted storage `except` blocks logged `user=… key=…` on upload/storage-backend failures; the global handlers log only `route` + `request_id`. Is losing that correlation acceptable, or should the routes / global handler re-add it? (Checkpoint B reconciliation #4 already noted body-derived log fields as a deferred follow-up — is this the same item?)
 

@@ -22,10 +22,13 @@ from pipelex.cogt.inference.error_classification import ProviderErrorMetadata, U
 from pipelex.cogt.inference.provider_name import ProviderName
 from pipelex.system.environment import EnvVarNotFoundError
 from pipelex.temporal.exceptions import WorkflowExecutionError
+from pydantic import BaseModel
 from pytest_mock import MockerFixture
 from temporalio.exceptions import TemporalError
 from typing_extensions import override
 
+from api.error_types import ErrorType
+from api.errors import raise_internal_server_error, raise_validation_error
 from api.main import PROBLEM_JSON_MEDIA_TYPE, register_exception_handlers
 from api.middleware import REQUEST_ID_HEADER, RequestIdMiddleware
 
@@ -184,6 +187,35 @@ async def crafted_retry_route(report_key: str) -> None:
     raise _CraftedRetryError(report_key)
 
 
+@_router.get("/api-input-error")
+async def api_input_error_route() -> None:
+    # An API-authored 422 — the INPUT-domain branch of `handle_api_error`.
+    raise_validation_error("a caller-side mistake")
+
+
+@_router.get("/api-config-error")
+async def api_config_error_route() -> None:
+    # An API-authored 500 — the CONFIG-domain branch of `handle_api_error`
+    # (the `version.py` `PackageNotFoundError → raise_internal_server_error`
+    # path goes through this same code).
+    raise_internal_server_error("the configuration is broken", error_type=ErrorType.SERVER_MISCONFIGURED)
+
+
+class _RequestValidationBody(BaseModel):
+    """Trivial schema for `test_request_validation_error_emits_structured_warning_log`.
+
+    A missing-field POST against this schema triggers FastAPI's automatic
+    `RequestValidationError`, which is what we want to log-test.
+    """
+
+    field: str
+
+
+@_router.post("/needs-body")
+async def needs_body_route(_body: _RequestValidationBody) -> None:
+    return None
+
+
 def _build_client(*, raise_server_exceptions: bool = True) -> TestClient:
     """Wire a throwaway app with the production handlers and request-id middleware.
 
@@ -336,3 +368,61 @@ class TestExceptionHandlers:
         response = _build_client().get("/config-error", headers={REQUEST_ID_HEADER: "inbound-correlation-007"})
         assert response.headers[REQUEST_ID_HEADER] == "inbound-correlation-007"
         assert response.json()["request_id"] == "inbound-correlation-007"
+
+    def test_api_authored_500_emits_structured_error_log(self, mocker: MockerFixture):
+        # Without `handle_api_error` logging, an `ApiError`-shaped 500 produces
+        # zero operator output (`/pipelex_version`'s `PackageNotFoundError →
+        # raise_internal_server_error` is the canonical silent case). Assert
+        # the handler emits one `event=api_error` line at `error` level with
+        # the response fields — same shape `_log_error_report` emits for a
+        # pipelex-derived 500, so a downstream log sink sees them uniformly.
+        log_spy = mocker.patch("api.main.log")
+        response = _build_client().get("/api-config-error")
+        assert response.status_code == 500
+        log_spy.error.assert_called_once()
+        rendered = log_spy.error.call_args.args[0]
+        assert "event=api_error" in rendered
+        assert "status=500" in rendered
+        assert "error_type=ServerMisconfigured" in rendered
+        assert "error_domain=config" in rendered
+        assert "retryable=False" in rendered
+        assert "route=/api-config-error" in rendered
+        assert "detail=the configuration is broken" in rendered
+        assert log_spy.error.call_args.kwargs == {"include_exception": True}
+        log_spy.warning.assert_not_called()
+
+    def test_api_authored_4xx_emits_structured_warning_log(self, mocker: MockerFixture):
+        # Mirror at the warning level: an INPUT-domain `ApiError` is a caller
+        # mistake, not an operator fault, so it logs at `warning` without a
+        # traceback — same disposition rule `_log_error_report` uses.
+        log_spy = mocker.patch("api.main.log")
+        response = _build_client().get("/api-input-error")
+        assert response.status_code == 422
+        log_spy.warning.assert_called_once()
+        rendered = log_spy.warning.call_args.args[0]
+        assert "event=api_error" in rendered
+        assert "status=422" in rendered
+        assert "error_type=ValidationError" in rendered
+        assert "error_domain=input" in rendered
+        assert "retryable=False" in rendered
+        assert "detail=a caller-side mistake" in rendered
+        log_spy.error.assert_not_called()
+
+    def test_request_validation_error_emits_structured_warning_log(self, mocker: MockerFixture):
+        # FastAPI's automatic-validation 422 goes through
+        # `handle_request_validation_error`, not `handle_api_error`, but emits
+        # the same `event=api_error` warning line so the surface is uniform —
+        # whichever code path rejects a caller-input failure, the operator
+        # log shape is identical.
+        log_spy = mocker.patch("api.main.log")
+        # `{"wrong": 1}` triggers FastAPI's automatic validation failure
+        # (`field` is missing, `wrong` is an extra field).
+        response = _build_client().post("/needs-body", json={"wrong": 1})
+        assert response.status_code == 422
+        log_spy.warning.assert_called_once()
+        rendered = log_spy.warning.call_args.args[0]
+        assert "event=api_error" in rendered
+        assert "status=422" in rendered
+        assert "error_type=ValidationError" in rendered
+        assert "error_domain=input" in rendered
+        log_spy.error.assert_not_called()

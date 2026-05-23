@@ -174,6 +174,39 @@ def _log_error_report(report: ErrorReport, *, request: Request, request_id: str 
     _emit_error_log(fields=fields, as_error=not is_caller_error)
 
 
+def _log_api_authored_error(*, document: dict[str, Any], status: int, request: Request, request_id: str | None) -> None:
+    """Emit the structured log entry for an API-authored error response.
+
+    Mirrors `_log_error_report` field-for-field so every error response — a
+    pipelex `ErrorReport` translated to RFC 7807 *or* an API-authored 4xx/5xx
+    raised by an `api.errors` helper — produces one structured `event=api_error`
+    log line. Without this, an API-owned 500 (a `raise_internal_server_error`
+    site — `version.py`'s missing-package case is the clearest example) would
+    land with zero operator log output, since `handle_api_error` only
+    serializes the response. `INPUT`-domain caller mistakes log at `warning`
+    without a traceback; everything else (a `CONFIG`-domain 500) logs at
+    `error` with the traceback — same disposition rule as `_log_error_report`.
+    The `detail` is included because the document is API-authored and never
+    redacted by strict disclosure mode (only pipelex domain errors are), so
+    the operator-facing cause (`pipelex package metadata is not available`,
+    `Server configuration error: JWT_SECRET_KEY not configured`) is preserved
+    in the log line.
+    """
+    error_domain = document.get("error_domain")
+    is_caller_error = error_domain == ErrorDomain.INPUT
+    fields: dict[str, Any] = {
+        "event": "api_error",
+        "request_id": request_id,
+        "route": request.url.path,
+        "error_type": document.get("error_type"),
+        "error_domain": error_domain,
+        "retryable": document.get("retryable"),
+        "status": status,
+        "detail": document.get("detail"),
+    }
+    _emit_error_log(fields=fields, as_error=not is_caller_error)
+
+
 def _json_safe_report(report: ErrorReport) -> ErrorReport:
     """Return a report whose floats Starlette's JSON encoder can render.
 
@@ -300,18 +333,27 @@ async def handle_unexpected_error(request: Request, exc: Exception) -> Response:
     return JSONResponse(status_code=500, content=document, media_type=PROBLEM_JSON_MEDIA_TYPE)
 
 
-async def handle_api_error(_request: Request, exc: Exception) -> Response:
+async def handle_api_error(request: Request, exc: Exception) -> Response:
     """Render an API-authored `ApiError` as an RFC 7807 problem response.
 
     `ApiError` is raised by the `raise_*` helpers in `api.errors` for the API's
     own 4xx/5xx — request validation, auth, payload limits, misconfiguration.
     The problem document is built at raise time (under the request-scoped
-    logging contextvars); this handler only serializes it and re-attaches any
-    `WWW-Authenticate` challenge header. `exc` is typed `Exception` to match
-    Starlette's handler contract; FastAPI only routes an `ApiError` here, so
-    the cast is sound.
+    logging contextvars); this handler serializes it, re-attaches any
+    `WWW-Authenticate` challenge header, and emits the structured `event=api_error`
+    log line so an API-owned 500 from any route is observable (a
+    `raise_internal_server_error` site like `version.py`'s missing-package case
+    is the canonical example — it has no preceding `log.error` at the call
+    site). `exc` is typed `Exception` to match Starlette's handler contract;
+    FastAPI only routes an `ApiError` here, so the cast is sound.
     """
     api_error = cast("ApiError", exc)
+    _log_api_authored_error(
+        document=api_error.document,
+        status=api_error.status_code,
+        request=request,
+        request_id=_request_id_of(request),
+    )
     return JSONResponse(
         status_code=api_error.status_code,
         content=api_error.document,
@@ -353,14 +395,18 @@ async def handle_request_validation_error(request: Request, exc: Exception) -> R
     is sound.
     """
     validation_error = cast("RequestValidationError", exc)
+    request_id = _request_id_of(request)
     document = build_problem_document_from_api_error(
         ErrorType.VALIDATION_ERROR,
         _summarize_request_validation_error(validation_error),
         422,
         instance=request.url.path,
-        request_id=_request_id_of(request),
+        request_id=request_id,
         error_domain=ErrorDomain.INPUT,
     )
+    # Same `event=api_error` line as an explicit `raise_validation_error`,
+    # so FastAPI's automatic-validation 422s aren't silent in operator logs.
+    _log_api_authored_error(document=document, status=422, request=request, request_id=request_id)
     return JSONResponse(status_code=422, content=document, media_type=PROBLEM_JSON_MEDIA_TYPE)
 
 
