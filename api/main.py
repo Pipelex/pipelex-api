@@ -1,11 +1,14 @@
 """FastAPI app init, middleware, router registration, and global error handlers.
 
-The three app-level exception handlers registered here are the single place
-the API translates a failure into an HTTP response. Every `PipelexError` is
-turned into an RFC 7807 problem document built from its `ErrorReport`; bare
-`temporalio` transport errors get an API-authored classification; everything
-else collapses to a sanitized 500. Routes therefore no longer need to catch
-and shape errors themselves.
+The app-level exception handlers registered here are the single place the API
+translates a failure into an HTTP response, and every one emits the same RFC
+7807 `application/problem+json` shape. An `ApiError` (raised by the `api.errors`
+4xx/5xx helpers) carries a pre-built problem document; a FastAPI
+`RequestValidationError` from automatic request validation is rendered into
+one; every `PipelexError` is turned into a problem document built from its
+`ErrorReport`; bare `temporalio` transport errors get an API-authored
+classification; everything else collapses to a sanitized 500. Routes therefore
+no longer need to catch and shape errors themselves.
 """
 
 import math
@@ -14,6 +17,7 @@ from contextlib import asynccontextmanager
 from typing import Any, cast
 
 from fastapi import Depends, FastAPI, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pipelex import log
@@ -25,10 +29,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from temporalio.exceptions import TemporalError
 
 from api.disclosure import resolve_disclosure_mode
+from api.error_types import ErrorType
 from api.error_uri import error_type_uri
 from api.errors import ApiError
 from api.middleware import RequestIdMiddleware, request_body_size_middleware
-from api.problem_document import PROBLEM_JSON_MEDIA_TYPE, build_problem_document
+from api.problem_document import PROBLEM_JSON_MEDIA_TYPE, build_problem_document, build_problem_document_from_api_error
 from api.routes import router as api_router
 from api.routes.health import router as health_router
 from api.security import get_auth_dependency
@@ -315,17 +320,66 @@ async def handle_api_error(_request: Request, exc: Exception) -> Response:
     )
 
 
+def _summarize_request_validation_error(exc: RequestValidationError) -> str:
+    """Render FastAPI's per-field validation failures as one human-readable string.
+
+    `RequestValidationError.errors()` is a list of per-field dicts; RFC 7807's
+    `detail` is a single human-readable string, so each entry is rendered as
+    `<location>: <message>` and the lot joined. Only `loc` and `msg` are read —
+    both are plain strings / ints — so nothing unserializable from a crafted
+    request body can reach the response.
+    """
+    parts: list[str] = []
+    for error in exc.errors():
+        location = ".".join(str(item) for item in error.get("loc", ()))
+        message = error.get("msg") or "Invalid input"
+        parts.append(f"{location}: {message}" if location else message)
+    return "; ".join(parts) or "Request validation failed"
+
+
+async def handle_request_validation_error(request: Request, exc: Exception) -> Response:
+    """Translate FastAPI's automatic request validation failure into RFC 7807.
+
+    FastAPI raises `RequestValidationError` when a request body, query, or path
+    parameter fails the endpoint's declared Pydantic model — an extra field
+    under `extra="forbid"`, a `min_length` / `max_length` breach, a missing or
+    mistyped field, a `field_validator` raising `ValueError`, malformed JSON. Its
+    built-in handler would answer with a bare `{"detail": [...]}` /
+    `application/json` body; registering this handler overrides that so an
+    endpoint's caller-input rejection is the same `application/problem+json`
+    shape as an explicit `raise_validation_error` — one error contract across
+    every endpoint. `exc` is typed `Exception` to match Starlette's handler
+    contract; FastAPI only routes a `RequestValidationError` here, so the cast
+    is sound.
+    """
+    validation_error = cast("RequestValidationError", exc)
+    document = build_problem_document_from_api_error(
+        ErrorType.VALIDATION_ERROR,
+        _summarize_request_validation_error(validation_error),
+        422,
+        instance=request.url.path,
+        request_id=_request_id_of(request),
+        error_domain=ErrorDomain.INPUT,
+    )
+    return JSONResponse(status_code=422, content=document, media_type=PROBLEM_JSON_MEDIA_TYPE)
+
+
 def register_exception_handlers(app: FastAPI) -> None:
-    """Register the four app-level exception handlers on `app`.
+    """Register the app-level exception handlers on `app`.
 
     Resolution is most-specific-first: an API-authored `ApiError` →
-    `handle_api_error`; a `PipelexError` (including `WorkflowExecutionError`) →
-    `handle_pipelex_error`; a non-pipelex `TemporalError` →
-    `handle_temporal_error`; anything else → `handle_unexpected_error`. Shared
-    by the production app below and by the unit tests, which register the same
-    handlers on a throwaway app.
+    `handle_api_error`; a FastAPI `RequestValidationError` (automatic
+    request-body / parameter validation) → `handle_request_validation_error`; a
+    `PipelexError` (including `WorkflowExecutionError`) → `handle_pipelex_error`;
+    a non-pipelex `TemporalError` → `handle_temporal_error`; anything else →
+    `handle_unexpected_error`. Registering `RequestValidationError` overrides
+    FastAPI's built-in handler so its automatic-validation failures answer in
+    the same `application/problem+json` shape as every other error, not the
+    default `{"detail": [...]}`. Shared by the production app below and by the
+    unit tests, which register the same handlers on a throwaway app.
     """
     app.add_exception_handler(ApiError, handle_api_error)
+    app.add_exception_handler(RequestValidationError, handle_request_validation_error)
     app.add_exception_handler(PipelexError, handle_pipelex_error)
     app.add_exception_handler(TemporalError, handle_temporal_error)
     app.add_exception_handler(Exception, handle_unexpected_error)

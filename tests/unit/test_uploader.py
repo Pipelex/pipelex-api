@@ -68,6 +68,8 @@ class TestUploadEndpoint:
         oversized = "A" * (MAX_UPLOAD_BASE64_CHARS + 1)
         response = client.post("/upload", json={"filename": "big.bin", "data": oversized})
         assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "ValidationError"
         store_mock.assert_not_awaited()
 
     def test_extra_fields_rejected(self, mocker: MockerFixture):
@@ -75,6 +77,8 @@ class TestUploadEndpoint:
         client, _ = _build_client(user, mocker)
         response = client.post("/upload", json={"filename": "a.txt", "data": VALID_B64, "extra": "nope"})
         assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "ValidationError"
 
     def test_happy_path(self, mocker: MockerFixture):
         user = RequestUser(user_id=USER_A)

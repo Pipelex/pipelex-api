@@ -67,6 +67,12 @@ What changes in `api/errors.py`:
 | `ENDPOINT_HANDLED_EXCEPTIONS` | **Removed** |
 | `STORAGE_HANDLED_EXCEPTIONS` | **Removed** |
 
+### FastAPI's automatic request validation (`RequestValidationError`)
+
+The section above covers the *explicit* Pydantic `ValidationError` a route catches when it parses a free-form inner payload (`agent/concept.py`'s `spec` dict). Separately — and not covered by that section — most routes declare a Pydantic model as the request body itself (`ValidateRequest`, `UploadRequest`, `ResolveStorageUrlRequest`, the `build/*` models) and rely on FastAPI's *automatic* validation of it. When that fails — an extra field under `extra="forbid"`, a `min_length` / `max_length` breach, a missing or mistyped field, a `field_validator` raising `ValueError`, malformed JSON — FastAPI raises `RequestValidationError` and dispatches it to its *own* built-in handler before any route code runs, answering `{"detail": [...]}` / `application/json` — a different shape from every other API error.
+
+The design therefore registers an app-level handler for `RequestValidationError` (which overrides FastAPI's default) that renders it through `build_problem_document_from_api_error` — `error_type = "ValidationError"`, `INPUT` domain, 422 — so it is identical on the wire to an explicit `raise_validation_error`. This is what makes the "one `application/problem+json` shape across every endpoint" contract actually hold: without it, the automatic-validation 422 leaks FastAPI's default envelope. The handler's `detail` is a human-readable summary of the per-field failures; no structured per-field member is added, because `raise_validation_error` has none and the two paths must stay shape-identical.
+
 ### Route cleanup
 
 Every route in `api/routes/pipelex/` and `api/routes/storage.py`, `api/routes/uploader.py` currently ends with:

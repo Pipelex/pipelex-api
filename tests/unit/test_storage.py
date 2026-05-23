@@ -189,6 +189,8 @@ class TestStorageEndpoint:
         response = client.post("/resolve-storage-url", json={"uri": UPLOAD_URI, "extra": "nope"})
 
         assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "ValidationError"
 
     def test_uri_too_long_rejected(self, mocker: MockerFixture):
         user = RequestUser(user_id=USER_A)
@@ -198,3 +200,5 @@ class TestStorageEndpoint:
         response = client.post("/resolve-storage-url", json={"uri": long_uri})
 
         assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "ValidationError"

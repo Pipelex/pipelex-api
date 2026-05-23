@@ -1,11 +1,12 @@
 """Phase 3 regression tests — every API error path emits one RFC 7807 shape.
 
-Builds a production-faithful app (the real routers, the four global exception
+Builds a production-faithful app (the real routers, the global exception
 handlers, `RequestIdMiddleware`, the body-size middleware) and asserts that
 4xx/5xx responses across the surface are `application/problem+json` with the
 RFC 7807 fields and an `X-Request-ID` header — never the old
-`{"detail": {...}}` envelope. Covers regression checks T1 (413), T2 (storage
-403) and T5 (`X-Request-ID` on every error response).
+`{"detail": {...}}` envelope, and never FastAPI's default `{"detail": [...]}`
+for automatic request validation. Covers regression checks T1 (413), T2
+(storage 403) and T5 (`X-Request-ID` on every error response).
 """
 
 from importlib.metadata import PackageNotFoundError
@@ -57,6 +58,22 @@ class TestErrorResponses:
         assert body["error_domain"] == "input"
         assert body["instance"] == "/api/v1/models"
         assert body["status"] == 422
+        assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
+
+    def test_request_validation_error_is_rfc7807(self):
+        # FastAPI's automatic body validation (here: mthds_contents below its
+        # min_length) must answer in the same RFC 7807 shape as every other
+        # path — not FastAPI's default {"detail": [...]} / application/json.
+        response = _build_client().post("/api/v1/validate", json={"mthds_contents": []})
+        assert response.status_code == 422
+        assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
+        body = response.json()
+        assert body["error_type"] == "ValidationError"
+        assert body["error_domain"] == "input"
+        assert body["status"] == 422
+        assert body["instance"] == "/api/v1/validate"
+        assert isinstance(body["detail"], str)
+        assert "mthds_contents" in body["detail"]
         assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
 
     def test_bad_request_is_rfc7807(self):

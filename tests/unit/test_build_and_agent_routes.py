@@ -37,6 +37,8 @@ class TestBuildAndAgentRoutes:
             json={"mthds_contents": [oversized]},
         )
         assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "ValidationError"
 
     def test_validate_rejects_too_many_files(self):
         client = _build_client()
@@ -45,6 +47,8 @@ class TestBuildAndAgentRoutes:
             json={"mthds_contents": [VALID_MTHDS] * 32},
         )
         assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "ValidationError"
 
     def test_build_inputs_rejects_oversized_pipe_code(self):
         client = _build_client()
@@ -54,12 +58,16 @@ class TestBuildAndAgentRoutes:
             json={"mthds_contents": [VALID_MTHDS], "pipe_code": long_code},
         )
         assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "ValidationError"
 
     def test_build_concept_rejects_oversized_spec(self):
         client = _build_client()
         big_spec = {"description": "x" * (512 * 1024)}  # 512 KiB > 256 KiB cap
         response = client.post("/api/v1/build/concept", json={"spec": big_spec})
         assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "ValidationError"
 
     def test_models_rejects_invalid_category(self, mocker: MockerFixture):
         client = _build_client()
