@@ -37,3 +37,8 @@ class ErrorType(StrEnum):
 
     # Misc
     PACKAGE_NOT_FOUND = "PackageNotFound"
+    # The `error_type` for the catch-all 500 emitted by `handle_unexpected_error`
+    # (any failure that is neither a `PipelexError`, a `TemporalError`, nor an
+    # `ApiError`). Stays in this enum so the same `build_problem_document_from_api_error`
+    # builder renders it — same shape as every other API-authored 500.
+    INTERNAL_SERVER_ERROR = "InternalServerError"

@@ -294,19 +294,20 @@ async def handle_unexpected_error(request: Request, exc: Exception) -> Response:
         },
         as_error=True,
     )
-    document: dict[str, Any] = {
-        "type": error_type_uri("InternalServerError"),
-        "title": "Internal server error",
-        "status": 500,
-        "detail": "An unexpected error occurred. The request id is included for support.",
-        "instance": request.url.path,
-        "error_type": "InternalServerError",
-        "error_domain": ErrorDomain.RUNTIME,
-        "error_category": "unknown",
-        "retryable": False,
-    }
-    if request_id is not None:
-        document["request_id"] = request_id
+    # Route through the same builder every other API-authored 500 uses, so the
+    # catch-all shape never drifts from `handle_api_error`'s output. The one
+    # catch-all-specific addition is `error_category: "unknown"` — by definition
+    # the failure was not classifiable, and the marker lets a downstream sink
+    # tell a catch-all 500 apart from a classified `CONFIG`-domain one.
+    document = build_problem_document_from_api_error(
+        ErrorType.INTERNAL_SERVER_ERROR,
+        "An unexpected error occurred. The request id is included for support.",
+        500,
+        instance=request.url.path,
+        request_id=request_id,
+        error_domain=ErrorDomain.RUNTIME,
+    )
+    document["error_category"] = "unknown"
     return JSONResponse(status_code=500, content=document, media_type=PROBLEM_JSON_MEDIA_TYPE)
 
 

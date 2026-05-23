@@ -197,7 +197,7 @@ Upstream items filed during the review (in `pipelex-changes.md` Stage 7, none bl
 - **JSON log sink.** The structured-log strings (`event=api_error key=value ...`) are greppable today; swap to native structured emission once a JSON sink lands. Plan-sanctioned followup from Checkpoint B reconciliation #2.
 - **`pipe_code` / `pipeline_run_id` body-derived log fields.** Mechanism is in place (`request.state` + `_*_of` getters in the handler) — wiring deferred. Open piece of Checkpoint B reconciliation #4.
 - **Kajson untrusted-deserialization design pass.** Separate track at `wip/security/kajson-untrusted-deserialization.md`. Realistic attack surface bounded today; needs `pipelex-app` and `pipelex-api-deploy` in the conversation.
-- **`RecursionError` from deeply-nested JSON.** Follow-up to Q10; one-line catch widening or json-stream-validator pre-pass once the contract question lands.
+- **`RecursionError` from deeply-nested JSON.** Follow-up to Q10; one-line catch widening or json-stream-validator pre-pass once the contract question lands. **Discuss:** decide whether to fold `RecursionError` into `_decode_body`'s catch tuple (one-token change, makes the 1000+ deep-nested-array case land as a 422 instead of a sanitized 500) or close it upstream with a stream-pre-pass. Either lands; the question is where the validator lives. Re-surface during Phase 5 cleanup.
 
 ---
 

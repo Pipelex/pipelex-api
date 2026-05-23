@@ -60,6 +60,16 @@ ERROR_DISCLOSURE_MODE = resolve_disclosure_mode()
 
 fastapi_app = FastAPI(redirect_slashes=False, lifespan=lifespan)
 
+# Order matters: Starlette's `add_middleware` PREPENDS (see
+# `user_middleware.insert(0, ...)` in `starlette.applications`), so the LAST
+# `add_middleware` call becomes the OUTERMOST wrapper. Body-size is registered
+# first so CORS ends up wrapping it: a 413 short-circuit from the body-size
+# middleware still passes back through CORSMiddleware on the way out, so a
+# cross-origin browser POST sees the RFC 7807 413 with the
+# `Access-Control-Allow-Origin` header it needs — not a generic CORS error
+# that swallows the response.
+fastapi_app.add_middleware(BaseHTTPMiddleware, dispatch=request_body_size_middleware)
+
 cors_origins, cors_allow_credentials = _resolve_cors_origins()
 fastapi_app.add_middleware(
     CORSMiddleware,
@@ -69,7 +79,6 @@ fastapi_app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
-fastapi_app.add_middleware(BaseHTTPMiddleware, dispatch=request_body_size_middleware)
 
 fastapi_app.include_router(health_router)
 
