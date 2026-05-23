@@ -380,6 +380,81 @@ The fix is upstream shape validation. Either raise a typed `PipelexInputError`-e
 
 ---
 
+### 12. `LocalStorageProvider` should wrap raw `OSError` as a `StorageError`
+
+> **Discovered during `pipelex-api` Phase 3 review (2026-05-23). Not started.**
+
+**Where:** `pipelex/tools/storage/local_storage_provider.py` — `_store` and `_load_with_metadata`.
+
+**What.** Neither method wraps `OSError`. In `_store` (line 102 `file_path.parent.mkdir(parents=True, exist_ok=True)`, lines 104–105 `aiofiles.open(...) / write(...)`), any filesystem failure — `ENOSPC` (disk full), `EACCES` (permission denied), `EROFS` (read-only filesystem), `ENOTDIR` / `FileExistsError` when a path component is a regular file, `EIO` — escapes as raw `OSError`. In `_load_with_metadata` the `file_path.exists()` check at line 70 handles only `FileNotFoundError`; the subsequent `aiofiles.open(...).read()` at lines 74–75 leaks `PermissionError`, `IsADirectoryError`, `EIO`, and the TOCTOU window where the file is deleted between the check and the open.
+
+Empirically verified against the pinned `pipelex==0.29.1` (`../_for_api`):
+
+```
+_store('blocker/foo.txt', …) when blocker/ is a regular file
+  → FileExistsError: [Errno 17] File exists: …/blocker   (leaks)
+
+_load_with_metadata('noread.txt') when the file is 0o000
+  → PermissionError: [Errno 13] Permission denied: …/noread.txt   (leaks)
+```
+
+The fix is a narrow `try/except OSError as exc: raise StorageError(msg) from exc` around the filesystem calls, mirroring the wrapping already done by `S3StorageProvider` / `GcpStorageProvider`. A more specific `StorageLocalError(StorageError)` class would parallel `StorageS3Error` / `StorageGcpError`, but reusing `StorageError` is also fine — every other storage provider's wrapper inherits from it. The two paths should classify separately: load-side `FileNotFoundError` already maps to `StorageFileNotFoundError`, so the wrapping is for the *other* `OSError` subclasses.
+
+**Why.** Same reason as `StorageS3Error` exists: the storage provider abstraction promises a `StorageError` hierarchy to consumers (`api/routes/uploader.py`, `api/routes/storage.py`, and the runner's own bytes-bouncing in `pipe_run/`). Phase 3 deleted `STORAGE_HANDLED_EXCEPTIONS` on this contract; today the API still does the right thing — a leaked `OSError` is caught by the global `Exception` handler and returned as a sanitized 500 — but the `error_type` then reads as `PermissionError` / `FileExistsError`, not `StorageError`, and the structured-log fields lose the storage context. The same leak in a non-API consumer (CLI dogfooding against a local store, a test harness that writes to a read-only mount) gives an even noisier failure.
+
+Two scenarios where this matters in practice: (a) a hosted deployment that mounts a local store as a buffer behind an S3 sync and the volume fills up — today the failure is `ENOSPC` as a 500 with a non-storage error type; (b) a permission-misconfigured deployment (UID/GID skew between container and host volume) where every read fails with `PermissionError` — same problem.
+
+**Surfaced by.** `pipelex-api` Phase 3 review, question 5 (`TODOS.md`).
+
+---
+
+### 13. `S3StorageProvider` should catch the full `BotoCoreError` hierarchy
+
+> **Discovered during `pipelex-api` Phase 3 review (2026-05-23). Not started.**
+
+**Where:** `pipelex/tools/storage/s3_storage_provider.py` — `_load_with_metadata` (lines 119–134), `_store` (lines 167–176), and `public_url` (lines 219–220).
+
+**What.** The provider catches `ClientError`, `NoCredentialsError`, and `EndpointConnectionError`. `ClientError` covers service-side errors (the AWS API returned a structured error); the other two are individual `BotoCoreError` subclasses for two specific transport failures. Every other `BotoCoreError` subclass escapes unwrapped. Verified against `botocore` (the dependency the pinned pipelex actually loads):
+
+```
+BotoCoreError subclasses that escape today:
+  HTTPClientError (and its descendants)
+    ├── ReadTimeoutError          ← transit failures mid-transfer
+    ├── ConnectTimeoutError       ← timeout before TLS handshake
+    └── ConnectionClosedError     ← server closed mid-stream
+  PartialCredentialsError         ← env half-set
+  CredentialRetrievalError        ← IMDS/STS retrieval failed
+  ProxyConnectionError            ← proxy misconfig
+  (… and others)
+
+Note: ClientError is NOT a subclass of BotoCoreError. They are sibling
+exception classes in botocore — verified empirically.
+```
+
+`ReadTimeoutError` is the most likely real-world leak: a slow upload that exceeds the default read timeout, or any transient network blip during a `put_object`. Today it escapes as a `botocore.exceptions.ReadTimeoutError`, hits the API's global `Exception` handler, and emits a sanitized 500 with `error_type = "ReadTimeoutError"` — losing the storage classification.
+
+The fix is to broaden each `except` block from `(NoCredentialsError, EndpointConnectionError)` to `BotoCoreError`, keeping the `ClientError` branch as a separate sibling `except`:
+
+```python
+except ClientError as exc:
+    ...  # already correct
+except BotoCoreError as exc:
+    msg = f"S3 backend error for key '{key}': {type(exc).__name__}"
+    raise StorageS3Error(msg) from exc
+```
+
+The two service-specific branches at the top (`NoSuchKey`, `NoSuchBucket`) stay. `public_url`'s `try/except ClientError → return public URL` fallback should likely widen the same way — a presign that fails with `ReadTimeoutError` today escapes as a 500 from `/resolve-storage-url`, but the existing fallback semantics ("if signing fails, return the public URL") apply equally to a transport failure.
+
+A related, smaller leak: `_get_session()` calls `_check_dependency()` (which raises `MissingDependencyError` — a `ToolError`, not a `StorageError`) and instantiates `aioboto3.Session()`. These run *outside* every method's `try` block. The dependency-missing case is a config error and arguably correct as-is (the `MissingDependencyError` is typed and classifiable), but the session instantiation could surface a `BotoCoreError` from boto's own startup path. Lower priority than the request-time leak above; mention in the fix PR but don't gate on it.
+
+**Why.** Same contract as item #12: the storage abstraction promises `StorageError` to consumers. Phase 3 deleted `STORAGE_HANDLED_EXCEPTIONS` on this promise. A `ReadTimeoutError` on a slow upload bubbling to the API as a non-storage 500 is the most common real-world failure mode (transient AWS networking is normal), and it's exactly the class of failure where classification matters — a `retryable: true` / `error_category: transient` is the right contract, and only a wrapped `StorageS3Error` can deliver it.
+
+Note also: the project rule "crashing loudly on an unexpected exception is the desired behavior; it hides bugs" applies to *programming bugs*, not to *infrastructure-transient failures*. A timeout is a known operational mode of S3, not a bug — it deserves a typed, classified `StorageS3Error`, not a sanitized 500.
+
+**Surfaced by.** `pipelex-api` Phase 3 review, question 5 (`TODOS.md`).
+
+---
+
 ## What NOT to push upstream
 
 Things that look like they belong in pipelex but actually stay API-side.
@@ -407,5 +482,7 @@ Things that look like they belong in pipelex but actually stay API-side.
 | 9 | Webhook signing | 6 | see `_for_api/wip/security/webhook-signing.md` | Open — separate track | — |
 | 10 | `EnvVarNotFoundError` → `error_domain = CONFIG` | 7 | `system/environment.py` | Not started — discovered in pipelex-api Phase 3 audit | — |
 | 11 | `parse_concept_spec` shape-validation of `structure` | 7 | `builder/operations/concept_ops.py` | Not started — discovered in pipelex-api Phase 3 review (Q4) | — |
+| 12 | `LocalStorageProvider` wrap `OSError` as `StorageError` | 7 | `tools/storage/local_storage_provider.py` | Not started — discovered in pipelex-api Phase 3 review (Q5) | — |
+| 13 | `S3StorageProvider` catch full `BotoCoreError` hierarchy | 7 | `tools/storage/s3_storage_provider.py` | Not started — discovered in pipelex-api Phase 3 review (Q5) | — |
 
-Stages 1–4 (#1–#7) are landed — the `pipelex-api` plan is unblocked: Phase 0 consumes #1+#2, Phase 1 consumes #4 (`to_dict(disclosure_mode=)`) and #6 (`to_problem_document`), Phase 4 consumes #5. Only #8 (future, no consumer yet), #9 (webhook signing — separate track), #10 and #11 (post-Phase-3 audit findings, non-blocking) remain.
+Stages 1–4 (#1–#7) are landed — the `pipelex-api` plan is unblocked: Phase 0 consumes #1+#2, Phase 1 consumes #4 (`to_dict(disclosure_mode=)`) and #6 (`to_problem_document`), Phase 4 consumes #5. Only #8 (future, no consumer yet), #9 (webhook signing — separate track), and #10–#13 (post-Phase-3 audit findings, non-blocking) remain.
