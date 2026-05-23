@@ -3,15 +3,16 @@
 These cover failures the API detects at its own boundary — request validation,
 auth, payload-size limits, server misconfiguration — as opposed to pipelex
 domain errors, which carry an `ErrorReport` and are translated by the global
-`PipelexError` handler in `api.main`.
+`PipelexError` handler in `api.exception_handlers`.
 
 Each helper builds an RFC 7807 problem document (`build_problem_document_from_api_error`)
-and raises `ApiError`. The `handle_api_error` handler registered in `api.main`
-renders it as `application/problem+json`. Routes do NOT catch pipelex
-exceptions themselves — anything that is not an API-authored `ApiError`
-propagates to the global handlers. There are no catch tuples here anymore:
-the global `PipelexError` / `Exception` handlers are the single translation
-point for everything the API does not author itself.
+and raises `ApiError`. The `handle_api_error` handler registered in
+`api.exception_handlers` renders it as `application/problem+json`. Routes do
+NOT catch pipelex exceptions themselves — anything that is not an
+API-authored `ApiError` propagates to the global handlers. There are no
+catch tuples here anymore: the global `PipelexError` / `Exception` handlers
+are the single translation point for everything the API does not author
+itself.
 """
 
 from typing import Any, NoReturn
@@ -27,7 +28,7 @@ class ApiError(Exception):
     """An API-authored error carrying a ready-rendered RFC 7807 problem document.
 
     Raised by the `raise_*` helpers below; rendered by `handle_api_error` in
-    `api.main` as `application/problem+json`. Distinct from a pipelex
+    `api.exception_handlers` as `application/problem+json`. Distinct from a pipelex
     `PipelexError`: there is no `ErrorReport` behind it — the failure is the
     API's own request validation, auth, or configuration check. The problem
     document is built at raise time so the handler only has to serialize it.

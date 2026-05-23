@@ -210,7 +210,7 @@ async def execute(request: Request) -> JSONResponse:
     """Execute a pipeline and wait for completion.
 
     Pipelex domain failures propagate untouched: the global `PipelexError`
-    handler in `api.main` turns them into an RFC 7807 problem response.
+    handler in `api.exception_handlers` turns them into an RFC 7807 problem response.
     """
     pipeline_request, _extras = await _parse_request(request)
     runner = ApiRunner(user_id=_get_user_id(request))
@@ -235,7 +235,7 @@ async def start(
     """Start a pipeline execution asynchronously without waiting for completion.
 
     Pipelex domain failures propagate untouched: the global `PipelexError`
-    handler in `api.main` turns them into an RFC 7807 problem response.
+    handler in `api.exception_handlers` turns them into an RFC 7807 problem response.
     """
     pipeline_request, extras = parsed
     runner = ApiRunner(user_id=_get_user_id(request))

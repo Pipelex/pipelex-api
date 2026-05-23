@@ -13,7 +13,7 @@ from mthds.client.pipeline import PipelineState
 from pipelex.pipeline.pipeline_response import PipelexPipelineStartResponse
 from pytest_mock import MockerFixture
 
-from api.main import register_exception_handlers
+from api.exception_handlers import register_exception_handlers
 from api.routes.pipelex.pipeline import router as pipeline_router
 
 VALID_MTHDS = (

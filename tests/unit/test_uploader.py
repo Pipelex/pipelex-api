@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 
-from api.main import register_exception_handlers
+from api.exception_handlers import register_exception_handlers
 from api.routes.uploader import MAX_UPLOAD_BASE64_CHARS
 from api.routes.uploader import router as uploader_router
 from api.security import RequestUser, get_request_user

@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 
-from api.main import register_exception_handlers
+from api.exception_handlers import register_exception_handlers
 from api.routes.storage import (
     expires_at_from_presigned,
     is_presigned,

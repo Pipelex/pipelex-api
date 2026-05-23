@@ -92,7 +92,7 @@ async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
     - **Failure (422):** RFC 7807 `application/problem+json` — same shape as
       every other API endpoint. `ValidateBundleError` is a `PipelexError`
       (`error_domain = INPUT`) so it propagates to the global handler in
-      `api.main` unchanged; "bundle has no `main_pipe`" is an API-side
+      `api.exception_handlers` unchanged; "bundle has no `main_pipe`" is an API-side
       semantic precondition for this endpoint and is raised via
       `raise_validation_error`. The legacy
       `{success: false, mthds_contents, message}` envelope is gone — its 422

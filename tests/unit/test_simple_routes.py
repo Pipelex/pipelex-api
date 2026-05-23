@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from api.main import register_exception_handlers
+from api.exception_handlers import register_exception_handlers
 from api.middleware import request_body_size_middleware
 from api.routes.health import router as health_router
 from api.routes.version import router as version_router

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from pipelex.hub import get_library_manager
 from pytest_mock import MockerFixture
 
-from api.main import register_exception_handlers
+from api.exception_handlers import register_exception_handlers
 from api.routes import router as api_router
 
 VALID_MTHDS = (

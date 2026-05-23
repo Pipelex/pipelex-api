@@ -1,8 +1,9 @@
 """Integration tests for the global FastAPI exception handlers.
 
-The production routes still catch their own exceptions (Phase 3 removes that),
-so these tests register the same three handlers on a throwaway app whose routes
-raise straight through — exercising exactly the path Phase 3 will leave behind.
+These tests register the production handlers on a throwaway FastAPI app whose
+routes raise straight through — `ApiError`, `RequestValidationError`,
+`PipelexError`, bare `TemporalError`, and uncaught `Exception` each end up at
+their respective handler exactly the way the real app routes them.
 """
 
 import re
@@ -30,8 +31,9 @@ from typing_extensions import override
 
 from api.error_types import ErrorType
 from api.errors import raise_internal_server_error, raise_validation_error
-from api.main import PROBLEM_JSON_MEDIA_TYPE, register_exception_handlers
+from api.exception_handlers import register_exception_handlers
 from api.middleware import REQUEST_ID_HEADER, RequestIdMiddleware
+from api.problem_document import PROBLEM_JSON_MEDIA_TYPE
 from api.security import RequestUser
 
 # Crockford Base32, 26 chars — the ULID alphabet RequestIdMiddleware mints.
@@ -261,16 +263,19 @@ async def authenticated_unexpected_error_route(request: Request) -> None:
     raise RuntimeError(msg)
 
 
-def _build_client(*, raise_server_exceptions: bool = True) -> TestClient:
+def _build_client(*, raise_server_exceptions: bool = True, disclosure_mode: DisclosureMode = DisclosureMode.VERBOSE) -> TestClient:
     """Wire a throwaway app with the production handlers and request-id middleware.
 
     `raise_server_exceptions` must be `False` for tests that hit the catch-all
     handler: Starlette's `ServerErrorMiddleware` always re-raises after running
     its handler, so the `TestClient` would otherwise surface the exception
-    instead of the sanitized response.
+    instead of the sanitized response. `disclosure_mode` is the value
+    `register_exception_handlers` captures in the closures it registers for
+    `PipelexError` / `TemporalError`; the default mirrors production
+    (VERBOSE), tests that exercise STRICT redaction pass it explicitly.
     """
     app = FastAPI()
-    register_exception_handlers(app)
+    register_exception_handlers(app, disclosure_mode=disclosure_mode)
     app.include_router(_router)
     return TestClient(RequestIdMiddleware(app), raise_server_exceptions=raise_server_exceptions)
 
@@ -302,12 +307,11 @@ class TestExceptionHandlers:
         assert body["error_type"] == "EnvVarNotFoundError"
         assert "error_domain" not in body
 
-    def test_strict_disclosure_redacts_config_preserves_input(self, mocker: MockerFixture):
-        # The handler forwards the startup-resolved disclosure mode unchanged;
-        # pipelex owns the redaction. STRICT redacts a non-caller-facing message
-        # and keeps a caller-facing one.
-        mocker.patch("api.main.ERROR_DISCLOSURE_MODE", DisclosureMode.STRICT)
-        client = _build_client()
+    def test_strict_disclosure_redacts_config_preserves_input(self):
+        # The handler forwards the disclosure mode it was registered under
+        # unchanged; pipelex owns the redaction. STRICT redacts a
+        # non-caller-facing message and keeps a caller-facing one.
+        client = _build_client(disclosure_mode=DisclosureMode.STRICT)
 
         config_response = client.get("/config-error")
         assert config_response.status_code == 500
@@ -435,7 +439,7 @@ class TestExceptionHandlers:
         # the handler emits one `event=api_error` line at `error` level with
         # the response fields — same shape `_log_error_report` emits for a
         # pipelex-derived 500, so a downstream log sink sees them uniformly.
-        log_spy = mocker.patch("api.main.log")
+        log_spy = mocker.patch("api.exception_handlers.log")
         response = _build_client().get("/api-config-error")
         assert response.status_code == 500
         log_spy.error.assert_called_once()
@@ -454,7 +458,7 @@ class TestExceptionHandlers:
         # Mirror at the warning level: an INPUT-domain `ApiError` is a caller
         # mistake, not an operator fault, so it logs at `warning` without a
         # traceback — same disposition rule `_log_error_report` uses.
-        log_spy = mocker.patch("api.main.log")
+        log_spy = mocker.patch("api.exception_handlers.log")
         response = _build_client().get("/api-input-error")
         assert response.status_code == 422
         log_spy.warning.assert_called_once()
@@ -473,7 +477,7 @@ class TestExceptionHandlers:
         # `request.state.user` so the operator can still tie a `PipelexError`
         # to the caller via the structured log alone — no cross-line grep on
         # `request_id` required.
-        log_spy = mocker.patch("api.main.log")
+        log_spy = mocker.patch("api.exception_handlers.log")
         response = _build_client().get("/authenticated-config-error")
         assert response.status_code == 500
         log_spy.error.assert_called_once()
@@ -487,7 +491,7 @@ class TestExceptionHandlers:
         # uploader's same set). It must ride the same `user_id` correlation
         # `_log_error_report` does so the contract is uniform — a caller
         # mistake and a backend failure both name the caller.
-        log_spy = mocker.patch("api.main.log")
+        log_spy = mocker.patch("api.exception_handlers.log")
         response = _build_client().get("/authenticated-api-input-error")
         assert response.status_code == 422
         log_spy.warning.assert_called_once()
@@ -499,7 +503,7 @@ class TestExceptionHandlers:
         # The catch-all 500 (`handle_unexpected_error`) is the one place a
         # missing `user_id` is most expensive — by definition the failure
         # was not classifiable upstream — so the same enrichment fires here.
-        log_spy = mocker.patch("api.main.log")
+        log_spy = mocker.patch("api.exception_handlers.log")
         response = _build_client(raise_server_exceptions=False).get("/authenticated-unexpected-error")
         assert response.status_code == 500
         log_spy.error.assert_called_once()
@@ -512,7 +516,7 @@ class TestExceptionHandlers:
         # `_user_id_of` returns `None` and `_emit_error_log` drops `None`-
         # valued fields, so the rendered line carries no `user_id=` token —
         # never `user_id=None`, which would be misleading noise.
-        log_spy = mocker.patch("api.main.log")
+        log_spy = mocker.patch("api.exception_handlers.log")
         response = _build_client().get("/config-error")
         assert response.status_code == 500
         log_spy.error.assert_called_once()
@@ -525,7 +529,7 @@ class TestExceptionHandlers:
         # the same `event=api_error` warning line so the surface is uniform —
         # whichever code path rejects a caller-input failure, the operator
         # log shape is identical.
-        log_spy = mocker.patch("api.main.log")
+        log_spy = mocker.patch("api.exception_handlers.log")
         # `{"wrong": 1}` triggers FastAPI's automatic validation failure on
         # `_RequestValidationBody`: `field` is missing AND `wrong` is an
         # extra key (the body uses `extra="forbid"`, so the extra-key path

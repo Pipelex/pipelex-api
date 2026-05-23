@@ -42,7 +42,7 @@ async def build_runner(request_data: BuildRunnerRequest) -> JSONResponse:
     """Generate Python runner code for a pipe from MTHDS content.
 
     Pipelex domain failures propagate untouched: the global `PipelexError`
-    handler in `api.main` turns them into an RFC 7807 problem response. The
+    handler in `api.exception_handlers` turns them into an RFC 7807 problem response. The
     `try`/`finally` guarantees the library is torn down on every path that
     actually opened one — `library_id` stays `None` until `open_library`
     returns, so a failure before that point is a no-op for teardown rather

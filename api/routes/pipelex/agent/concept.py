@@ -37,7 +37,7 @@ async def build_concept(request_data: BuildConceptRequest) -> BuildConceptRespon
 
     A malformed spec surfaces as a Pydantic `ValidationError` — an API-owned
     422. Pipelex domain failures propagate untouched to the global
-    `PipelexError` handler in `api.main`.
+    `PipelexError` handler in `api.exception_handlers`.
 
     Known gap (tracked as `pipelex-changes.md` item #11): a non-dict `structure`
     (`{"structure": "string"}`) or a `structure` field that is neither a string

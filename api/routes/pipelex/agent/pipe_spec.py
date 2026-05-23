@@ -42,7 +42,7 @@ async def build_pipe_spec(request_data: BuildPipeSpecRequest) -> BuildPipeSpecRe
     `ValueError` from `parse_pipe_spec` when `pipe_type` is not one of the
     known pipe types (documented in `parse_pipe_spec`'s docstring; raised at
     exactly one site). Pipelex domain failures propagate untouched to the
-    global `PipelexError` handler in `api.main`.
+    global `PipelexError` handler in `api.exception_handlers`.
     """
     try:
         pipe_spec = parse_pipe_spec(request_data.pipe_type, request_data.spec)

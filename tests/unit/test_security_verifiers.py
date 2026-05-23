@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 
-from api.main import register_exception_handlers
+from api.exception_handlers import register_exception_handlers
 from api.security import RequestUser, get_request_user, verify_api_key, verify_jwt
 from tests.unit._constants import RoutePath
 
