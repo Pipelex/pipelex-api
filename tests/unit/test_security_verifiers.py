@@ -156,11 +156,49 @@ class TestSecurityVerifiers:
         assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "ServerMisconfigured"
 
-    @pytest.mark.parametrize("missing_header", [True, False])
-    def test_api_key_missing_header_rejected(self, mocker: MockerFixture, missing_header: bool):
+    @pytest.mark.parametrize(
+        "authorization",
+        [
+            None,  # header absent
+            "",  # header present but empty
+            "Bearer",  # bare scheme, no token
+            "Basic dXNlcjpwYXNz",  # wrong scheme entirely
+        ],
+    )
+    def test_api_key_missing_or_malformed_header_rejected(self, mocker: MockerFixture, authorization: str | None):
+        """Missing / empty / non-Bearer Authorization → RFC 7807 401, not the old shape.
+
+        `HTTPBearer(auto_error=False)` means none of these branches go through
+        FastAPI's default `HTTPException` handler (which would emit
+        `application/json` `{"detail": "Not authenticated"}`). Instead
+        `verify_api_key` sees `credentials is None` and calls
+        `raise_unauthenticated(...)` — same problem document as every other 401.
+        """
         mocker.patch("api.security.get_optional_env", return_value=API_KEY)
         client = _build_api_key_client()
-        headers: dict[str, str] = {} if missing_header else {"Authorization": ""}
+        headers: dict[str, str] = {} if authorization is None else {"Authorization": authorization}
         response = client.get(RoutePath.PING, headers=headers)
-        # Missing or empty Authorization header → HTTPBearer dependency rejects with 403/401.
-        assert response.status_code in {401, 403}
+        assert response.status_code == 401
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.headers["WWW-Authenticate"] == "Bearer"
+        assert response.json()["error_type"] == "Unauthenticated"
+
+    @pytest.mark.parametrize(
+        "authorization",
+        [
+            None,
+            "",
+            "Bearer",
+            "Basic dXNlcjpwYXNz",
+        ],
+    )
+    def test_jwt_missing_or_malformed_header_rejected(self, mocker: MockerFixture, authorization: str | None):
+        """JWT counterpart of the API-key case: same RFC 7807 401 shape."""
+        mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
+        client = _build_jwt_client()
+        headers: dict[str, str] = {} if authorization is None else {"Authorization": authorization}
+        response = client.get(RoutePath.WHOAMI, headers=headers)
+        assert response.status_code == 401
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.headers["WWW-Authenticate"] == "Bearer"
+        assert response.json()["error_type"] == "Unauthenticated"

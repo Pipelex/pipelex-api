@@ -31,7 +31,14 @@ JWT_ALGORITHM = "HS256"
 # resulting URIs for the same caller.
 USER_ID_UUID_REGEX = re.compile(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")
 
-security = HTTPBearer()
+# `auto_error=False` so a missing/empty/non-Bearer `Authorization` header
+# does NOT raise FastAPI's default `HTTPException` (which would emit
+# `application/json` `{"detail": "Not authenticated"}` — the old, pre-RFC-7807
+# shape) before our verifiers run. With `auto_error=False`, `HTTPBearer`
+# returns `None` in that case, and the verifiers below raise
+# `raise_unauthenticated(...)` so the response is the same RFC 7807
+# `application/problem+json` document as every other 401 on the surface.
+security = HTTPBearer(auto_error=False)
 
 
 class AuthMode(StrEnum):
@@ -85,9 +92,17 @@ def get_auth_mode() -> AuthMode:
 
 async def verify_jwt(
     request: Request,
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
 ) -> dict[str, Any]:
     """Validate JWT token from Authorization header using JWT_SECRET_KEY."""
+    if credentials is None:
+        # Missing, empty, or non-Bearer `Authorization` header. `HTTPBearer`
+        # is configured with `auto_error=False` so this branch (rather than
+        # FastAPI's default `HTTPException`) shapes the response — same RFC
+        # 7807 `application/problem+json` as every other 401.
+        log.warning("JWT auth requested without a Bearer token")
+        raise_unauthenticated("Missing or malformed Authorization header")
+
     jwt_secret = get_optional_env("JWT_SECRET_KEY")
     if not jwt_secret:
         log.error("JWT_SECRET_KEY environment variable is not set")
@@ -129,11 +144,18 @@ async def verify_jwt(
         raise_unauthenticated("Invalid token", error_type=ErrorType.INVALID_TOKEN)
 
 
-async def verify_api_key(credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)]) -> str:
+async def verify_api_key(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)]) -> str:
     """Validate static API key from Authorization header against API_KEY env var.
 
     No user identity is available with static API keys — this is a shared developer key.
     """
+    if credentials is None:
+        # Missing, empty, or non-Bearer `Authorization` header. See the
+        # matching branch in `verify_jwt` for why this lives here and not
+        # in `HTTPBearer`'s default `auto_error=True` behavior.
+        log.warning("API key auth requested without a Bearer token")
+        raise_unauthenticated("Missing or malformed Authorization header")
+
     api_key = get_optional_env("API_KEY")
 
     if not api_key:
