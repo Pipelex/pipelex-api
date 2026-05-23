@@ -68,7 +68,35 @@ Phase 3 commit under review: `7b758f6`. Diff: `git diff HEAD~1` (while it is sti
 
    `make fui && make c && make tp` clean — 167 passed (was 161). This also discharges the remaining open piece of question 12 (`test_api_key_missing_header_rejected` was the last status-only auth-path 422/401 test still in the file; both auth surfaces are now tightened).
 
-4. **Should malformed-spec builder errors be 422 instead of 500?** `parse_pipe_spec` (invalid `pipe_type`) and `parse_concept_spec` (non-dict `structure`) reportedly raise bare `ValueError`/`AttributeError`/`TypeError` — not `ValidationError`, not `PipelexError` — so they escape the `except ValidationError` in `agent/concept.py` / `agent/pipe_spec.py` and become an opaque 500. Caller mistakes → should be 422. Catch specifically at the route, or file as a pipelex-wrapping gap? (The Phase 3 catch-site audit was meant to settle this class — was it missed?)
+4. ~~**Should malformed-spec builder errors be 422 instead of 500?**~~ `parse_pipe_spec` (invalid `pipe_type`) and `parse_concept_spec` (non-dict `structure`) reportedly raise bare `ValueError`/`AttributeError`/`TypeError` — not `ValidationError`, not `PipelexError` — so they escape the `except ValidationError` in `agent/concept.py` / `agent/pipe_spec.py` and become an opaque 500. Caller mistakes → should be 422. Catch specifically at the route, or file as a pipelex-wrapping gap? (The Phase 3 catch-site audit was meant to settle this class — was it missed?)
+
+   **✅ RESOLVED (2026-05-23) — verdict: fix it. Hybrid: catch `ValueError` at `/build/pipe-spec` (documented, narrow); file `parse_concept_spec`'s shape leak as upstream pipelex item #11 (undocumented, raised types match real-bug signatures — unsafe to broadly catch at the route). The Phase 3 catch-site audit *did* miss this class: it narrowed existing `except` blocks but did not enumerate the other exception types `parse_pipe_spec`/`parse_concept_spec` could raise. Landed in this commit.**
+
+   Premise fully verified against the pinned pipelex (`pipelex==0.29.1`, `../_for_api`):
+
+   ```python
+   parse_pipe_spec("NotARealPipeType", {})                   # ValueError: Invalid pipe type 'NotARealPipeType'. Must be one of: [...]
+   parse_concept_spec({"structure": "not_a_dict"})           # AttributeError: 'str' object has no attribute 'items'
+   parse_concept_spec({"structure": {"my_field": 42}})       # TypeError: 'int' object is not iterable
+   parse_concept_spec({"structure": {"my_field": [1, 2]}})   # TypeError: cannot convert dictionary update sequence...
+   ```
+
+   All four escape the routes' `except ValidationError` and land in `handle_unexpected_error` → opaque 500 (`{"error_type": "InternalServerError", "detail": "An unexpected error occurred..."}`) — confirmed empirically via TestClient. The `ValueError` traceback is reproduced verbatim through `parse_pipe_spec → builder/operations/pipe_ops.py:83 → handle_unexpected_error → main.py:275`.
+
+   Why the two legs split — per the Phase 3 audit's own decision rule ("If pipelex should wrap it but doesn't → file upstream; if the API boundary itself raises it → catch the specific exception and call `raise_validation_error`"):
+
+   - **`parse_pipe_spec`'s `ValueError` → catch at route.** Documented in `parse_pipe_spec`'s docstring as a caller-input error. Raised at exactly one site (`pipe_ops.py:83`, the unknown-`pipe_type` branch). The route already had `except ValidationError`; adding `ValueError` widens that catch by exactly one well-defined documented exception. This is the canonical "API boundary catches the specific documented exception" case.
+   - **`parse_concept_spec`'s `AttributeError`/`TypeError` → file upstream.** Undocumented (the docstring declares only `ValidationError`). Symptoms of `parse_concept_spec` iterating raw JSON without shape-validating it first — a genuine pipelex shape-validation gap. **Catching `AttributeError`/`TypeError` at the route is unsafe**: those are the exact same types a real programming bug elsewhere in pipelex would raise, and a broad route catch would mask both. Per the project rule "crashing loudly on an unexpected exception is the desired behavior; it hides bugs", we deliberately leave the opaque 500 until the upstream fix lands.
+
+   Why fix, not document-as-intended: Phase 5's changelog commits to "RFC 7807 across **every** API endpoint" and the design intent is that caller mistakes always classify as 422 — same precedent as Q2 and Q3.
+
+   Action taken:
+   - `api/routes/pipelex/agent/pipe_spec.py`: widened the `except` from `ValidationError` to `(ValidationError, ValueError)`, both routed through `raise_validation_error`. Updated the route docstring so both 422 paths are named (Pydantic schema mismatch + unknown `pipe_type`).
+   - `api/routes/pipelex/agent/concept.py`: route unchanged. Added a docstring "Known gap" paragraph documenting the leak and pointing to `pipelex-changes.md` item #11, with the rationale for *not* catching `AttributeError`/`TypeError` here.
+   - `wip/error-handling/pipelex-changes.md`: filed item #11 in Stage 7 — `parse_concept_spec` should validate `structure` shape before iterating. Tracking table updated.
+   - Tests: added `test_build_pipe_spec_rejects_unknown_pipe_type` to `tests/unit/test_build_and_agent_routes.py` — asserts 422, `application/problem+json`, `error_type == "ValidationError"`, and that `detail` carries the invalid type name (verifies the documented error message is propagated, not lost). No test added for the concept leak — it documents a known-bad behavior the API isn't authoring; a test there belongs in the PR that lands the upstream fix.
+
+   `make fui && make c && make tp` clean — 168 passed (was 167).
 
 5. **Do pipelex storage providers actually wrap all backend errors?** Phase 3 deleted `STORAGE_HANDLED_EXCEPTIONS` on the assumption (now a code comment) that storage failures surface as a pipelex `StorageError`. A review claims `LocalStorageProvider._store` leaks raw `OSError` (disk-full, permission) and `S3StorageProvider` leaks non-`ClientError` `BotoCoreError` (read/connect timeouts). Verify against the pinned pipelex. If true, the audit step says to file these in `wip/error-handling/pipelex-changes.md` — should new items be added?
 

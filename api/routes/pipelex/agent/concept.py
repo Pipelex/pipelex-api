@@ -38,6 +38,15 @@ async def build_concept(request_data: BuildConceptRequest) -> BuildConceptRespon
     A malformed spec surfaces as a Pydantic `ValidationError` — an API-owned
     422. Pipelex domain failures propagate untouched to the global
     `PipelexError` handler in `api.main`.
+
+    Known gap (tracked as `pipelex-changes.md` item #11): a non-dict `structure`
+    (`{"structure": "string"}`) or a `structure` field that is neither a string
+    nor a dict (`{"structure": {"f": 42}}`) makes `parse_concept_spec` leak a
+    bare `AttributeError`/`TypeError` instead of a typed error, so the request
+    surfaces as an opaque 500. We deliberately don't catch those here — they
+    are also the signal of a real pipelex programming bug, and a broad route
+    catch would mask both. The fix is upstream shape validation in
+    `parse_concept_spec`.
     """
     try:
         concept_spec = parse_concept_spec(request_data.spec)

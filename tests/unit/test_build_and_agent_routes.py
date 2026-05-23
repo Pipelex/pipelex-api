@@ -69,6 +69,22 @@ class TestBuildAndAgentRoutes:
         assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "ValidationError"
 
+    def test_build_pipe_spec_rejects_unknown_pipe_type(self):
+        # `parse_pipe_spec` raises a bare `ValueError` for an unknown pipe_type
+        # (documented in its docstring). The route must classify that as a
+        # caller-input 422 — not let it escape as an opaque 500 through the
+        # global `Exception` fallback. Regression for `TODOS.md` Q4.
+        client = _build_client()
+        response = client.post(
+            "/api/v1/build/pipe-spec",
+            json={"pipe_type": "NotARealPipeType", "spec": {"pipe_code": "x", "description": "d", "output": "Text"}},
+        )
+        assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
+        body = response.json()
+        assert body["error_type"] == "ValidationError"
+        assert "NotARealPipeType" in body["detail"]
+
     def test_models_rejects_invalid_category(self, mocker: MockerFixture):
         client = _build_client()
         # Patch list_models so we don't depend on real Pipelex setup if the

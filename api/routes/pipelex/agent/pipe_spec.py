@@ -37,9 +37,12 @@ class BuildPipeSpecResponse(BaseModel):
 async def build_pipe_spec(request_data: BuildPipeSpecRequest) -> BuildPipeSpecResponse:
     """Convert a JSON pipe spec to TOML format.
 
-    A malformed spec surfaces as a Pydantic `ValidationError` — an API-owned
-    422. Pipelex domain failures propagate untouched to the global
-    `PipelexError` handler in `api.main`.
+    Two caller-mistake paths surface as a 422 here: a `ValidationError` from
+    Pydantic when the spec shape doesn't match the chosen pipe type, and a
+    `ValueError` from `parse_pipe_spec` when `pipe_type` is not one of the
+    known pipe types (documented in `parse_pipe_spec`'s docstring; raised at
+    exactly one site). Pipelex domain failures propagate untouched to the
+    global `PipelexError` handler in `api.main`.
     """
     try:
         pipe_spec = parse_pipe_spec(request_data.pipe_type, request_data.spec)
@@ -51,5 +54,5 @@ async def build_pipe_spec(request_data: BuildPipeSpecRequest) -> BuildPipeSpecRe
             pipe_type=request_data.pipe_type,
             toml=toml_content,
         )
-    except ValidationError as exc:
+    except (ValidationError, ValueError) as exc:
         raise_validation_error(message=str(exc))

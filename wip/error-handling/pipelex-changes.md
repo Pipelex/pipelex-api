@@ -356,6 +356,30 @@ Items surfaced *after* the main companion work landed, during the `pipelex-api` 
 
 ---
 
+### 11. `parse_concept_spec` should validate `structure` shape before iterating
+
+> **Discovered during `pipelex-api` Phase 3 review (2026-05-23). Not started.**
+
+**Where:** `pipelex/builder/operations/concept_ops.py` — the `parse_concept_spec(...)` function (and, by parallel, any other `parse_*_spec` that iterates raw JSON before handing to Pydantic).
+
+**What.** `parse_concept_spec` reads `spec_data["structure"]` and iterates it (`structure_data.items()`, then `dict(field_data)`) before calling `ConceptSpec.model_validate(...)`. When `structure` is a non-dict (e.g. `"a string"`) or a structure field is neither a string nor a dict (e.g. an int or list), the iteration raises a bare `AttributeError`/`TypeError` that escapes the function — undocumented in the docstring (which only declares `ValidationError`). Reproduced against the pinned pipelex (`pipelex==0.29.1`, `../_for_api`):
+
+```python
+parse_concept_spec({"structure": "not_a_dict"})           # AttributeError: 'str' object has no attribute 'items'
+parse_concept_spec({"structure": {"my_field": 42}})       # TypeError: 'int' object is not iterable
+parse_concept_spec({"structure": {"my_field": [1, 2]}})   # TypeError: cannot convert dictionary update sequence...
+```
+
+The fix is upstream shape validation. Either raise a typed `PipelexInputError`-equivalent that the API renders as a 422 via the global `PipelexError` handler, or `raise pydantic.ValidationError`-via-`ValueError` from a thin `model_validate(...)` over the raw input shape before the iteration. The function's own docstring should then list every exception it actually raises.
+
+`parse_pipe_spec` already documents its bare `ValueError` (invalid `pipe_type`); that one is narrow enough to catch at the API route (and is, post-fix). The `parse_concept_spec` leak is *undocumented* and the raised types (`AttributeError`/`TypeError`) are the same types a real programming bug would produce — the API cannot safely catch them at the route without masking genuine bugs.
+
+**Why.** Same reason as item #10: pipelex owns the error model, the API consumes it. Caller-input errors should be typed at the call site, not deduced from the exception class three frames up. RFC 7807 wants a 422 for "this is malformed input"; we can't classify it correctly if the function leaks `AttributeError`. Two consumers (the API route here, and the MTHDS build agent that calls `parse_concept_spec` more directly) both benefit from a typed contract.
+
+**Surfaced by.** `pipelex-api` Phase 3 review, question 4 (`TODOS.md`).
+
+---
+
 ## What NOT to push upstream
 
 Things that look like they belong in pipelex but actually stay API-side.
@@ -382,5 +406,6 @@ Things that look like they belong in pipelex but actually stay API-side.
 | 8 | `query_pipeline_state(...)` | 5 | `temporal/tprl/workflow_caller.py` (new) | Not started — future-facing, no consumer yet | — |
 | 9 | Webhook signing | 6 | see `_for_api/wip/security/webhook-signing.md` | Open — separate track | — |
 | 10 | `EnvVarNotFoundError` → `error_domain = CONFIG` | 7 | `system/environment.py` | Not started — discovered in pipelex-api Phase 3 audit | — |
+| 11 | `parse_concept_spec` shape-validation of `structure` | 7 | `builder/operations/concept_ops.py` | Not started — discovered in pipelex-api Phase 3 review (Q4) | — |
 
-Stages 1–4 (#1–#7) are landed — the `pipelex-api` plan is unblocked: Phase 0 consumes #1+#2, Phase 1 consumes #4 (`to_dict(disclosure_mode=)`) and #6 (`to_problem_document`), Phase 4 consumes #5. Only #8 (future, no consumer yet), #9 (webhook signing — separate track) and #10 (post-Phase-3 audit finding, non-blocking) remain.
+Stages 1–4 (#1–#7) are landed — the `pipelex-api` plan is unblocked: Phase 0 consumes #1+#2, Phase 1 consumes #4 (`to_dict(disclosure_mode=)`) and #6 (`to_problem_document`), Phase 4 consumes #5. Only #8 (future, no consumer yet), #9 (webhook signing — separate track), #10 and #11 (post-Phase-3 audit findings, non-blocking) remain.
