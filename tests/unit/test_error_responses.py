@@ -59,6 +59,8 @@ class TestErrorResponses:
         assert body["instance"] == "/api/v1/models"
         assert body["status"] == 422
         assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
+        # API-authored caller-input errors are non-retryable across the surface.
+        assert body["retryable"] is False
 
     def test_request_validation_error_is_rfc7807(self):
         # FastAPI's automatic body validation (here: mthds_contents below its
@@ -75,6 +77,7 @@ class TestErrorResponses:
         assert isinstance(body["detail"], str)
         assert "mthds_contents" in body["detail"]
         assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
+        assert body["retryable"] is False
 
     def test_bad_request_is_rfc7807(self):
         # A malformed storage URI → raise_bad_request → 400.
@@ -86,6 +89,7 @@ class TestErrorResponses:
         assert body["error_type"] == "InvalidUri"
         assert body["error_domain"] == "input"
         assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
+        assert body["retryable"] is False
 
     def test_storage_ownership_mismatch_is_rfc7807(self):
         # REGRESSION T2: a cross-user storage URI → raise_forbidden → 403.
@@ -98,6 +102,7 @@ class TestErrorResponses:
         assert body["error_type"] == "Forbidden"
         assert body["status"] == 403
         assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
+        assert body["retryable"] is False
 
     def test_payload_too_large_is_rfc7807(self):
         # REGRESSION T1: a body over the cap → 413 via the body-size middleware.
@@ -112,6 +117,7 @@ class TestErrorResponses:
         assert body["error_domain"] == "input"
         assert body["status"] == 413
         assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
+        assert body["retryable"] is False
 
     def test_internal_server_error_is_rfc7807_config_domain(self, mocker: MockerFixture):
         # Absent package metadata → raise_internal_server_error → 500 CONFIG.
@@ -124,6 +130,10 @@ class TestErrorResponses:
         assert body["error_domain"] == "config"
         assert body["status"] == 500
         assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
+        # An API-owned 5xx is non-retryable: the operator, not the caller,
+        # fixes a missing package; the symmetry with the 4xx paths is the
+        # uniform retry contract clients can rely on.
+        assert body["retryable"] is False
 
     def test_unauthenticated_carries_www_authenticate_challenge(self):
         # An unauthenticated upload → raise_unauthenticated → 401 + challenge.
@@ -134,6 +144,7 @@ class TestErrorResponses:
         body = response.json()
         assert body["error_type"] == "Unauthenticated"
         assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
+        assert body["retryable"] is False
 
     def test_inbound_request_id_is_echoed_into_error_body(self):
         # A caller-supplied X-Request-ID rides through to the response body.

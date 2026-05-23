@@ -57,6 +57,7 @@ def build_problem_document_from_api_error(
     instance: str | None,
     request_id: str | None,
     error_domain: ErrorDomain | None = ErrorDomain.INPUT,
+    retryable: bool = False,
 ) -> dict[str, Any]:
     """Build an RFC 7807 problem document for an API-authored error.
 
@@ -64,13 +65,37 @@ def build_problem_document_from_api_error(
     request validation, auth, or configuration checks rather than a pipelex
     domain error — there is no `ErrorReport` to delegate to. The `type` URI and
     `title` are derived from the static `ErrorType` enum the same way pipelex
-    derives them for its own classes, so an API-authored error is
-    shape-identical to a pipelex one on the wire.
+    derives them for its own classes, so the standard RFC 7807 slots and the
+    `error_type` / `error_domain` members line up with what a pipelex error
+    renders.
+
+    Extension-member parity with a pipelex `ErrorReport` is by-field, not
+    wholesale, with two distinct rules:
+
+    - `retryable` is emitted unconditionally here (every API-authored error is
+      non-retryable; see below). pipelex emits it only when the source error
+      populated it, so a non-inference pipelex report (`PipelexConfigError`,
+      `EnvVarNotFoundError`) renders with no `retryable`. Asymmetric by design:
+      the API knows the answer for every error it authors, and clients can
+      drive retry logic uniformly without branching on field presence.
+    - Classification fields pipelex sets only on classifiable failures
+      (`error_category`, `user_action`, `model`, `provider`, `provider_metadata`)
+      are NOT manufactured here. The same omission rule pipelex applies to its
+      own non-inference reports (`PipelexConfigError`, `EnvVarNotFoundError`
+      carry no `error_category` either) — surfacing a fake category for an
+      API-authored validation or auth failure would lie about what the API
+      actually classified.
 
     `error_domain` defaults to `INPUT` — the caller can fix a 4xx. API-owned
     5xx (a missing secret, a misconfigured backend) pass `CONFIG`: an operator,
     not the caller, fixes those. `None` omits the member entirely, matching how
     a domain-less pipelex error renders.
+
+    `retryable` defaults to `False`: every error this builder authors is a
+    caller-input mistake or a server misconfiguration, neither of which a blind
+    retry fixes. Carried as a positional contract member rather than dropped on
+    `None`, so clients can drive retry logic uniformly without branching on
+    field presence.
 
     `None`-valued context (`instance`, `request_id`) is dropped rather than
     emitted as `null`, matching `ErrorReport.to_problem_document` semantics.
@@ -88,4 +113,5 @@ def build_problem_document_from_api_error(
     document["error_type"] = error_type
     if error_domain is not None:
         document["error_domain"] = error_domain
+    document["retryable"] = retryable
     return document

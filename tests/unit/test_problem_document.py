@@ -107,6 +107,14 @@ class TestProblemDocument:
         assert doc["request_id"] == "REQ9"
         assert doc["error_type"] == "ValidationError"
         assert doc["error_domain"] == "input"
+        # Every API-authored error is non-retryable: a caller mistake is not
+        # fixed by a blind retry. Carried as a uniform contract member so
+        # clients drive retry logic without branching on field presence.
+        assert doc["retryable"] is False
+        # Pipelex's `error_category` set is inference-domain; the API does not
+        # manufacture a category for a non-inference failure — same omission
+        # rule pipelex itself applies to `PipelexConfigError` etc.
+        assert "error_category" not in doc
 
     def test_api_error_variant_config_domain_for_server_fault(self):
         # An API-owned 5xx (a missing secret, an unconfigured backend) classifies
@@ -123,6 +131,9 @@ class TestProblemDocument:
         assert doc["title"] == "Server misconfigured"
         assert doc["error_type"] == "ServerMisconfigured"
         assert doc["error_domain"] == "config"
+        # An API-owned 5xx is no more retryable than a 4xx — the operator, not
+        # the caller, fixes a missing secret; a blind retry does nothing.
+        assert doc["retryable"] is False
 
     def test_none_valued_fields_dropped(self):
         report = EnvVarNotFoundError("missing X").to_error_report()
@@ -136,3 +147,6 @@ class TestProblemDocument:
         assert None not in api_doc.values()
         assert "instance" not in api_doc
         assert "request_id" not in api_doc
+        # `retryable` is a contract member, not a drop-on-None one — present
+        # even when `instance`/`request_id` are absent.
+        assert api_doc["retryable"] is False
