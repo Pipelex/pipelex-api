@@ -6,6 +6,7 @@ raise straight through — exercising exactly the path Phase 3 will leave behind
 """
 
 import re
+from typing import Any
 
 import pytest
 from fastapi import APIRouter, FastAPI
@@ -22,7 +23,7 @@ from pipelex.cogt.inference.error_classification import ProviderErrorMetadata, U
 from pipelex.cogt.inference.provider_name import ProviderName
 from pipelex.system.environment import EnvVarNotFoundError
 from pipelex.temporal.exceptions import WorkflowExecutionError
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from pytest_mock import MockerFixture
 from temporalio.exceptions import TemporalError
 from typing_extensions import override
@@ -204,9 +205,16 @@ async def api_config_error_route() -> None:
 class _RequestValidationBody(BaseModel):
     """Trivial schema for `test_request_validation_error_emits_structured_warning_log`.
 
-    A missing-field POST against this schema triggers FastAPI's automatic
-    `RequestValidationError`, which is what we want to log-test.
+    A POST that is both missing `field` and carries an unknown key triggers
+    FastAPI's automatic `RequestValidationError`, which is what we want to
+    log-test. `extra="forbid"` matches the strictest production schemas
+    (`UploadRequest`, `ResolveStorageUrlRequest`) and ensures both the
+    missing-field and the extra-field branches of the validation surface
+    fire on a single request — Pydantic's default `extra="ignore"` would
+    silently drop the unknown key.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     field: str
 
@@ -345,20 +353,34 @@ class TestExceptionHandlers:
         assert "to_error_report is deliberately broken" not in response.text
 
     @pytest.mark.parametrize(
-        ("path", "expected_status"),
+        ("method", "path", "json_body", "expected_status"),
         [
-            ("/config-error", 500),
-            ("/env-error", 500),
-            ("/input-error", 422),
-            ("/llm-error", 429),
-            ("/workflow-error", 500),
-            ("/temporal-transport-error", 500),
-            ("/corrupt-error", 500),
-            ("/unexpected-error", 500),
+            ("GET", "/config-error", None, 500),
+            ("GET", "/env-error", None, 500),
+            ("GET", "/input-error", None, 422),
+            ("GET", "/llm-error", None, 429),
+            ("GET", "/workflow-error", None, 500),
+            ("GET", "/temporal-transport-error", None, 500),
+            ("GET", "/corrupt-error", None, 500),
+            ("GET", "/unexpected-error", None, 500),
+            # Cover the API-authored paths (`handle_api_error`) and FastAPI's
+            # automatic-validation path (`handle_request_validation_error`):
+            # the request-id propagation is the same structural property, but
+            # the three branches build the response document differently and
+            # are worth sweeping.
+            ("GET", "/api-input-error", None, 422),
+            ("GET", "/api-config-error", None, 500),
+            ("POST", "/needs-body", {"wrong": 1}, 422),
         ],
     )
-    def test_request_id_present_on_every_error_response(self, path: str, expected_status: int):
-        response = _build_client(raise_server_exceptions=False).get(path)
+    def test_request_id_present_on_every_error_response(
+        self,
+        method: str,
+        path: str,
+        json_body: dict[str, Any] | None,
+        expected_status: int,
+    ):
+        response = _build_client(raise_server_exceptions=False).request(method, path, json=json_body)
         assert response.status_code == expected_status
         request_id = response.headers[REQUEST_ID_HEADER]
         assert _ULID_RE.match(request_id) is not None
@@ -415,8 +437,11 @@ class TestExceptionHandlers:
         # whichever code path rejects a caller-input failure, the operator
         # log shape is identical.
         log_spy = mocker.patch("api.main.log")
-        # `{"wrong": 1}` triggers FastAPI's automatic validation failure
-        # (`field` is missing, `wrong` is an extra field).
+        # `{"wrong": 1}` triggers FastAPI's automatic validation failure on
+        # `_RequestValidationBody`: `field` is missing AND `wrong` is an
+        # extra key (the body uses `extra="forbid"`, so the extra-key path
+        # actually fires — Pydantic's default `extra="ignore"` would have
+        # left only the missing-field error).
         response = _build_client().post("/needs-body", json={"wrong": 1})
         assert response.status_code == 422
         log_spy.warning.assert_called_once()
@@ -425,4 +450,7 @@ class TestExceptionHandlers:
         assert "status=422" in rendered
         assert "error_type=ValidationError" in rendered
         assert "error_domain=input" in rendered
+        # The summary covers both per-field failures the request triggered.
+        assert "field" in rendered
+        assert "wrong" in rendered
         log_spy.error.assert_not_called()

@@ -177,20 +177,29 @@ def _log_error_report(report: ErrorReport, *, request: Request, request_id: str 
 def _log_api_authored_error(*, document: dict[str, Any], status: int, request: Request, request_id: str | None) -> None:
     """Emit the structured log entry for an API-authored error response.
 
-    Mirrors `_log_error_report` field-for-field so every error response — a
-    pipelex `ErrorReport` translated to RFC 7807 *or* an API-authored 4xx/5xx
-    raised by an `api.errors` helper — produces one structured `event=api_error`
-    log line. Without this, an API-owned 500 (a `raise_internal_server_error`
-    site — `version.py`'s missing-package case is the clearest example) would
-    land with zero operator log output, since `handle_api_error` only
-    serializes the response. `INPUT`-domain caller mistakes log at `warning`
-    without a traceback; everything else (a `CONFIG`-domain 500) logs at
-    `error` with the traceback — same disposition rule as `_log_error_report`.
-    The `detail` is included because the document is API-authored and never
-    redacted by strict disclosure mode (only pipelex domain errors are), so
-    the operator-facing cause (`pipelex package metadata is not available`,
-    `Server configuration error: JWT_SECRET_KEY not configured`) is preserved
-    in the log line.
+    Shares the disposition rule and the common-key set of `_log_error_report`
+    so every error response — a pipelex `ErrorReport` translated to RFC 7807
+    *or* an API-authored 4xx/5xx raised by an `api.errors` helper — produces
+    one `event=api_error` line a downstream sink can grep uniformly on
+    `event`, `request_id`, `route`, `error_type`, `error_domain`, `retryable`,
+    and `status`. Without this, an API-owned 500 (a `raise_internal_server_error`
+    site — `/pipelex_version`'s missing-package case is the canonical example)
+    would land with zero operator output, since `handle_api_error` only
+    serializes the response.
+
+    Where the two helpers differ — by design, matching what each side actually
+    has to log:
+    - API-authored docs add `detail`, always safe because
+      `build_problem_document_from_api_error` does not apply strict-disclosure
+      redaction (only `build_problem_document` does for pipelex domain errors).
+      Carrying the message preserves the operator-facing cause in the log line.
+    - API-authored docs omit `error_category`, `provider`, `model`, and
+      `provider_metadata.*` — those are inference-domain classifiers pipelex
+      sets only on classifiable failures and the API never authors itself.
+
+    `INPUT`-domain caller mistakes log at `warning` without a traceback;
+    everything else logs at `error` with the traceback — same disposition rule
+    `_log_error_report` uses, so a sink dedup'ing by level sees one shape.
     """
     error_domain = document.get("error_domain")
     is_caller_error = error_domain == ErrorDomain.INPUT
