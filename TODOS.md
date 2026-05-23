@@ -196,7 +196,47 @@ Phase 3 commit under review: `7b758f6`. Diff: `git diff HEAD~1` (while it is sti
 
    B-recon #4 status: the `user_id` slice is discharged here. The `pipe_code` / `pipeline_run_id` slice remains an open follow-up but the mechanism is now in place — a future change just stores those fields on `request.state` (where the pipeline route knows them, post-`_parse_request`) and the global handlers add a matching `_pipe_code_of` / `_pipeline_run_id_of` getter alongside `_user_id_of`. No new architecture needed.
 
-10. **Should `_decode_body` catch more than `(UnicodeDecodeError, ValueError)`?** `kajson.loads` reconstructs typed objects from `__class__`/`__module__` markers and can raise `ModuleNotFoundError`/`ImportError`/`AttributeError`/`TypeError` on a crafted body → escapes to a 500 instead of a 422. Widen the catch? Separately: is kajson instantiating arbitrary classes from an untrusted request body a security concern worth its own flag? (Pre-existing — not introduced by Phase 3 — but surfaced by the review.)
+10. ~~**Should `_decode_body` catch more than `(UnicodeDecodeError, ValueError)`?**~~ **✅ RESOLVED (2026-05-23) — verdict: fix it (part 1) + flag-but-defer (part 2). Widened the `_decode_body` catch tuple to `(UnicodeDecodeError, ValueError, KajsonDecoderError, KeyError, AttributeError, TypeError)`; filed the kajson upstream wrap-the-bare-three item as `pipelex-changes.md` #15; filed the security concern as a separate-track design document at `wip/security/kajson-untrusted-deserialization.md`. Landed in this commit.**
+
+   Premise verified empirically against the pinned `kajson` (shipped with `pipelex==0.29.1`). Four exception classes can escape `kajson.loads(...)` on a crafted body and currently land as opaque 500s via the global `Exception` handler:
+
+   ```python
+   # 1. KajsonDecoderError — NOT a ValueError subclass; covers every documented kajson decode failure.
+   kajson.loads('{"__class__": "X", "__module__": "no_such_module_xyz"}')   # KajsonDecoderError
+   kajson.loads('{"__class__": "NoSuchClass", "__module__": "json"}')      # KajsonDecoderError
+   kajson.loads('{"__class__": "ErrorType", "__module__": "api.error_types", "_value_": "not_a_real_value"}')  # KajsonDecoderError (enum)
+
+   # 2. KeyError — `__class__` marker without `__module__` (json_decoder.py:137 `the_dict.pop("__module__")`).
+   kajson.loads('{"__class__": "X"}')                          # KeyError: '__module__'
+   kajson.loads('{"outer": {"__class__": "X"}}')               # same KeyError nested
+
+   # 3. AttributeError — generic-typed class fallback (`Foo[Bar]` → tries base class `Foo`)
+   #    where `getattr(module, base_class_name)` at json_decoder.py:159 and :190 is NOT wrapped.
+   kajson.loads('{"__class__": "Foo[Bar]", "__module__": "json"}')      # AttributeError
+   kajson.loads('{"__class__": "Foo[Bar]", "__module__": "builtins"}')  # AttributeError
+
+   # 4. TypeError — `__class__` not a string; `getattr(module, class_name)` requires a string.
+   kajson.loads('{"__class__": 42, "__module__": "json"}')     # TypeError
+   ```
+
+   All four are caller mistakes (the body is malformed against kajson's contract), not server faults — should be 422, not 500. The original framing's `ModuleNotFoundError`/`ImportError` are actually caught by kajson (`json_decoder.py:178-181` wraps the dynamic-import in `try/except Exception → KajsonDecoderError`) so those never escape — verified empirically.
+
+   **Why fix, not document-as-intended (part 1):** same chain as Q2/Q3/Q4/Q7/Q8/Q9 — the Phase 5 changelog commits to RFC 7807 "across **every** API endpoint" and CLAUDE.md says "no backward compatibility" + "Solid over quick" + "flag and fix existing bugs". The Q4 precedent ("don't broadly catch `AttributeError`/`TypeError` because they mask programming bugs") is *not* violated here: the `try` block scope is one line (`kajson.loads(body.decode("utf-8"))`), and the only source of `KeyError`/`AttributeError`/`TypeError` within that one line is kajson's internal handling of crafted marker bytes — there is no other code in scope that can raise those types. The Q4 rule applies to broader route-level catches around five-plus lines, not one-line transformations.
+
+   Action taken (part 1):
+   - `api/routes/pipelex/pipeline.py`: added `from kajson.exceptions import KajsonDecoderError`; widened the `_decode_body` catch tuple to `(UnicodeDecodeError, ValueError, KajsonDecoderError, KeyError, AttributeError, TypeError)`; rewrote the docstring to enumerate each escape path and link to the upstream tracking item.
+   - Tests: added `test_execute_rejects_crafted_kajson_payloads` to `tests/unit/test_pipeline_routes.py::TestPipelineRoutes` — parametrized across all four escape paths (with both the bare and nested `KeyError` cases, plus enum-mismatch and bad-module variants of `KajsonDecoderError`). Each case asserts `status == 422`, `content-type == application/problem+json`, `error_type == "InvalidJSON"`, `error_domain == "input"`, and that `error_type != "InternalServerError"` (the opaque-500 sentinel must never appear).
+   - `wip/error-handling/pipelex-changes.md`: filed item #15 in Stage 7 — kajson should wrap the bare three (`KeyError` / `AttributeError` / `TypeError`) in `KajsonDecoderError` at its decoder boundary, so downstream consumers can catch a single named class. Tracking table updated.
+
+   **Why flag-but-defer (part 2 — security concern):** `kajson` imports arbitrary modules and instantiates arbitrary classes from a caller-controlled body. The realistic attack surface is bounded — there is no `exec` path from `_decode_body` (`class_source_code` is not passed; verified in source), constructor-side exploitation is limited to whatever happens inside `__init__` / `__post_init__` / `model_validate` of the resolved class on the supplied kwargs, and most modules in a pinned production image are already imported. The remaining concern is forced-import of unimported site-packages modules whose top-level code has side effects. This is a real but pre-existing design surface that needs `pipelex-app` (the main `inputs` consumer) and `pipelex-api-deploy` (production runtime) in the conversation — out of scope for a one-question Q10 resolution. Folding it into Q10 would balloon the fix into a design pass that does not belong here. Per the Q9 / item #9 precedent ("Open — separate track" with a dedicated `wip/security/` document), the right move is to flag it for its own decision.
+
+   Action taken (part 2):
+   - Created `wip/security/kajson-untrusted-deserialization.md` (new `wip/security/` directory, mirroring the pipelex-side `_for_api/wip/security/webhook-signing.md` pattern referenced from Q9). The document captures the trust boundary, the realistic attack surface (forced import is real; arbitrary code via `class_source_code` is NOT reachable from the API), what is intentional (the kajson round-trip is load-bearing for typed `inputs`), and four design options for a future decision (allowlist `__module__` prefixes, migrate to plain JSON, gate by `AUTH_MODE`, document-and-keep).
+   - No code or behavior change for part 2 — the trust boundary at `kajson.loads(...)` is unchanged. Q10's deliverable for the security concern is the design document, not a code patch.
+
+   `make fui && make c && make tp` clean — 186 passed (was 179, +7 parametrized cases on one new test). `make gha-tests` clean.
+
+   **Adjacent observation (not folded into the Q10 fix).** Post-resolution code review (`pr-review-toolkit:code-reviewer`) surfaced one more reachable escape: `RecursionError` from `json.JSONDecoder`'s recursive descent on a deeply-nested array. Empirically reproduced — a 10kb `[[[…]]]` payload (~5000 levels) escapes the new catch tuple at default `sys.getrecursionlimit()` because `RecursionError` is a `RuntimeError`, not a `ValueError`. Not folded in here because (a) the contract question — "is a recursion-deep payload a caller mistake or a deployment knob" — deserves its own decision (a deployment that lowers recursion limit to 100 would 422 mildly-nested but valid JSON); (b) the realistic surface is narrow (most legitimate payloads stay well under 1000 levels); (c) the fix is one line of catch widening or a json-stream-validator pre-pass, both straightforward once the contract question lands. Tracked here as a follow-up; the `_decode_body` docstring explicitly calls it out as out-of-scope.
 
 11. **Is `/validate`'s legacy result envelope intended?** `/validate` still returns `{"success": false, "mthds_contents": …, "message": …}` for its 422 (`ValidateBundleError`) and 400 (no `main_pipe`) — not RFC 7807. Is this a deliberate "validation-result payload" (in which case add a comment saying so), or an endpoint the migration missed?
 

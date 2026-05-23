@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Annotated, Any, cast
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from kajson import kajson
+from kajson.exceptions import KajsonDecoderError
 from mthds.client.exceptions import PipelineRequestError
 from mthds.client.pipeline import PipelineRequest, PipelineState
 from pipelex.config import get_config
@@ -122,10 +123,33 @@ class ApiRunner(PipelexRunner):
 
 
 def _decode_body(body: bytes) -> dict[str, Any]:
-    """kajson-decode the body and confirm it's a dict. Raises 422 if not."""
+    """kajson-decode the body and confirm it's a dict. Raises 422 if not.
+
+    The catch covers the kajson decode failures we've documented and
+    verified empirically against the pinned kajson:
+      - `UnicodeDecodeError` — body bytes are not valid UTF-8.
+      - `ValueError` — `json.JSONDecodeError` (it subclasses `ValueError`).
+      - `KajsonDecoderError` — kajson's named class for bad module name,
+        class-not-found, enum mismatch, and pydantic validation failures.
+      - bare `KeyError` / `AttributeError` / `TypeError` — protocol-shape
+        leaks where kajson dereferences crafted `__class__` / `__module__`
+        markers without wrapping (a `__class__` without a `__module__`, a
+        non-string marker, a generic-typed class whose base fallback also
+        resolves nothing). Tracked upstream so kajson eventually wraps
+        them in `KajsonDecoderError`; see
+        `wip/error-handling/pipelex-changes.md` #15.
+    All of these are caller mistakes — the body is malformed against
+    kajson's contract — so they map to a 422, not a sanitized 500. The
+    scope here is one line (`kajson.loads(...)`), so catching the bare
+    three cannot mask a programming bug in our code — the only source of
+    those types within this try block is kajson's internal handling.
+    Other failure modes (e.g. `RecursionError` from `json.JSONDecoder` on
+    a deeply-nested array) are out of scope here — see Q10's resolution
+    note in `TODOS.md` for the rationale and follow-up pointer.
+    """
     try:
         decoded = kajson.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError) as exc:
+    except (UnicodeDecodeError, ValueError, KajsonDecoderError, KeyError, AttributeError, TypeError) as exc:
         raise_validation_error(
             message=f"Request body is not valid JSON: {exc!s}",
             error_type=ErrorType.INVALID_JSON,

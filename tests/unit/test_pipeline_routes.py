@@ -94,6 +94,48 @@ class TestPipelineRoutes:
         assert response.status_code == 422
         assert response.json()["error_type"] == "InvalidJSON"
 
+    @pytest.mark.parametrize(
+        ("label", "body"),
+        [
+            # KajsonDecoderError — bad module name.
+            ("bad_module", b'{"__class__": "X", "__module__": "no_such_module_xyz"}'),
+            # KajsonDecoderError — class not found in an importable module.
+            ("class_not_in_module", b'{"__class__": "NoSuchClass", "__module__": "json"}'),
+            # KajsonDecoderError — enum value mismatch.
+            (
+                "enum_bad_value",
+                b'{"__class__": "ErrorType", "__module__": "api.error_types", "_value_": "not_a_real_value"}',
+            ),
+            # Unwrapped KeyError — `__class__` present without `__module__`.
+            ("missing_module_marker", b'{"__class__": "X"}'),
+            # Unwrapped KeyError — same leak nested inside an outer object.
+            ("nested_missing_module_marker", b'{"outer": {"__class__": "X"}}'),
+            # Unwrapped AttributeError — generic-typed class whose base also resolves to nothing.
+            ("generic_base_missing", b'{"__class__": "Foo[Bar]", "__module__": "json"}'),
+            # Unwrapped TypeError — `__class__` is not a string.
+            ("class_not_a_string", b'{"__class__": 42, "__module__": "json"}'),
+        ],
+    )
+    def test_execute_rejects_crafted_kajson_payloads(self, mocker: MockerFixture, label: str, body: bytes):
+        """Every documented kajson decode failure — and the bare `KeyError` /
+        `AttributeError` / `TypeError` that escape kajson's `__class__` /
+        `__module__` handling on crafted markers — is a caller mistake and
+        must map to a 422 RFC 7807 problem document, never an opaque 500.
+        """
+        client, _, _ = _build_client(mocker)
+        response = client.post(
+            "/api/v1/pipeline/execute",
+            content=body,
+            headers={"content-type": "application/json"},
+        )
+        assert response.status_code == 422, label
+        assert response.headers["content-type"] == "application/problem+json", label
+        problem = response.json()
+        assert problem["error_type"] == "InvalidJSON", label
+        assert problem["error_domain"] == "input", label
+        # The opaque-500 sentinel must never appear for a crafted body.
+        assert problem["error_type"] != "InternalServerError", label
+
     def test_start_happy_path(self, mocker: MockerFixture):
         client, _, start_mock = _build_client(mocker)
         response = client.post(

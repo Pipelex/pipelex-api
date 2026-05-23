@@ -490,6 +490,57 @@ Call sites then read `report.error_domain.is_input` — encapsulated, single sou
 
 ---
 
+### 15. `kajson` should wrap `KeyError` / `AttributeError` / `TypeError` from crafted markers in `KajsonDecoderError`
+
+> **Discovered during `pipelex-api` Phase 3 review (2026-05-23). Not started.** Target repo: `kajson` (not `pipelex`).
+
+**Where:** `kajson/json_decoder.py` — `UniversalJSONDecoder.universal_decoder`.
+
+**What.** `kajson` defines `KajsonDecoderError` as the named class for every "your body is undecodable" case and wraps most of its internal failures in it. Three escape paths slip through unwrapped — confirmed empirically against the pinned `kajson` (the version shipped with `pipelex==0.29.1`):
+
+```python
+# 1. `__class__` present, `__module__` missing — line 137 `the_dict.pop("__module__")`.
+kajson.loads('{"__class__": "X"}')                        # KeyError: '__module__'
+kajson.loads('{"outer": {"__class__": "X"}}')             # same KeyError (nested)
+
+# 2. Generic-typed class whose base fallback also fails — lines 159 and 190
+#    (`getattr(sys.modules[module_name], base_class_name)` / `getattr(m, base_class_name)`
+#    are NOT wrapped in the surrounding try/except).
+kajson.loads('{"__class__": "Foo[Bar]", "__module__": "json"}')      # AttributeError
+kajson.loads('{"__class__": "Foo[Bar]", "__module__": "builtins"}')  # AttributeError
+
+# 3. `__class__` is not a string — `getattr(module, class_name)` requires a string `name`.
+kajson.loads('{"__class__": 42, "__module__": "json"}')   # TypeError: attribute name must be string
+```
+
+Every other documented failure mode (`__module__` not importable, class not found in resolved module, enum reconstruction failure, `BaseModel`/`RootModel` validation) already raises `KajsonDecoderError` — only these three corners leak.
+
+The fix is a narrow guard at the top of `universal_decoder` to validate the protocol shape before dereferencing it, plus a `try/except AttributeError` around each generic-base-class fallback `getattr`:
+
+```python
+if "__class__" not in the_dict:
+    return the_dict
+if "__module__" not in the_dict:
+    raise KajsonDecoderError("`__class__` marker present without `__module__`")
+class_name = the_dict.pop("__class__")
+if not isinstance(class_name, str):
+    raise KajsonDecoderError(f"`__class__` must be a string, got {type(class_name).__name__}")
+module_name = the_dict.pop("__module__")
+if not isinstance(module_name, str):
+    raise KajsonDecoderError(f"`__module__` must be a string, got {type(module_name).__name__}")
+# … then wrap the two generic-base fallbacks in `try/except AttributeError: raise KajsonDecoderError(…) from`.
+```
+
+**Why.** Consumers that decode user-supplied bytes through `kajson.loads` (the `pipelex-api` `/pipeline/execute` and `/pipeline/start` routes are the canonical example) rely on `KajsonDecoderError` as the single class to catch for "the body is malformed against my contract." With the three leaks, those consumers must catch the bare three types defensively — but `KeyError` / `AttributeError` / `TypeError` are also the exact types a real programming bug elsewhere would raise, so a broad route-level catch risks masking real bugs. Wrapping at the kajson boundary keeps the consumer's catch narrow and named.
+
+**Workaround in place.** `pipelex-api` `_decode_body` in `api/routes/pipelex/pipeline.py` currently catches `(UnicodeDecodeError, ValueError, KajsonDecoderError, KeyError, AttributeError, TypeError)` — safe because the `try` scope is one line (`kajson.loads(body.decode("utf-8"))`), so no programming bug in our code can raise the bare three from that block. Once #15 lands, the route catch tightens to `(UnicodeDecodeError, ValueError, KajsonDecoderError)`.
+
+**Related — separate track.** `kajson` also instantiates arbitrary classes from request bodies through `importlib.import_module(module_name)` + `getattr(m, class_name)(**the_dict)`. That is a deserialization-trust concern, not an error-handling one. Tracked in this repo under `wip/security/kajson-untrusted-deserialization.md`; **not** part of this item.
+
+**Surfaced by.** `pipelex-api` Phase 3 review, question 10 (`TODOS.md`).
+
+---
+
 ## What NOT to push upstream
 
 Things that look like they belong in pipelex but actually stay API-side.
@@ -520,5 +571,6 @@ Things that look like they belong in pipelex but actually stay API-side.
 | 12 | `LocalStorageProvider` wrap `OSError` as `StorageError` | 7 | `tools/storage/local_storage_provider.py` | Not started — discovered in pipelex-api Phase 3 review (Q5) | — |
 | 13 | `S3StorageProvider` catch full `BotoCoreError` hierarchy | 7 | `tools/storage/s3_storage_provider.py` | Not started — discovered in pipelex-api Phase 3 review (Q5) | — |
 | 14 | `ErrorDomain.is_input` (and siblings) `@property` helpers | 7 | `base_exceptions.py` | Not started — discovered in pipelex-api Phase 3 review (Q9 code review) | — |
+| 15 | `kajson` wrap bare `KeyError`/`AttributeError`/`TypeError` in `KajsonDecoderError` | 7 | `kajson/json_decoder.py` (note: kajson repo, not pipelex) | Not started — discovered in pipelex-api Phase 3 review (Q10) | — |
 
-Stages 1–4 (#1–#7) are landed — the `pipelex-api` plan is unblocked: Phase 0 consumes #1+#2, Phase 1 consumes #4 (`to_dict(disclosure_mode=)`) and #6 (`to_problem_document`), Phase 4 consumes #5. Only #8 (future, no consumer yet), #9 (webhook signing — separate track), and #10–#14 (post-Phase-3 audit findings, non-blocking) remain.
+Stages 1–4 (#1–#7) are landed — the `pipelex-api` plan is unblocked: Phase 0 consumes #1+#2, Phase 1 consumes #4 (`to_dict(disclosure_mode=)`) and #6 (`to_problem_document`), Phase 4 consumes #5. Only #8 (future, no consumer yet), #9 (webhook signing — separate track), and #10–#15 (post-Phase-3 audit findings, non-blocking) remain.
