@@ -51,6 +51,56 @@ class TestBuildAndAgentRoutes:
         assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "ValidationError"
 
+    def test_validate_invalid_mthds_returns_rfc7807(self):
+        # Regression for TODOS.md Q11: a `ValidateBundleError` (PipelexError
+        # subclass, error_domain=INPUT) must propagate to the global handler
+        # and render as RFC 7807 — NOT the legacy
+        # `{success: false, mthds_contents, message}` envelope that this
+        # endpoint used to return for 422 before Q11. Invalid TOML reliably
+        # triggers a `ValidateBundleError` from the underlying interpreter.
+        client = _build_client()
+        response = client.post(
+            "/api/v1/validate",
+            json={"mthds_contents": ["this is not valid TOML !!!"]},
+        )
+        assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
+        body = response.json()
+        assert body["error_type"] == "ValidateBundleError"
+        assert body["error_domain"] == "input"
+        assert body["status"] == 422
+        # The pipelex message is preserved (caller-facing under
+        # `_authors_caller_facing_message`) so the client gets the actual
+        # interpreter complaint, not a generic placeholder.
+        assert "TOML" in body["detail"]
+        # Legacy fields must NOT appear in the failure envelope anymore.
+        assert "success" not in body
+        assert "mthds_contents" not in body
+        assert "message" not in body
+
+    def test_validate_missing_main_pipe_returns_rfc7807(self):
+        # Regression for TODOS.md Q11: a bundle that parses cleanly but does
+        # not declare a `main_pipe` is an API-side semantic precondition —
+        # raised via `raise_validation_error` so it lands as RFC 7807 422
+        # with `error_type = "ValidationError"`, not the legacy 400 envelope.
+        bundle_without_main_pipe = (
+            'domain = "smoke"\n\n[pipe.echo]\ntype = "PipeLLM"\ndescription = "Echo"\ninputs = { text = "Text" }\noutput = "Text"\nprompt = "@text"\n'
+        )
+        client = _build_client()
+        response = client.post(
+            "/api/v1/validate",
+            json={"mthds_contents": [bundle_without_main_pipe]},
+        )
+        assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
+        body = response.json()
+        assert body["error_type"] == "ValidationError"
+        assert body["error_domain"] == "input"
+        # 422 (not the legacy 400): the body is syntactically valid; the
+        # bundle fails this endpoint's content rule.
+        assert body["status"] == 422
+        assert "main_pipe" in body["detail"]
+
     def test_build_inputs_rejects_oversized_pipe_code(self):
         client = _build_client()
         long_code = "x" * 1024

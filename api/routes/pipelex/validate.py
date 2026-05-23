@@ -9,9 +9,10 @@ from pipelex.core.concepts.concept_representation_generator import ConceptRepres
 from pipelex.core.pipes.pipe_abstract import PipeAbstract
 from pipelex.graph.graphspec import GraphSpec
 from pipelex.pipe_run.dry_run_pipeline import dry_run_pipeline
-from pipelex.pipeline.validate_bundle import ValidateBundleError, validate_bundle
+from pipelex.pipeline.validate_bundle import validate_bundle
 from pydantic import BaseModel, Field, field_validator
 
+from api.errors import raise_validation_error
 from api.limits import MAX_MTHDS_FILE_BYTES, MAX_MTHDS_FILES_PER_REQUEST
 
 router = APIRouter(tags=["validate"])
@@ -81,32 +82,42 @@ def _find_main_blueprint(blueprints: list[PipelexBundleBlueprint]) -> PipelexBun
 
 @router.post("/validate", response_model=ValidateResponse)
 async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
-    """Validate MTHDS content by parsing, loading, and dry-running pipes."""
+    """Validate MTHDS content by parsing, loading, and dry-running pipes.
+
+    Response contract:
+    - **Success (200):** the `ValidateResponse` envelope — the validated
+      `pipelex_bundle_blueprint`, the best-effort `graph_spec`, per-pipe
+      `pipe_structures`, plus the `success` / `message` flags clients use to
+      gate UI on a known-good bundle.
+    - **Failure (422):** RFC 7807 `application/problem+json` — same shape as
+      every other API endpoint. `ValidateBundleError` is a `PipelexError`
+      (`error_domain = INPUT`) so it propagates to the global handler in
+      `api.main` unchanged; "bundle has no `main_pipe`" is an API-side
+      semantic precondition for this endpoint and is raised via
+      `raise_validation_error`. The legacy
+      `{success: false, mthds_contents, message}` envelope is gone — its 422
+      half lost the structured per-pipe error data carried on
+      `ValidateBundleError`, and its 400 half made `/validate` the only
+      endpoint that did not emit RFC 7807. Both are now the uniform shape.
+    """
     mthds_contents = request_data.mthds_contents
 
-    try:
-        validate_bundle_result = await validate_bundle(mthds_contents=mthds_contents)
-    except ValidateBundleError as exc:
-        return JSONResponse(
-            status_code=422,
-            content={
-                "success": False,
-                "mthds_contents": mthds_contents,
-                "message": str(exc),
-            },
-        )
+    # `ValidateBundleError` (and any other `PipelexError`) propagates: the
+    # global `PipelexError` handler turns it into an RFC 7807 422 carrying
+    # `error_type=ValidateBundleError`, `error_domain=input`, the verbatim
+    # message (caller-facing under `_authors_caller_facing_message`), the
+    # docs `type_uri`, and the `user_action` hint. We do not catch and
+    # re-shape it here — Phase 3 deleted every per-route error catch.
+    validate_bundle_result = await validate_bundle(mthds_contents=mthds_contents)
 
     primary_blueprint = _find_main_blueprint(validate_bundle_result.blueprints) or validate_bundle_result.blueprints[0]
 
     if not primary_blueprint.main_pipe:
-        return JSONResponse(
-            status_code=400,
-            content={
-                "success": False,
-                "mthds_contents": mthds_contents,
-                "message": "Bundle does not declare a main_pipe, which is required for validation",
-            },
-        )
+        # API-side semantic precondition: a bundle without `main_pipe` parsed
+        # cleanly but is unusable for this endpoint's purpose. 422 (not 400):
+        # the request body is syntactically valid; what failed is its content
+        # against this endpoint's domain rule.
+        raise_validation_error("Bundle does not declare a main_pipe, which is required for validation")
 
     pipe_structures = _build_pipe_structures(validate_bundle_result.pipes)
 
