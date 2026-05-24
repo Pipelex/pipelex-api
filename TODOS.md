@@ -8,7 +8,8 @@ This document tracks the error-handling rework for `pipelex-api`. The original d
 
 - **This PR delivers Phases 0–3** — the synchronous error path. Every API error response now emits RFC 7807 `application/problem+json` with the same field set across pipelex domain errors, validation errors (4xx), auth (401/403), payload limits (413), and the catch-all 500.
 - **Phase A0 (adapt to post-#931/#933 pipelex) is now ALSO on this branch** — see the section near the bottom for the commit shape and what landed. Phase 4 partially folded in (T6 cross-path regression test only; structured-logging item deferred upstream).
-- **This PR ends at Phase A0.** Phase 5 (documentation + archive) is still deferred to a follow-up PR — its full plan is retained at the bottom of this document.
+- **Phase 5 (docs + CHANGELOG + CLAUDE.md) is now ALSO on this branch** — see the "Phase 5 — Documentation (✅ landed)" section near the bottom. Archive cleanup already shipped in Phase A0.
+- **This PR ends at Phase 5.** Next track is webhook signing — its plan is split out to `wip/webhook-signing-cross-repo.md` (workspace-level) and `_for_api/wip/security/webhook-signing.md` (authoritative pipelex-side plan). Cross-repo, lockstep, Louis-gated.
 - **Branch:** `feature/Adapt-to-pipelex-update-2`.
 - **Phase 3 review** (13 questions surfaced by a multi-agent review at Checkpoint C) **is fully resolved.** Each got a verdict (fix / document-as-intended / file upstream) and the code/tests landed across commits `e683338` → `2a78409`. See the "Phase 3 review resolutions" section below for the one-paragraph summary; the per-question detail lives in those commit messages and in `wip/pipelex-changes.md` Stage 7 (for the upstream items filed).
 
@@ -190,8 +191,7 @@ Upstream items filed during the review (in `pipelex-changes.md` Stage 7, none bl
 
 ## What is explicitly NOT in this PR
 
-- **Phase 4 — Temporal webhook recovery.** Async failures still go through pipelex's existing webhook path. Item #5 (the upstream dependency, `DeliveryExecutor.execute(error_report=...)`) is **landed** in `pipelex==0.29.1` (PRs #931, #933) — the API-side audit consuming it is deferred to a follow-up PR. Full plan retained below.
-- **Phase 5 — Documentation + archive.** Public API error-contract page and `CHANGELOG.md` entry are deferred to a follow-up PR. The archival item is **done in this PR**: `wip/error-handling/` is now `wip/error-handling-archive/` (with an updated README marking it historical-reference-only), and `wip/pipelex-changes.md` was lifted one level up to stay live as the cross-repo tracker.
+- **Phase 4 — Temporal webhook recovery.** Folded into Phase A0 as the T6 cross-path regression test. Sender-side `event=webhook_delivery` / `event=webhook_failure` log enrichment is upstream-pipelex work — tracked in "Upstream-pipelex follow-ups" below.
 - **Webhook signing scope expansion** (`X-Completion-Signature` covering full payload). Independent track — `_for_api/wip/security/webhook-signing.md` is the authoritative plan; was item #9 in `pipelex-changes.md` Stage 6.
 - **`GET /api/v1/pipeline/{run_id}` polling endpoint.** Designed in `track-temporal-recovery.md` for shape consistency but out of scope. Depends on `pipelex-changes.md` Stage 5 item #8 (`query_pipeline_state(...)`).
 - **OpenTelemetry / distributed tracing.** The `X-Request-ID` plumbing is a strict subset and can grow into trace context later.
@@ -221,7 +221,7 @@ Upstream items filed during the review (in `pipelex-changes.md` Stage 7, none bl
 
 Reacts to the hardening tail of pipelex `feature/post-pr933-followups` (the body of work that originally shipped as PRs #931 / #933 plus the follow-ups landing on top of it). Surface-area changes: error-class import paths, STRICT disclosure keying provenance, native end-to-end `request_id`, acronym-casing in error titles.
 
-**Editable pipelex dependency.** `pyproject.toml` declares `pipelex = { path = "../_for_api", editable = true }` under `[tool.uv.sources]`, so `make install` resolves to whatever is checked out on `_for_api/`. The PyPI pin (`pipelex==0.29.1`) is unchanged — bumping it is a separate release-coordination question.
+**Pipelex source pin — temporary git-rev (was: editable path).** `pyproject.toml` `[tool.uv.sources]` originally declared `pipelex = { path = "../_for_api", editable = true }` so `make install` resolved to whatever was checked out on `_for_api/`. That breaks CI (the GHA runner only checks out `pipelex-api/`, not the sibling `pipelex` repo), so commit `5be3c06` flipped it to `pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "<sha>" }`, pinned to the HEAD of `feature/post-pr933-followups` at that moment. **This is a temporary stopgap** — the intended end-state is to bump the PyPI floor (`pipelex==0.29.1` in `dependencies`) once the pipelex side and the API side are both ready to ship together. Bump the `rev` to pick up newer pipelex commits in the meantime. Owner: Louis decides when to flip back to a PyPI pin (cross-repo release coordination).
 
 ### What landed
 
@@ -247,63 +247,51 @@ Reacts to the hardening tail of pipelex `feature/post-pr933-followups` (the body
 - **Structured `event=webhook_delivery` / `event=webhook_failure` logging** at `pipelex/pipe_run/delivery_executor.py:270`. Belongs upstream in pipelex; cross-repo work should land as a pipelex PR.
 - **Webhook signing.** Separate cross-repo track, governed by `_for_api/wip/security/webhook-signing.md`. Three-step rollout (receiver-side dual-format first → worker-side body-signing → drop legacy), waiting on Louis.
 - **Upstream `pipelex-changes.md` Stage 7 items #10–#15** (`EnvVarNotFoundError` → `CONFIG` domain, `parse_concept_spec` shape validation, `LocalStorageProvider` `OSError` wrap, `S3StorageProvider` `BotoCoreError` widening, `ErrorDomain.is_input` helper, kajson crafted-marker exceptions). None landed on `feature/post-pr933-followups`; still open upstream.
-- **Phase 5 (docs + archive)** — split as a follow-up branch per Checkpoint A default. Original plan retained below.
+---
+
+## Phase 5 — Documentation (✅ landed)
+
+Docs match reality. The breaking-change RFC 7807 shape is now disclosed in CHANGELOG, documented as a public contract page, and reflected in `CLAUDE.md` so future route work follows the new pattern.
+
+### What landed
+
+- **[`docs/error-responses.md`](docs/error-responses.md)** — new public docs page covering the RFC 7807 envelope, standard members + the pipelex extension set, the `error_domain → HTTP status` mapping (`input → 422`, `config`/`runtime` → 500, plus 401/403/413/429 carve-outs), the `type` URI namespace (`https://docs.pipelex.com/latest/errors/<kebab>/`), disclosure modes (verbose vs strict, provenance-gated on `_authors_caller_facing_message`), request correlation (`X-Request-ID` → `JobMetadata.request_id` → worker logs), and worked examples (422 input, 500 config, 401 auth). Cross-links to `docs/pipe-run.md` for the async webhook payload note.
+- **`docs/pipe-validate.md`** — "Error Responses" section rewritten: the legacy `HTTP 200 + success: false` envelope is gone; failures are now `HTTP 422` RFC 7807. The success-path body (200 `ValidateResponse` with `success: true`, `mthds_contents`, `pipelex_bundle_blueprint`, `graph_spec`, `pipe_structures`) is unchanged.
+- **`docs/pipe-run.md`** — the two `{"detail": {error_type, message}}` references on `/execute` and `/start` now point at `error-responses.md`.
+- **`mkdocs.yml`** — `Error Responses: error-responses.md` added to the API nav between `Pipe Validate` and `Contribute`.
+- **`CHANGELOG.md`** — new `### Breaking Changes` block at the top of `[Unreleased]` discloses the RFC 7807 migration, the `/validate` envelope removal, and the `X-Request-ID` echo. A `### Added` block records the `ERROR_DISCLOSURE` env var and the new docs page.
+- **`CLAUDE.md`** — "Error Responses" section (lines 154-171) rewritten: the legacy `HTTPException` + `{"detail": {error_type, message}}` pattern is gone. The section now teaches: routes let `PipelexError` propagate to the global handler; API-authored 4xx/5xx use the `raise_*` helpers in `api/errors.py` (which raise `ApiError`, never `HTTPException`); auth helpers set `WWW-Authenticate: Bearer` automatically; the global handlers emit structured `event=api_error` / `event=pipelex_error` / `event=unexpected_error` logs.
+
+### Cross-repo `/validate` consumer updates (companion PRs)
+
+The `/validate` failure envelope change (Q11) breaks consumers that read the old `{success: false, mthds_contents, message}` shape on a 200 response. Companion PRs:
+
+- **`pipelex-app`** — `src/actions/mthds-validator.ts` had dead legacy-envelope code at the 200-success branch; cleanup PR removes it. The non-200 path was already RFC 7807-aware (top-level `detail` extraction).
+- **`mthds-js`** — `src/runners/api-runner.ts` swallowed the RFC 7807 body into an opaque error string on non-2xx; companion PR detects `application/problem+json`, parses `title` / `detail`, and throws an `Error` whose message reads `<title>: <detail>`. Downstream CLI / agent callers (which already display `error.message`) benefit automatically without code changes.
+
+### Verification
+
+- `make fui && make c && make tp && make gha-tests` clean.
+- `mkdocs build --strict` clean (the new page + nav entry must not break the site build).
+- Local: `make run`, hit `/api/v1/validate` with a malformed bundle → confirm the 422 body matches the example in `docs/error-responses.md`.
 
 ---
 
-# Deferred work (for the next session)
+# Deferred / next-track work
 
-The two sections below preserve the original phase plans verbatim so a follow-up session can pick them up cleanly. They are NOT part of this PR.
+## Upstream-pipelex follow-ups
 
-## Phase 4 — Temporal webhook recovery (deferred)
+Items that belong in `pipelex/` rather than `pipelex-api/`, surfaced during this PR's audits. Track here so they don't get lost; land via separate pipelex PRs.
 
-Async failures must surface to callers with the same RFC 7807 shape as the synchronous path. The recovery primitive is `pipelex.temporal.tprl.temporal_error.recover_error_report`.
+- **Structured `event=webhook_delivery` / `event=webhook_failure` logging** at `pipelex/pipe_run/delivery_executor.py:270`. The receiver-side consistency T6 test landed in Phase A0; the sender-side log enrichment is upstream-pipelex work. Surface to the next pipelex session.
+- **Stage 7 items #10–#15** in `wip/pipelex-changes.md` (`EnvVarNotFoundError` → `CONFIG` domain, `parse_concept_spec` shape validation, `LocalStorageProvider` `OSError` wrap, `S3StorageProvider` `BotoCoreError` widening, `ErrorDomain.is_input` helper, kajson crafted-marker exceptions). None landed on `feature/post-pr933-followups`; still open upstream.
 
-### Phase 4a — Verify pipelex item #5 is landed
+## Next track — webhook signing
 
-Consumes item **#5** from `wip/pipelex-changes.md` (`DeliveryExecutor.execute(error_report=...)`). The tracking table marks it **✅ Landed** in PRs #931 / #933.
+Cross-repo, lockstep, Louis-gated. Three-step rollout (receiver-side dual-format first → worker-side body-signing → drop legacy). Plans:
 
-- [ ] Spec-check on the pinned version: `DeliveryExecutor.execute(...)` accepts `error_report: ErrorReport | None = None`; `_notify_webhook` includes `error: <error_report.to_dict()>` in the payload on `FAILED` status when `error_report` is provided; recovery responsibility stays with the caller (worker/observer), not `DeliveryExecutor` itself.
-- [ ] Update the pipelex version pin in `pyproject.toml` if needed.
+- **Workspace coordinator** — `wip/webhook-signing-cross-repo.md` (workspace root, cold-start safe).
+- **Authoritative pipelex-side plan** — `_for_api/wip/security/webhook-signing.md`.
 
-### Phase 4b — API-side audit
+Not part of this PR.
 
-- [ ] Confirm the workflow-completion observer location: `pipelex/pipe_run/delivery_executor.py:_notify_webhook` (verified during plan review on 2026-05-20). The API supplies `callback_urls` via `WebhookTarget`; pipelex composes and posts.
-- [ ] **Render decision — pinned: option 2 (raw `ErrorReport` dict in webhook).** Reason: the `ErrorReport` dict IS the structured data — RFC 7807 is a presentational layer over it, and the webhook receiver may or may not want the envelope (a non-HTTP consumer like a queue, a log shipper, or a batch processor probably doesn't). The sync HTTP response renders to RFC 7807 because HTTP wants it; the webhook payload stays structurally faithful to the source. Document this asymmetry clearly in `track-temporal-recovery.md`. Future escape hatch: pipelex item #6 (`ErrorReport.to_problem_document(...)`) is available if a future use case demands "RFC 7807 everywhere."
-- [ ] On `status = FAILED` with a recovered `ErrorReport`: confirm the webhook payload includes `error: <error_report.to_dict()>`. Field-by-field parity with the sync RFC 7807 extension members.
-- [ ] On `status = FAILED`, confirm the webhook payload always includes a structured `error`. `recover_error_report` is total — synthesizes an `UnrecoverableWorkflowFailureError` report when nothing better can be recovered. No `error_report is None` branch to author API-side.
-- [ ] Wire structured logging on the webhook delivery (existing log line at `delivery_executor.py:261`):
-    - [ ] `event = "webhook_delivery"` on 2xx, `event = "webhook_failure"` on non-2xx.
-    - [ ] Include `request_id` of the original `/pipeline/start` call. Consumed from the first-class field added by pipelex item #3 (workflow input carries `request_id: str | None`). Populate at `make_temporal_pipe_run(...)` dispatch time in `api/routes/pipelex/pipeline.py:96-107`, reading the request-id contextvar.
-    - [ ] Include `pipeline_run_id`, `callback_url`, response status, and (on failure) the recovered error classification fields.
-- [ ] Tests in `tests/unit/test_webhook_recovery.py`:
-    - [ ] `WorkflowExecutionError` carrying a packed `ErrorReport` dict → recovery yields the same classification.
-    - [ ] `WorkflowExecutionError` with a malformed / absent details dict → `recover_error_report` still yields a structured report (`UnrecoverableWorkflowFailureError`), and the webhook `error` carries it.
-    - [ ] **T6 — cross-path consistency (REGRESSION):** same source `ErrorReport` → both the sync handler and the webhook composer produce identical body content for the error fields, modulo `instance`, `request_id`, and timestamps.
-    - [ ] Strict-mode disclosure: the webhook always carries the raw `ErrorReport` regardless of `ERROR_DISCLOSURE` mode (the receiver chooses what to render).
-- [ ] e2e or integration test if feasible against a test Temporal instance. If a real Temporal instance is not available in this repo's test infra, document the gap and rely on the unit tests.
-- [ ] `make fui && make c && make tp` clean.
-
-## Phase 5 — Documentation and archival (deferred)
-
-Code work is done; documentation makes the contract usable for clients and tidies the design directory.
-
-- [ ] Public API error-contract page under `docs/`:
-    - [ ] One page describing the error response shape (RFC 7807 fields + pipelex extension members).
-    - [ ] A table of the stable `error_category` values and their retry implications.
-    - [ ] A table of `user_action.kind` values.
-    - [ ] A reference to the `type` URI namespace and a list of currently-published classes.
-- [ ] `type` URI doc pages: pipelex already generates per-class error doc pages under `https://docs.pipelex.com/latest/errors/<kebab>/` (item #7). Confirm the pipelex error doc pages cover the classes the API surfaces; decide whether the API publishes its own schema overview page or just links to the pipelex docs.
-- [ ] `CHANGELOG.md` entry:
-    - [ ] Breaking change: error response shape moved from `{"detail": {...}}` to RFC 7807 `application/problem+json` across every API endpoint — pipelex domain errors, validation, auth (401/403), payload limits (413), catch-all 500.
-    - [ ] New fields available to clients (`error_type`, `error_category`, `error_domain`, `retryable`, `user_action`, `provider_metadata`, `request_id`, plus RFC 7807 standard fields).
-    - [ ] `ERROR_DISCLOSURE` env var and its default.
-    - [ ] `WWW-Authenticate: Bearer` still appears on 401 responses; only the body shape changed.
-    - [ ] `/validate` failure shape changed (Q11 resolution) — `pipelex-app` and `mthds-js` need cross-repo updates.
-    - [ ] **Known limitation:** the webhook completion payload carries the raw `ErrorReport` dict under `error`, not an RFC 7807 envelope. See `track-temporal-recovery.md` for rationale.
-- [ ] Update `CLAUDE.md` if any conventions changed (e.g. the rule about per-route error handling).
-- [ ] Archive the design directory:
-    - [x] Rename `wip/error-handling/` to `wip/error-handling-archive/` (or move under a top-level `archive/`). **Done in the Phase A0 PR** — cubic's review of that PR flagged 7 docs-drift issues in this directory; archiving short-circuits them.
-    - [x] Update the README inside the archived directory to mark it historical-reference-only. **Done in the Phase A0 PR.**
-    - [x] `wip/pipelex-changes.md` stays live as the cross-repo tracker. **Done in the Phase A0 PR** — lifted from `wip/error-handling/` to `wip/` directly. Whether to move it to `docs/pipelex-companion-changes.md` once all items land is still open, but not blocking.
-- [ ] `make fui && make c && make tp` clean.
