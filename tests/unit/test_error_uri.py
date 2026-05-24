@@ -26,9 +26,9 @@ class TestErrorUri:
             ("ValidationError", "Validation error"),
             ("PayloadTooLarge", "Payload too large"),
             ("BadRequest", "Bad request"),
-            # A trailing acronym is lowercased by pipelex's pascal_case_to_sentence;
-            # pinned here so the (acceptable) behavior is visible, not a surprise.
-            ("InvalidJSON", "Invalid json"),
+            # A trailing acronym is preserved by pipelex's pascal_case_to_sentence
+            # (`InvalidJSON` → `Invalid JSON`); pinned so the behavior is visible.
+            ("InvalidJSON", "Invalid JSON"),
         ],
     )
     def test_error_type_title(self, error_type: str, expected: str):

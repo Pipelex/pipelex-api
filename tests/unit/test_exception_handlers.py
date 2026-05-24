@@ -22,7 +22,7 @@ from pipelex.base_exceptions import (
 )
 from pipelex.cogt.inference.error_classification import ProviderErrorMetadata, UserAction, UserActionKind
 from pipelex.cogt.inference.provider_name import ProviderName
-from pipelex.system.environment import EnvVarNotFoundError
+from pipelex.system.exceptions import EnvVarNotFoundError
 from pipelex.temporal.exceptions import WorkflowExecutionError
 from pydantic import BaseModel, ConfigDict
 from pytest_mock import MockerFixture

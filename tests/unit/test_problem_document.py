@@ -4,7 +4,7 @@ import pytest
 from pipelex.base_exceptions import DisclosureMode, ErrorDomain, ErrorReport, PipelexConfigError
 from pipelex.cogt.inference.error_classification import ProviderErrorMetadata, UserAction, UserActionKind
 from pipelex.cogt.inference.provider_name import ProviderName
-from pipelex.system.environment import EnvVarNotFoundError
+from pipelex.system.exceptions import EnvVarNotFoundError
 from pytest_mock import MockerFixture
 
 from api.error_types import ErrorType
