@@ -1,6 +1,6 @@
 # Implementation Plan — Error Handling
 
-This document tracks the error-handling rework for `pipelex-api`. The full design lives under `wip/error-handling/`. **The design is settled** — refer to it for rationale; do not relitigate decisions here.
+This document tracks the error-handling rework for `pipelex-api`. The original design body has been archived to `wip/error-handling-archive/` now that the work has shipped; the cross-repo tracker for pipelex-side companion items has been moved one level up to `wip/pipelex-changes.md` (kept live). **The design is settled** — refer to the archived docs for rationale; do not relitigate decisions here.
 
 ---
 
@@ -10,7 +10,7 @@ This document tracks the error-handling rework for `pipelex-api`. The full desig
 - **Phase A0 (adapt to post-#931/#933 pipelex) is now ALSO on this branch** — see the section near the bottom for the commit shape and what landed. Phase 4 partially folded in (T6 cross-path regression test only; structured-logging item deferred upstream).
 - **This PR ends at Phase A0.** Phase 5 (documentation + archive) is still deferred to a follow-up PR — its full plan is retained at the bottom of this document.
 - **Branch:** `feature/Adapt-to-pipelex-update-2`.
-- **Phase 3 review** (13 questions surfaced by a multi-agent review at Checkpoint C) **is fully resolved.** Each got a verdict (fix / document-as-intended / file upstream) and the code/tests landed across commits `e683338` → `2a78409`. See the "Phase 3 review resolutions" section below for the one-paragraph summary; the per-question detail lives in those commit messages and in `wip/error-handling/pipelex-changes.md` Stage 7 (for the upstream items filed).
+- **Phase 3 review** (13 questions surfaced by a multi-agent review at Checkpoint C) **is fully resolved.** Each got a verdict (fix / document-as-intended / file upstream) and the code/tests landed across commits `e683338` → `2a78409`. See the "Phase 3 review resolutions" section below for the one-paragraph summary; the per-question detail lives in those commit messages and in `wip/pipelex-changes.md` Stage 7 (for the upstream items filed).
 
 ---
 
@@ -68,7 +68,7 @@ This document tracks the error-handling rework for `pipelex-api`. The full desig
 - #6 `ErrorReport.to_problem_document(...)`
 - #7 Per-class `type` URI doc pages under `docs.pipelex.com/latest/errors/<kebab>/`
 
-Tracking table lives at `wip/error-handling/pipelex-changes.md`. Items #10–#15 (Stage 7) are filed upstream against pipelex / kajson; none block the API.
+Tracking table lives at `wip/pipelex-changes.md`. Items #10–#15 (Stage 7) are filed upstream against pipelex / kajson; none block the API.
 
 ---
 
@@ -161,7 +161,7 @@ Tracking table lives at `wip/error-handling/pipelex-changes.md`. Items #10–#15
 
 ## Phase 3 review resolutions
 
-A multi-agent code review at Checkpoint C surfaced 13 questions (Q1–Q13). All resolved across commits `e683338` → `2a78409` (chronological order in `git log --oneline`). Per-question detail lives in those commit messages and in the upstream items filed in `wip/error-handling/pipelex-changes.md` Stage 7.
+A multi-agent code review at Checkpoint C surfaced 13 questions (Q1–Q13). All resolved across commits `e683338` → `2a78409` (chronological order in `git log --oneline`). Per-question detail lives in those commit messages and in the upstream items filed in `wip/pipelex-changes.md` Stage 7.
 
 Material changes from those resolutions, in addition to what's already named above:
 
@@ -191,7 +191,7 @@ Upstream items filed during the review (in `pipelex-changes.md` Stage 7, none bl
 ## What is explicitly NOT in this PR
 
 - **Phase 4 — Temporal webhook recovery.** Async failures still go through pipelex's existing webhook path. Item #5 (the upstream dependency, `DeliveryExecutor.execute(error_report=...)`) is **landed** in `pipelex==0.29.1` (PRs #931, #933) — the API-side audit consuming it is deferred to a follow-up PR. Full plan retained below.
-- **Phase 5 — Documentation + archive.** Public API error-contract page, `CHANGELOG.md` entry, archive of `wip/error-handling/`. Deferred to a follow-up PR.
+- **Phase 5 — Documentation + archive.** Public API error-contract page and `CHANGELOG.md` entry are deferred to a follow-up PR. The archival item is **done in this PR**: `wip/error-handling/` is now `wip/error-handling-archive/` (with an updated README marking it historical-reference-only), and `wip/pipelex-changes.md` was lifted one level up to stay live as the cross-repo tracker.
 - **Webhook signing scope expansion** (`X-Completion-Signature` covering full payload). Independent track — `_for_api/wip/security/webhook-signing.md` is the authoritative plan; was item #9 in `pipelex-changes.md` Stage 6.
 - **`GET /api/v1/pipeline/{run_id}` polling endpoint.** Designed in `track-temporal-recovery.md` for shape consistency but out of scope. Depends on `pipelex-changes.md` Stage 5 item #8 (`query_pipeline_state(...)`).
 - **OpenTelemetry / distributed tracing.** The `X-Request-ID` plumbing is a strict subset and can grow into trace context later.
@@ -204,13 +204,13 @@ Upstream items filed during the review (in `pipelex-changes.md` Stage 7, none bl
 
 ## Design reference
 
-- `wip/error-handling/README.md` — index, settled decisions, reading order.
-- `wip/error-handling/architecture.md` — layer model, contract, types/pure functions consumed from pipelex.
-- `wip/error-handling/track-exception-handlers.md` — central handler design.
-- `wip/error-handling/track-response-schema.md` — RFC 7807 envelope, field mapping, strict mode.
-- `wip/error-handling/track-temporal-recovery.md` — async path + webhook payload shape (Phase 4 reference).
-- `wip/error-handling/track-observability.md` — structured logging fields, request correlation.
-- `wip/error-handling/pipelex-changes.md` — cross-repo tracking (pipelex/kajson companion items).
+- `wip/error-handling-archive/README.md` — index, settled decisions, reading order.
+- `wip/error-handling-archive/architecture.md` — layer model, contract, types/pure functions consumed from pipelex.
+- `wip/error-handling-archive/track-exception-handlers.md` — central handler design.
+- `wip/error-handling-archive/track-response-schema.md` — RFC 7807 envelope, field mapping, strict mode.
+- `wip/error-handling-archive/track-temporal-recovery.md` — async path + webhook payload shape (Phase 4 reference).
+- `wip/error-handling-archive/track-observability.md` — structured logging fields, request correlation.
+- `wip/pipelex-changes.md` — cross-repo tracking (pipelex/kajson companion items).
 - `wip/security/kajson-untrusted-deserialization.md` — separate-track design (out of scope for this PR).
 
 ---
@@ -261,7 +261,7 @@ Async failures must surface to callers with the same RFC 7807 shape as the synch
 
 ### Phase 4a — Verify pipelex item #5 is landed
 
-Consumes item **#5** from `wip/error-handling/pipelex-changes.md` (`DeliveryExecutor.execute(error_report=...)`). The tracking table marks it **✅ Landed** in PRs #931 / #933.
+Consumes item **#5** from `wip/pipelex-changes.md` (`DeliveryExecutor.execute(error_report=...)`). The tracking table marks it **✅ Landed** in PRs #931 / #933.
 
 - [ ] Spec-check on the pinned version: `DeliveryExecutor.execute(...)` accepts `error_report: ErrorReport | None = None`; `_notify_webhook` includes `error: <error_report.to_dict()>` in the payload on `FAILED` status when `error_report` is provided; recovery responsibility stays with the caller (worker/observer), not `DeliveryExecutor` itself.
 - [ ] Update the pipelex version pin in `pyproject.toml` if needed.
@@ -303,7 +303,7 @@ Code work is done; documentation makes the contract usable for clients and tidie
     - [ ] **Known limitation:** the webhook completion payload carries the raw `ErrorReport` dict under `error`, not an RFC 7807 envelope. See `track-temporal-recovery.md` for rationale.
 - [ ] Update `CLAUDE.md` if any conventions changed (e.g. the rule about per-route error handling).
 - [ ] Archive the design directory:
-    - [ ] Rename `wip/error-handling/` to `wip/error-handling-archive/` (or move under a top-level `archive/`).
-    - [ ] Update the README inside the archived directory to mark it historical-reference-only.
-    - [ ] `wip/error-handling/pipelex-changes.md` stays live as the cross-repo tracker. Decide whether it moves to `docs/pipelex-companion-changes.md` once all items are landed.
+    - [x] Rename `wip/error-handling/` to `wip/error-handling-archive/` (or move under a top-level `archive/`). **Done in the Phase A0 PR** — cubic's review of that PR flagged 7 docs-drift issues in this directory; archiving short-circuits them.
+    - [x] Update the README inside the archived directory to mark it historical-reference-only. **Done in the Phase A0 PR.**
+    - [x] `wip/pipelex-changes.md` stays live as the cross-repo tracker. **Done in the Phase A0 PR** — lifted from `wip/error-handling/` to `wip/` directly. Whether to move it to `docs/pipelex-companion-changes.md` once all items land is still open, but not blocking.
 - [ ] `make fui && make c && make tp` clean.

@@ -1,6 +1,23 @@
+# Error Handling — Design (archived)
+
+> **Historical reference only.** This directory is the original design body for the error-handling rework. The architecture it describes — RFC 7807 problem documents, global exception handlers, `ErrorReport` consumption, request-id middleware, STRICT/VERBOSE disclosure — has **shipped**. The current state of the system is documented in:
+>
+> - [`api/exception_handlers.py`](../../api/exception_handlers.py) — the actual handlers.
+> - [`api/problem_document.py`](../../api/problem_document.py) — the actual builder.
+> - [`CHANGELOG.md`](../../CHANGELOG.md) `[v0.1.2]` and `[Unreleased]` entries — the wire-shape and disclosure-mode changes.
+> - [`TODOS.md`](../../TODOS.md) — Phases 0–3, the deferred Phase 4/5 plans, and the post-#931/#933 adapt (Phase A0).
+>
+> The cross-repo tracker [`wip/pipelex-changes.md`](../pipelex-changes.md) (moved one level up so it stays in the live `wip/` tree) is still load-bearing: it records the upstream pipelex items we depend on and which of them have landed.
+>
+> The `track-*.md` files and the original README text below are preserved unedited so the design rationale remains readable, but they will diverge from the code as the system evolves. Treat any conflict between this directory and the modules linked above as: **the code is the spec; the archive is the trail of how we got there.**
+
+---
+
+## Original README contents (preserved verbatim)
+
 # Error Handling — Design
 
-This directory captures the design for how `pipelex-api` consumes the `pipelex` error model. The `track-*.md` files describe the intended shape of the system; the implementation plan is [`../../TODOS.md`](../../TODOS.md), and the pipelex-side companion work is tracked in [pipelex-changes.md](pipelex-changes.md) — items #1–#7 there landed in pipelex as of 2026-05-22, so the API plan is unblocked. Open questions are called out where a design decision needs sign-off.
+This directory captures the design for how `pipelex-api` consumes the `pipelex` error model. The `track-*.md` files describe the intended shape of the system; the implementation plan is [`../../TODOS.md`](../../TODOS.md), and the pipelex-side companion work is tracked in [pipelex-changes.md](../pipelex-changes.md) — items #1–#7 there landed in pipelex as of 2026-05-22, so the API plan is unblocked. Open questions are called out where a design decision needs sign-off.
 
 ## Why this exists
 

@@ -46,5 +46,5 @@ Nothing security-side. Q10 only widened `_decode_body`'s `except` tuple so kajso
 - `api/routes/pipelex/pipeline.py::_decode_body` and `::_parse_request` — the consumer side; `_decode_body` calls `kajson.loads(body.decode("utf-8"))` with no kwargs, and `_parse_request` hands the result to `PipelineRequest.from_body(...)`.
 - `kajson/kajson.py::loads` — the entry point.
 - `kajson/json_decoder.py::UniversalJSONDecoder.universal_decoder` — the marker handling.
-- `wip/error-handling/pipelex-changes.md` #15 — the error-shape companion item (separate concern).
+- `wip/pipelex-changes.md` #15 — the error-shape companion item (separate concern).
 - `TODOS.md` question 10 — the trigger.

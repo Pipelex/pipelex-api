@@ -140,7 +140,7 @@ def _decode_body(body: bytes) -> dict[str, Any]:
         non-string marker, a generic-typed class whose base fallback also
         resolves nothing). Tracked upstream so kajson eventually wraps
         them in `KajsonDecoderError`; see
-        `wip/error-handling/pipelex-changes.md` #15.
+        `wip/pipelex-changes.md` #15.
     All of these are caller mistakes — the body is malformed against
     kajson's contract — so they map to a 422, not a sanitized 500. The
     scope here is one line (`kajson.loads(...)`), so catching the bare
