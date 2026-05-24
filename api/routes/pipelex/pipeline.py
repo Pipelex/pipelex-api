@@ -22,6 +22,7 @@ from typing_extensions import override
 
 from api.error_types import ErrorType
 from api.errors import raise_validation_error
+from api.logging_context import get_request_id
 from api.routes.pipelex.utils import get_current_iso_timestamp
 from api.schemas.models import PipelineApiExtras
 
@@ -72,6 +73,7 @@ class ApiRunner(PipelexRunner):
         dynamic_output_concept_ref: str | None = None,
         pipeline_run_id: str | None = None,
         callback_urls: list[str] | None = None,
+        request_id: str | None = None,
     ) -> PipelexPipelineStartResponse:
         """Start a pipeline execution asynchronously without waiting for completion."""
         created_at = get_current_iso_timestamp()
@@ -93,6 +95,7 @@ class ApiRunner(PipelexRunner):
             search_domain_codes=self.search_domain_codes,
             user_id=self.user_id,
             pipeline_run_id=pipeline_run_id,
+            request_id=request_id,
         )
 
         delivery_assignment = DeliveryAssignment(
@@ -248,4 +251,5 @@ async def start(
         dynamic_output_concept_ref=pipeline_request.dynamic_output_concept_ref,
         pipeline_run_id=extras.pipeline_run_id,
         callback_urls=extras.callback_urls,
+        request_id=get_request_id(),
     )

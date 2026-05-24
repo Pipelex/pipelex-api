@@ -14,6 +14,7 @@ from pipelex.pipeline.pipeline_response import PipelexPipelineStartResponse
 from pytest_mock import MockerFixture
 
 from api.exception_handlers import register_exception_handlers
+from api.middleware import REQUEST_ID_HEADER, RequestIdMiddleware
 from api.routes.pipelex.pipeline import router as pipeline_router
 
 VALID_MTHDS = (
@@ -29,10 +30,12 @@ VALID_MTHDS = (
 )
 
 
-def _build_client(mocker: MockerFixture) -> tuple[TestClient, Any, Any]:
+def _build_client(mocker: MockerFixture, *, with_request_id_middleware: bool = False) -> tuple[TestClient, Any, Any]:
     """Wire a FastAPI app whose pipeline runner is fully mocked.
 
-    Returns (client, execute_mock, start_mock).
+    Returns (client, execute_mock, start_mock). `with_request_id_middleware`
+    wraps the ASGI app in `RequestIdMiddleware` so an inbound `X-Request-ID`
+    header binds the request-scoped contextvar the route reads.
     """
     app = FastAPI()
     app.include_router(pipeline_router, prefix="/api/v1")
@@ -60,7 +63,8 @@ def _build_client(mocker: MockerFixture) -> tuple[TestClient, Any, Any]:
     fake_runner.start_pipeline = mocker.AsyncMock(return_value=fake_start_response)
     mocker.patch("api.routes.pipelex.pipeline.ApiRunner", return_value=fake_runner)
 
-    return TestClient(app), fake_runner.execute_pipeline, fake_runner.start_pipeline
+    asgi_app = RequestIdMiddleware(app) if with_request_id_middleware else app
+    return TestClient(asgi_app), fake_runner.execute_pipeline, fake_runner.start_pipeline
 
 
 class TestPipelineRoutes:
@@ -152,6 +156,24 @@ class TestPipelineRoutes:
         start_mock.assert_awaited_once()
         kwargs = start_mock.await_args.kwargs
         assert kwargs["callback_urls"] == ["https://example.com/done"]
+
+    def test_start_propagates_request_id_to_runner(self, mocker: MockerFixture):
+        # The middleware binds the inbound `X-Request-ID` onto the request-scoped
+        # contextvar; the route reads it via `get_request_id()` and passes it as
+        # `request_id=` to `ApiRunner.start_pipeline`, which forwards it to
+        # `pipeline_run_setup(...)` so it lands on `JobMetadata.request_id`.
+        # Without this hop the worker's `WorkflowLog` would carry `None`.
+        client, _, start_mock = _build_client(mocker, with_request_id_middleware=True)
+        inbound_request_id = "01HNJZ4XR7K3Q9D8MWAQ7FY2E5"
+        response = client.post(
+            "/api/v1/pipeline/start",
+            json={"pipe_code": "echo", "mthds_contents": [VALID_MTHDS], "inputs": {"text": "hello"}},
+            headers={REQUEST_ID_HEADER: inbound_request_id},
+        )
+        assert response.status_code == 200
+        assert response.headers[REQUEST_ID_HEADER] == inbound_request_id
+        start_mock.assert_awaited_once()
+        assert start_mock.await_args.kwargs["request_id"] == inbound_request_id
 
     @pytest.mark.parametrize(
         "bad_url",
