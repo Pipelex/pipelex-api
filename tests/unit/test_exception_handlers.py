@@ -31,13 +31,57 @@ from typing_extensions import override
 
 from api.error_types import ErrorType
 from api.errors import raise_internal_server_error, raise_validation_error
-from api.exception_handlers import register_exception_handlers
+from api.exception_handlers import emit_error_log, register_exception_handlers
 from api.middleware import REQUEST_ID_HEADER, RequestIdMiddleware
 from api.problem_document import PROBLEM_JSON_MEDIA_TYPE
 from api.security import RequestUser
 
 # Crockford Base32, 26 chars — the ULID alphabet RequestIdMiddleware mints.
 _ULID_RE = re.compile(r"\A[0-9A-HJKMNP-TV-Z]{26}\Z")
+
+
+def _parse_logfmt(line: str) -> dict[str, str]:
+    """Minimal logfmt parser used by the injection-guard test.
+
+    Splits ``key=value`` pairs separated by spaces, honoring ``"..."`` quoting
+    with embedded ``""`` doubled (the same convention `_logfmt_value` writes).
+    Returns the top-level field map a downstream parser would extract — used
+    to assert that a crafted value did NOT introduce extra top-level keys.
+    """
+    fields: dict[str, str] = {}
+    index = 0
+    length = len(line)
+    while index < length:
+        while index < length and line[index] == " ":
+            index += 1
+        if index >= length:
+            break
+        equals_position = line.find("=", index)
+        if equals_position == -1:
+            break
+        key = line[index:equals_position]
+        index = equals_position + 1
+        if index < length and line[index] == '"':
+            index += 1
+            value_chars: list[str] = []
+            while index < length:
+                if line[index] == '"':
+                    if index + 1 < length and line[index + 1] == '"':
+                        value_chars.append('"')
+                        index += 2
+                        continue
+                    index += 1
+                    break
+                value_chars.append(line[index])
+                index += 1
+            fields[key] = "".join(value_chars)
+        else:
+            value_end = line.find(" ", index)
+            if value_end == -1:
+                value_end = length
+            fields[key] = line[index:value_end]
+            index = value_end
+    return fields
 
 
 class _SimulatedLLMError(PipelexError):
@@ -450,7 +494,9 @@ class TestExceptionHandlers:
         assert "error_domain=config" in rendered
         assert "retryable=False" in rendered
         assert "route=/api-config-error" in rendered
-        assert "detail=the configuration is broken" in rendered
+        # Values containing whitespace are logfmt-quoted by `_logfmt_value`
+        # so a crafted `detail` cannot forge sibling fields.
+        assert 'detail="the configuration is broken"' in rendered
         assert log_spy.error.call_args.kwargs == {"include_exception": True}
         log_spy.warning.assert_not_called()
 
@@ -468,7 +514,7 @@ class TestExceptionHandlers:
         assert "error_type=ValidationError" in rendered
         assert "error_domain=input" in rendered
         assert "retryable=False" in rendered
-        assert "detail=a caller-side mistake" in rendered
+        assert 'detail="a caller-side mistake"' in rendered
         log_spy.error.assert_not_called()
 
     def test_user_id_rides_authenticated_pipelex_error_log(self, mocker: MockerFixture):
@@ -513,7 +559,7 @@ class TestExceptionHandlers:
 
     def test_user_id_absent_from_unauthenticated_error_log(self, mocker: MockerFixture):
         # Pre-auth or anonymous-AUTH_MODE paths have no `request.state.user`;
-        # `_user_id_of` returns `None` and `_emit_error_log` drops `None`-
+        # `_user_id_of` returns `None` and `emit_error_log` drops `None`-
         # valued fields, so the rendered line carries no `user_id=` token —
         # never `user_id=None`, which would be misleading noise.
         log_spy = mocker.patch("api.exception_handlers.log")
@@ -547,3 +593,47 @@ class TestExceptionHandlers:
         assert "field" in rendered
         assert "wrong" in rendered
         log_spy.error.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "crafted_detail",
+        [
+            # A newline in the detail would forge a second log line entirely —
+            # the worst case for `\n`-delimited log shippers (Loki, journald,
+            # CloudWatch). `_logfmt_value` encodes it as `\\n` so the line
+            # stays single-line.
+            "legit\nstatus=200 event=auth_success",
+            # Whitespace + key=value runs are the canonical logfmt forge: a
+            # crafted detail must not produce a top-level `event` field that
+            # logfmt-aware parsers would treat as a real field.
+            "hijack status=200 event=fake",
+            # A carriage return alone is enough to corrupt a `\r\n` shipper.
+            "legit\rstatus=200",
+            # A bare `"` inside the value would close the quoted region early
+            # in a permissive parser; the escape doubles it.
+            'has " a quote = inside',
+        ],
+    )
+    def test_log_injection_in_detail_is_neutralized(self, mocker: MockerFixture, crafted_detail: str) -> None:
+        # `_log_api_authored_error` ships `document["detail"]` into the log
+        # line, and `detail` originates from caller input on several routes
+        # (`raise_validation_error(str(exc))`, callback-URL rejections,
+        # `_summarize_request_validation_error`'s per-field messages). Without
+        # escaping, a crafted body could forge sibling log fields or whole
+        # new log lines (Greptile P1 finding). Pin the neutralization
+        # contract directly at the formatter so a future caller that ships a
+        # new caller-controlled field is also covered without re-auditing.
+        log_spy = mocker.patch("api.exception_handlers.log")
+        emit_error_log(
+            fields={"event": "api_error", "detail": crafted_detail, "status": 422},
+            as_error=False,
+        )
+        rendered = log_spy.warning.call_args.args[0]
+        # Line stays single-line — no shipper-delimiter forgery.
+        assert "\n" not in rendered, f"newline survived escaping: rendered={rendered!r}"
+        assert "\r" not in rendered, f"carriage return survived escaping: rendered={rendered!r}"
+        # The top-level field set, as a logfmt-aware parser would read it,
+        # is exactly the three keys we shipped — no forged siblings.
+        parsed = _parse_logfmt(rendered)
+        assert set(parsed.keys()) == {"event", "detail", "status"}, f"forged field surfaced: rendered={rendered!r}, parsed={parsed!r}"
+        assert parsed["event"] == "api_error", f"legitimate `event` field was overwritten: rendered={rendered!r}"
+        assert parsed["status"] == "422", f"legitimate `status` field was overwritten: rendered={rendered!r}"

@@ -22,6 +22,7 @@ every module that imports a handler at once.
 """
 
 import math
+import re
 from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import FastAPI, Request, Response
@@ -59,7 +60,7 @@ def _user_id_of(request: Request) -> str | None:
     multiple log lines by `request_id` — and without each route having to log
     `user=<id>` itself before raising (which Phase 3 removed). Returns `None`
     pre-auth, on the static-API-key surface (no per-caller identity), or for
-    `AUTH_MODE=none` without the forwarded-identity opt-in: `_emit_error_log`
+    `AUTH_MODE=none` without the forwarded-identity opt-in: `emit_error_log`
     drops `None`-valued fields, so the field is absent from the rendered line
     rather than `user_id=None`.
     """
@@ -89,7 +90,37 @@ def _retry_after_header(report: ErrorReport) -> dict[str, str]:
     return {"Retry-After": str(max(0, math.ceil(seconds)))}
 
 
-def _emit_error_log(*, fields: dict[str, Any], as_error: bool) -> None:
+_LOGFMT_NEEDS_QUOTING = re.compile(r'[\s"=]')
+
+
+def _logfmt_value(value: Any) -> str:
+    """Render a value for the ``key=value`` log format, escaping caller input.
+
+    Several `emit_error_log` callers ship caller-controlled strings into the
+    field map — `_log_api_authored_error` forwards `document["detail"]`
+    (a validation message, a callback-URL rejection reason, etc.) and the
+    catch-all handler ships `type(exc).__name__` which can be anything pipelex
+    raised. Without escaping, a crafted body with a newline or whitespace
+    inside `detail` would break the field separator (`key=value key2=value2`)
+    or forge extra log fields (`detail=ok status=200 event=fake`) — both are
+    log-injection vectors.
+
+    Non-string values (`int`, `bool`, `StrEnum` instances) have no injection
+    surface and render bare. Strings get logfmt-style treatment: control chars
+    are backslash-escaped first, then values containing whitespace, `=`, or
+    `"` are wrapped in double quotes with embedded `"` doubled. The shape
+    survives both grep (the line stays single-line and the keys remain at the
+    same offsets) and a future JSON log sink (each field is recoverable).
+    """
+    if not isinstance(value, str):
+        return str(value)
+    escaped = value.encode("unicode_escape").decode("ascii")
+    if _LOGFMT_NEEDS_QUOTING.search(escaped):
+        return '"' + escaped.replace('"', '""') + '"'
+    return escaped
+
+
+def emit_error_log(*, fields: dict[str, Any], as_error: bool) -> None:
     """Emit one structured error-log line from a flat field map.
 
     The pipelex `log` object renders a single message string rather than
@@ -97,9 +128,10 @@ def _emit_error_log(*, fields: dict[str, Any], as_error: bool) -> None:
     run: greppable today, and a clean migration target once a JSON log sink
     lands. `None`-valued fields are dropped. `as_error` picks the level —
     `error` (with traceback) for operator-actionable failures, `warning` for
-    `INPUT`-domain caller mistakes.
+    `INPUT`-domain caller mistakes. Caller-controlled values go through
+    `_logfmt_value` so a crafted `detail` can't forge log fields.
     """
-    rendered = " ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
+    rendered = " ".join(f"{key}={_logfmt_value(value)}" for key, value in fields.items() if value is not None)
     if as_error:
         log.error(rendered, include_exception=True)
     else:
@@ -136,7 +168,7 @@ def _log_error_report(report: ErrorReport, *, request: Request, request_id: str 
     if metadata is not None:
         fields["provider_status_code"] = metadata.status_code
         fields["provider_request_id"] = metadata.request_id
-    _emit_error_log(fields=fields, as_error=not is_caller_error)
+    emit_error_log(fields=fields, as_error=not is_caller_error)
 
 
 def _log_api_authored_error(*, document: dict[str, Any], status: int, request: Request, request_id: str | None) -> None:
@@ -179,7 +211,7 @@ def _log_api_authored_error(*, document: dict[str, Any], status: int, request: R
         "status": status,
         "detail": document.get("detail"),
     }
-    _emit_error_log(fields=fields, as_error=not is_caller_error)
+    emit_error_log(fields=fields, as_error=not is_caller_error)
 
 
 def _json_safe_report(report: ErrorReport) -> ErrorReport:
@@ -281,7 +313,7 @@ async def handle_unexpected_error(request: Request, exc: Exception) -> Response:
     sanitized 500 rather than a bodyless default.
     """
     request_id = _request_id_of(request)
-    _emit_error_log(
+    emit_error_log(
         fields={
             "event": "api_error",
             "request_id": request_id,
