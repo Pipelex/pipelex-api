@@ -7,8 +7,9 @@ This document tracks the error-handling rework for `pipelex-api`. The full desig
 ## Status
 
 - **This PR delivers Phases 0–3** — the synchronous error path. Every API error response now emits RFC 7807 `application/problem+json` with the same field set across pipelex domain errors, validation errors (4xx), auth (401/403), payload limits (413), and the catch-all 500.
-- **This PR ends at Phase 3.** Phase 4 (Temporal webhook recovery) and Phase 5 (documentation + archive) are deferred to follow-up PRs — their full plans are retained at the bottom of this document for the next session.
-- **Branch:** `feature/Adapt-to-pipelex-update`.
+- **Phase A0 (adapt to post-#931/#933 pipelex) is now ALSO on this branch** — see the section near the bottom for the commit shape and what landed. Phase 4 partially folded in (T6 cross-path regression test only; structured-logging item deferred upstream).
+- **This PR ends at Phase A0.** Phase 5 (documentation + archive) is still deferred to a follow-up PR — its full plan is retained at the bottom of this document.
+- **Branch:** `feature/Adapt-to-pipelex-update-2`.
 - **Phase 3 review** (13 questions surfaced by a multi-agent review at Checkpoint C) **is fully resolved.** Each got a verdict (fix / document-as-intended / file upstream) and the code/tests landed across commits `e683338` → `2a78409`. See the "Phase 3 review resolutions" section below for the one-paragraph summary; the per-question detail lives in those commit messages and in `wip/error-handling/pipelex-changes.md` Stage 7 (for the upstream items filed).
 
 ---
@@ -211,6 +212,42 @@ Upstream items filed during the review (in `pipelex-changes.md` Stage 7, none bl
 - `wip/error-handling/track-observability.md` — structured logging fields, request correlation.
 - `wip/error-handling/pipelex-changes.md` — cross-repo tracking (pipelex/kajson companion items).
 - `wip/security/kajson-untrusted-deserialization.md` — separate-track design (out of scope for this PR).
+
+---
+
+---
+
+## Phase A0 — Adapt to post-#931/#933 pipelex (✅ landed on `feature/Adapt-to-pipelex-update-2`)
+
+Reacts to the hardening tail of pipelex `feature/post-pr933-followups` (the body of work that originally shipped as PRs #931 / #933 plus the follow-ups landing on top of it). Surface-area changes: error-class import paths, STRICT disclosure keying provenance, native end-to-end `request_id`, acronym-casing in error titles.
+
+**Editable pipelex dependency.** `pyproject.toml` declares `pipelex = { path = "../_for_api", editable = true }` under `[tool.uv.sources]`, so `make install` resolves to whatever is checked out on `_for_api/`. The PyPI pin (`pipelex==0.29.1`) is unchanged — bumping it is a separate release-coordination question.
+
+### What landed
+
+- **Phase B — Phase 6 import-path moves.** `EnvVarNotFoundError` import in `tests/unit/test_exception_handlers.py` + `tests/unit/test_problem_document.py` updated from `pipelex.system.environment` → `pipelex.system.exceptions`. No production code touched the moved import. No `MthdsDecodeError` references in the codebase (pipelex-api never used it).
+
+- **Phase C — `WebhookTarget` reserved-key collisions: no-op.** The single `WebhookTarget(...)` call site in `api/routes/pipelex/pipeline.py` already passed only `url` + `headers` — no reserved keys (`pipeline_run_id` / `status` / `result_url` / `error`) anywhere in static payloads.
+
+- **Phase D — STRICT-disclosure provenance audit: no-op.** `api/problem_document.py:build_problem_document` is a thin wrapper that delegates wholesale to `report.to_problem_document(disclosure_mode=...)`. Pipelex's provenance-gated keying (Decision D1 upstream — `_authors_caller_facing_message` ClassVar replaces `error_domain == INPUT` reasoning for STRICT message passthrough) flows through untouched. The two `error_domain == ErrorDomain.INPUT` sites in `api/exception_handlers.py` (`:121`, `:170`) are **log-level switches** (warning for caller mistakes vs error+traceback for server failures), not wire-disclosure switches. They remain correct. The existing `test_strict_disclosure_redacts_config_preserves_input` empirically confirms the provenance gating works end-to-end through the delegation.
+
+- **Phase E — native `request_id` at dispatch.** `POST /pipeline/start` now reads the request-scoped `request_id` contextvar (`api.logging_context.get_request_id()`) and passes it as `request_id=` to `ApiRunner.start_pipeline`, which forwards it to `pipeline_run_setup(...)`. Pipelex then populates `JobMetadata.request_id`, and every worker-side `WorkflowLog` record emitted by `WfPipeRun` / `WfPipeRouter.run` carries `request_id` in `extra`. The legacy `webhook.payload["request_id"]` piggyback was never used in pipelex-api (and `WebhookTarget.payload`'s new validator would now reject it as a reserved key anyway). New regression test: `test_pipeline_routes.py::test_start_propagates_request_id_to_runner` wires `RequestIdMiddleware` into the test client and asserts the kwarg lands.
+
+- **Phase F — Temporal webhook recovery (partial fold-in).** Upstream verification confirmed: `DeliveryExecutor.execute(error_report=...)` + `_notify_webhook` payload-injection of `error: <error_report.to_dict(VERBOSE)>` on FAILED + `recover_error_report` totality (synthesizes `UnrecoverableWorkflowFailureError` when nothing else recovers). All live in pipelex; the API supplies `WebhookTarget`s and otherwise does not touch the webhook payload. The API-side contribution is `tests/unit/test_webhook_recovery.py` — the **T6 cross-path consistency regression** the deferred plan called for: given the same `ErrorReport`, the classification fields surface identically via the sync RFC 7807 path and the webhook `error` field. Pins the asymmetry of the envelope members (`type` / `status` / `detail` / `instance` / `request_id` are sync-only) and the VERBOSE-always-for-webhook rule. **Structured-logging item NOT folded in — it modifies pipelex (`delivery_executor.py:270`), not the API. Tracked as a separate pipelex PR.**
+
+- **Bonus — acronym-casing in error titles.** Upstream commit `07af2e2c` ("preserve acronym casing in auto-derived error titles") flipped `pascal_case_to_sentence("InvalidJSON")` from `"Invalid json"` to `"Invalid JSON"`. The matching assertion in `tests/unit/test_error_uri.py::test_error_type_title` updated; the comment now describes the (corrected) behavior.
+
+### Verification at commit time
+
+- `make fui && make c && make tp` clean. Test count: 188 → 193 (5 new tests across the request_id propagation regression and the four T6 cross-path tests).
+- Pyright + mypy: 0 errors. Ruff: clean.
+
+### Out of scope (recorded, not in this branch)
+
+- **Structured `event=webhook_delivery` / `event=webhook_failure` logging** at `pipelex/pipe_run/delivery_executor.py:270`. Belongs upstream in pipelex; cross-repo work should land as a pipelex PR.
+- **Webhook signing.** Separate cross-repo track, governed by `_for_api/wip/security/webhook-signing.md`. Three-step rollout (receiver-side dual-format first → worker-side body-signing → drop legacy), waiting on Louis.
+- **Upstream `pipelex-changes.md` Stage 7 items #10–#15** (`EnvVarNotFoundError` → `CONFIG` domain, `parse_concept_spec` shape validation, `LocalStorageProvider` `OSError` wrap, `S3StorageProvider` `BotoCoreError` widening, `ErrorDomain.is_input` helper, kajson crafted-marker exceptions). None landed on `feature/post-pr933-followups`; still open upstream.
+- **Phase 5 (docs + archive)** — split as a follow-up branch per Checkpoint A default. Original plan retained below.
 
 ---
 

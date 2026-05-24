@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **Adapt to post-#931/#933 pipelex surface.**
+  - Phase 6 module relocation: `EnvVarNotFoundError` is now imported from `pipelex.system.exceptions` (was `pipelex.system.environment`). Tests updated; no production code touched the moved import.
+  - Acronym-casing fix: pipelex's `pascal_case_to_sentence` now preserves trailing acronym casing (`InvalidJSON` → `Invalid JSON`); the `test_error_uri.py::test_error_type_title` assertion updated.
+  - **Native `request_id` wiring at dispatch.** `POST /pipeline/start` now reads the request-scoped `request_id` contextvar and passes it as `request_id=` to `pipeline_run_setup(...)`, so it lands on `JobMetadata.request_id` and rides every worker-side `WorkflowLog` record. No more `webhook.payload["request_id"]` piggyback needed (and `WebhookTarget.payload` would now reject it as a reserved key anyway).
+  - **Cross-path consistency regression (T6).** New `tests/unit/test_webhook_recovery.py` pins the invariant: given the same source `ErrorReport`, the classification fields surface identically via the sync HTTP RFC 7807 response and via the webhook `error` payload (composed upstream by `DeliveryExecutor._notify_webhook`).
+  - **STRICT-disclosure audit (no code change).** Confirmed `api/problem_document.py` delegates wholesale to `report.to_problem_document(disclosure_mode=...)`, so pipelex's provenance-gated keying flip (Decision D1) flows through untouched. The two `error_domain == INPUT` sites in `api/exception_handlers.py` are log-level switches, not wire-disclosure switches, and remain correct.
+
+### Known follow-ups (deferred, not in this set of changes)
+
+- Structured logging on `_notify_webhook` (`event=webhook_delivery` / `event=webhook_failure`) — lives in pipelex upstream at `delivery_executor.py`, not in this repo. Tracked for a separate pipelex PR.
+
 ## [v0.1.2] - 2026-05-20
 
 ### Changed
