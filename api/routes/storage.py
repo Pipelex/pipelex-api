@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from urllib.parse import parse_qs, urlparse
 
+from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends
 from pipelex import log
 from pipelex.hub import get_storage_provider
@@ -144,12 +145,21 @@ async def resolve_storage_url(
         log.warning(f"resolve-storage-url: ownership mismatch jwt_user={user.user_id} uri_user={owner_user_id}")
         raise_forbidden("You do not own this file")
 
-    # A storage-backend failure surfaces as a pipelex StorageError (a
-    # PipelexError): it propagates to the global handler. The non-presigned
-    # fallback below is an API-layer configuration check, not a backend error,
-    # so the API authors that 500 itself.
+    # Most backend failures surface as a pipelex `StorageError` (a `PipelexError`)
+    # and propagate to the global handler. The narrow catch below covers the
+    # documented upstream wrapping gaps (pipelex-changes.md Stage 7 #12/#13):
+    # `LocalStorageProvider.public_url` can leak raw `OSError` on permission
+    # errors, and S3's presign path has historically leaked `BotoCoreError` /
+    # `ClientError` on credential-retrieval or endpoint-resolution failures.
+    # Without this catch those escape to the generic 500 handler and the response
+    # loses its presign classification (`PresignFailed` → `InternalServerError`).
+    # The non-presigned fallback below is an API-layer configuration check, not
+    # a backend error, so the API authors that 500 itself.
     storage = get_storage_provider()
-    url = await storage.public_url(body.uri)
+    try:
+        url = await storage.public_url(body.uri)
+    except (OSError, BotoCoreError, ClientError):
+        raise_internal_server_error("Storage backend failure while resolving URL", error_type=ErrorType.PRESIGN_FAILED)
 
     if not url or not is_presigned(url):
         log.error(f"resolve-storage-url: storage returned non-presigned URL (signed_urls_lifespan_seconds disabled or fallback). user={user.user_id}")
