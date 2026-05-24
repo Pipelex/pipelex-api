@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
@@ -207,3 +208,39 @@ class TestStorageEndpoint:
         assert response.status_code == 422
         assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "ValidationError"
+
+    @pytest.mark.parametrize(
+        "backend_error",
+        [
+            OSError("permission denied"),
+            BotoCoreError(),
+            ClientError({"Error": {"Code": "ExpiredToken", "Message": "boom"}}, "GeneratePresignedUrl"),
+        ],
+    )
+    def test_backend_storage_failure_returns_presign_failed(self, mocker: MockerFixture, backend_error: Exception):
+        """Pipelex storage providers have documented wrapping gaps (pipelex-changes.md Stage 7 #12/#13):
+        `LocalStorageProvider.public_url` leaks raw `OSError`, S3 presign leaks `BotoCoreError` /
+        `ClientError` on credential-retrieval or endpoint-resolution failures. The narrow catch
+        in `resolve_storage_url` must classify these as `PresignFailed` (500) instead of
+        letting them escape to the catch-all `handle_unexpected_error`.
+        """
+        user = RequestUser(user_id=USER_A)
+        app = FastAPI()
+        app.include_router(storage_router)
+        register_exception_handlers(app)
+
+        async def _override_user() -> RequestUser | None:
+            return user
+
+        app.dependency_overrides[get_request_user] = _override_user
+
+        fake_storage = mocker.AsyncMock()
+        fake_storage.public_url = mocker.AsyncMock(side_effect=backend_error)
+        mocker.patch("api.routes.storage.get_storage_provider", return_value=fake_storage)
+
+        client = TestClient(app)
+        response = client.post("/resolve-storage-url", json={"uri": UPLOAD_URI})
+
+        assert response.status_code == 500
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "PresignFailed"

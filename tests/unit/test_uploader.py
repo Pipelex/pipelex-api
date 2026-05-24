@@ -2,6 +2,7 @@ import base64
 from typing import Any
 
 import pytest
+from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
@@ -114,3 +115,28 @@ class TestUploadEndpoint:
         key = store_mock.await_args.kwargs["key"]
         assert key.startswith(f"{USER_A}/assets/")
         assert key.endswith(f".{expected_ext}")
+
+    @pytest.mark.parametrize(
+        "backend_error",
+        [
+            OSError("disk full"),
+            BotoCoreError(),
+            ClientError({"Error": {"Code": "InternalError", "Message": "boom"}}, "PutObject"),
+        ],
+    )
+    def test_backend_storage_failure_returns_upload_failed(self, mocker: MockerFixture, backend_error: Exception):
+        """Pipelex storage providers have documented wrapping gaps (pipelex-changes.md Stage 7 #12/#13):
+        `LocalStorageProvider` leaks raw `OSError`, S3 leaks `BotoCoreError` / `ClientError`.
+        The narrow catch in `upload_file` must classify these as `UploadFailed` (500) instead
+        of letting them escape to the catch-all `handle_unexpected_error` (which renders an
+        opaque `InternalServerError` with no storage context).
+        """
+        user = RequestUser(user_id=USER_A)
+        client, store_mock = _build_client(user, mocker)
+        store_mock.side_effect = backend_error
+
+        response = client.post("/upload", json={"filename": "a.txt", "data": VALID_B64})
+
+        assert response.status_code == 500
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "UploadFailed"
