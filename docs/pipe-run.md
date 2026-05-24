@@ -68,7 +68,7 @@ Execute a Pipelex pipeline with flexible inputs and wait for completion.
 - `main_stuff_name` (string | null): Key under `pipe_output.working_memory.root` where the main result lives. Use this to extract the typed output: `pipe_output.working_memory.root[main_stuff_name].content`.
 - `pipe_output` (object): Result of the pipeline execution. Contains `working_memory` with `root` (every named stuff produced during the run) and `aliases` (built-in name mappings such as `main_stuff`).
 
-**Errors** are returned as standard FastAPI HTTP error responses (4xx/5xx) with a JSON body of the form `{"detail": {"error_type": "...", "message": "..."}}`. The successful response body has no `status`/`error` field — the HTTP status code is the source of truth.
+**Errors** are returned as [RFC 7807 `application/problem+json`](error-responses.md) bodies with HTTP 4xx/5xx status codes. The successful response body has no `status`/`error` field — the HTTP status code is the source of truth.
 
 ---
 
@@ -139,7 +139,7 @@ Start a pipeline execution without waiting for completion (non-blocking).
 - `pipe_output` (null): Always `null`; the result isn't ready yet.
 - `workflow_id` (string | null): The Temporal workflow ID, when Temporal is enabled. `null` otherwise.
 
-**Errors** follow the same convention as `/execute`: HTTP 4xx/5xx with `{"detail": {"error_type": "...", "message": "..."}}`.
+**Errors** follow the same convention as `/execute`: HTTP 4xx/5xx with an [RFC 7807 `application/problem+json`](error-responses.md) body.
 
 #### Async Completion Callbacks (optional)
 
