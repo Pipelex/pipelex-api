@@ -138,7 +138,7 @@ def emit_error_log(*, fields: dict[str, Any], as_error: bool) -> None:
         log.warning(rendered)
 
 
-def _log_error_report(report: ErrorReport, *, request: Request, request_id: str | None) -> None:
+def _log_error_report(report: ErrorReport, *, request: Request, request_id: str | None, status: int | None = None) -> None:
     """Emit the structured log entry for a handled `ErrorReport`.
 
     `INPUT`-domain errors are the caller's mistake, not the operator's — they
@@ -149,6 +149,11 @@ def _log_error_report(report: ErrorReport, *, request: Request, request_id: str 
     `route`, and tying the failure to the caller requires correlating the
     request id across unrelated log lines (Phase 3 deleted the per-route
     `log.error(... user=...)` lines those failures used to emit).
+
+    ``status`` defaults to ``report.http_status`` and exists so the caller can
+    pass the post-override value (see ``_ERROR_TYPE_STATUS_OVERRIDES``) — the
+    log line then agrees with the HTTP status actually sent rather than the
+    domain default.
     """
     is_caller_error = report.error_domain == ErrorDomain.INPUT
     fields: dict[str, Any] = {
@@ -160,7 +165,7 @@ def _log_error_report(report: ErrorReport, *, request: Request, request_id: str 
         "error_category": report.error_category,
         "error_domain": report.error_domain,
         "retryable": report.retryable,
-        "status": report.http_status,
+        "status": status if status is not None else report.http_status,
         "provider": report.provider,
         "model": report.model,
     }
@@ -233,28 +238,55 @@ def _json_safe_report(report: ErrorReport) -> ErrorReport:
     return report.model_copy(update={"provider_metadata": safe_metadata})
 
 
+_ERROR_TYPE_STATUS_OVERRIDES: dict[str, int] = {
+    # Async execution disabled is a deliberate deployment configuration, not
+    # an unexpected runtime fault. Mapping it to 501 Not Implemented (rather
+    # than the CONFIG-domain default of 500) tells clients "this server does
+    # not provide this functionality" without inviting retries.
+    "AsyncExecutionNotEnabledError": 501,
+}
+
+
+def _http_status_for(report: ErrorReport) -> int:
+    """Return the HTTP status to use for this report.
+
+    Defers to ``report.http_status`` for the standard mapping (provider-429
+    passthrough + ``error_domain`` -> 4xx/5xx) and applies a per-error-type
+    override last. Overrides live in ``_ERROR_TYPE_STATUS_OVERRIDES`` so the
+    decisions are discoverable in one place — keep the dict small and each
+    entry justified.
+    """
+    return _ERROR_TYPE_STATUS_OVERRIDES.get(report.error_type, report.http_status)
+
+
 def _problem_response(report: ErrorReport, *, request: Request, disclosure_mode: DisclosureMode) -> JSONResponse:
     """Build the RFC 7807 `JSONResponse` for an `ErrorReport` and log the entry.
 
     Shared by the `PipelexError` and `TemporalError` handlers: both produce an
     `ErrorReport`, so both render and log it identically. The report is first
     made JSON-safe (see `_json_safe_report`); the status code then comes from
-    `report.http_status` (which already encodes the provider-429 passthrough),
-    and the response body from the Phase 1 problem-document builder under the
-    caller-supplied `disclosure_mode` (`register_exception_handlers` binds the
-    app's effective mode into the handlers it registers).
+    `_http_status_for(report)` (the report's own mapping plus any API-layer
+    override registered in ``_ERROR_TYPE_STATUS_OVERRIDES``), and the response
+    body from the Phase 1 problem-document builder under the caller-supplied
+    `disclosure_mode` (`register_exception_handlers` binds the app's effective
+    mode into the handlers it registers).
     """
     report = _json_safe_report(report)
     request_id = _request_id_of(request)
+    status = _http_status_for(report)
     document = build_problem_document(
         report,
         instance=request.url.path,
         request_id=request_id,
         disclosure_mode=disclosure_mode,
     )
-    _log_error_report(report, request=request, request_id=request_id)
+    # Keep the RFC 7807 ``status`` member aligned with the actual HTTP status
+    # when an API-layer override has bumped it away from ``report.http_status``;
+    # otherwise the two surfaces (header vs body) would silently disagree.
+    document["status"] = status
+    _log_error_report(report, request=request, request_id=request_id, status=status)
     return JSONResponse(
-        status_code=report.http_status,
+        status_code=status,
         content=document,
         media_type=PROBLEM_JSON_MEDIA_TYPE,
         headers=_retry_after_header(report),

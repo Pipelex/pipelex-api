@@ -22,6 +22,7 @@ from pipelex.base_exceptions import (
 )
 from pipelex.cogt.inference.error_classification import ProviderErrorMetadata, UserAction, UserActionKind
 from pipelex.cogt.inference.provider_name import ProviderName
+from pipelex.pipe_run.exceptions import AsyncExecutionNotEnabledError
 from pipelex.system.exceptions import EnvVarNotFoundError
 from pipelex.temporal.exceptions import WorkflowExecutionError
 from pydantic import BaseModel, ConfigDict
@@ -216,6 +217,15 @@ async def corrupt_error_route() -> None:
 async def workflow_error_route() -> None:
     msg = "the workflow failed"
     raise WorkflowExecutionError(msg)
+
+
+@_router.get("/async-execution-not-enabled")
+async def async_execution_not_enabled_route() -> None:
+    # Pipelex raises this when an async dispatch site is reached on a
+    # deployment without an async execution backend enabled. The API maps it
+    # to 501 Not Implemented (see ``_ERROR_TYPE_STATUS_OVERRIDES``).
+    msg = "Asynchronous pipeline execution is not enabled on this deployment."
+    raise AsyncExecutionNotEnabledError(msg)
 
 
 @_router.get("/temporal-transport-error")
@@ -637,3 +647,41 @@ class TestExceptionHandlers:
         assert set(parsed.keys()) == {"event", "detail", "status"}, f"forged field surfaced: rendered={rendered!r}, parsed={parsed!r}"
         assert parsed["event"] == "api_error", f"legitimate `event` field was overwritten: rendered={rendered!r}"
         assert parsed["status"] == "422", f"legitimate `status` field was overwritten: rendered={rendered!r}"
+
+    def test_async_execution_not_enabled_maps_to_501(self):
+        # The pipelex-side ``AsyncExecutionNotEnabledError`` reports as
+        # ``CONFIG``-domain (-> 500 under the default mapping), but the
+        # API layer overrides it to 501 Not Implemented. 501 is more precise
+        # for "this server does not provide async execution": it tells clients
+        # the failure is permanent under the current deployment rather than a
+        # transient runtime fault.
+        response = _build_client().get("/async-execution-not-enabled")
+        assert response.status_code == 501
+        assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
+        body = response.json()
+        # The body's ``status`` member must agree with the HTTP status — if
+        # the override path only bumped the header status and left the body at
+        # 500, RFC 7807-aware clients would see a contradictory document.
+        assert body["status"] == 501
+        assert body["title"] == "Async execution not enabled"
+        assert body["error_type"] == "AsyncExecutionNotEnabledError"
+        assert body["error_domain"] == "config"
+        assert body["instance"] == "/async-execution-not-enabled"
+        assert body["type"].endswith("/async-execution-not-enabled-error/")
+        assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
+
+    def test_async_execution_not_enabled_logs_post_override_status(self, mocker: MockerFixture):
+        # ``_log_error_report`` receives the overridden status so the operator
+        # log line agrees with what the client actually saw. Without the
+        # ``status=`` plumbing the log would read ``status=500`` (the report's
+        # domain default) while the response shipped 501 — a silent disagree
+        # between the two surfaces. Pin the alignment.
+        log_spy = mocker.patch("api.exception_handlers.log")
+        response = _build_client().get("/async-execution-not-enabled")
+        assert response.status_code == 501
+        log_spy.error.assert_called_once()
+        rendered = log_spy.error.call_args.args[0]
+        assert "event=api_error" in rendered
+        assert "status=501" in rendered
+        assert "error_type=AsyncExecutionNotEnabledError" in rendered
+        assert "error_domain=config" in rendered
