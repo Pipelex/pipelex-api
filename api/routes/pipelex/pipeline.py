@@ -141,18 +141,19 @@ def _decode_body(body: bytes) -> dict[str, Any]:
         resolves nothing). Tracked upstream so kajson eventually wraps
         them in `KajsonDecoderError`; see
         `wip/pipelex-changes.md` #15.
+      - `RecursionError` — a deeply-nested JSON array or object exhausts
+        the interpreter's recursion budget inside the JSON parser. Still
+        a caller-controllable input shape, so it maps to 422 alongside
+        the rest rather than escaping to a sanitized 500.
     All of these are caller mistakes — the body is malformed against
     kajson's contract — so they map to a 422, not a sanitized 500. The
     scope here is one line (`kajson.loads(...)`), so catching the bare
     three cannot mask a programming bug in our code — the only source of
     those types within this try block is kajson's internal handling.
-    Other failure modes (e.g. `RecursionError` from `json.JSONDecoder` on
-    a deeply-nested array) are out of scope here — see Q10's resolution
-    note in `TODOS.md` for the rationale and follow-up pointer.
     """
     try:
         decoded = kajson.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError, KajsonDecoderError, KeyError, AttributeError, TypeError) as exc:
+    except (UnicodeDecodeError, ValueError, KajsonDecoderError, KeyError, AttributeError, TypeError, RecursionError) as exc:
         raise_validation_error(
             message=f"Request body is not valid JSON: {exc!s}",
             error_type=ErrorType.INVALID_JSON,

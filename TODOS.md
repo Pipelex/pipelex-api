@@ -199,7 +199,6 @@ Upstream items filed during the review (in `pipelex-changes.md` Stage 7, none bl
 - **JSON log sink.** The structured-log strings (`event=api_error key=value ...`) are greppable today; swap to native structured emission once a JSON sink lands. Plan-sanctioned followup from Checkpoint B reconciliation #2.
 - **`pipe_code` / `pipeline_run_id` body-derived log fields.** Mechanism is in place (`request.state` + `_*_of` getters in the handler) — wiring deferred. Open piece of Checkpoint B reconciliation #4.
 - **Kajson untrusted-deserialization design pass.** Separate track at `wip/security/kajson-untrusted-deserialization.md`. Realistic attack surface bounded today; needs `pipelex-app` and `pipelex-api-deploy` in the conversation.
-- **`RecursionError` from deeply-nested JSON.** Follow-up to Q10; one-line catch widening or json-stream-validator pre-pass once the contract question lands. **Discuss:** decide whether to fold `RecursionError` into `_decode_body`'s catch tuple (one-token change, makes the 1000+ deep-nested-array case land as a 422 instead of a sanitized 500) or close it upstream with a stream-pre-pass. Either lands; the question is where the validator lives. Re-surface during Phase 5 cleanup.
 
 ---
 
@@ -311,6 +310,7 @@ Items that belong in `pipelex/` rather than `pipelex-api/`, surfaced during this
 
 - **Structured `event=webhook_delivery` / `event=webhook_failure` logging** at `pipelex/pipe_run/delivery_executor.py:270`. The receiver-side consistency T6 test landed in Phase A0. The plumbing landed upstream in Phase A1 (`ceb018b5` / `07f9cce9` thread `request_id` through `DeliveryExecutor`). The remaining work is the actual structured event-name emission — kick-off doc lives at `_for_api/wip/console-targets-and-agent-cli-stdout.md`. Surface to the next pipelex session.
 - **Stage 7 items #10–#15** in `wip/pipelex-changes.md` (`EnvVarNotFoundError` → `CONFIG` domain, `parse_concept_spec` shape validation, `LocalStorageProvider` `OSError` wrap, `S3StorageProvider` `BotoCoreError` widening, `ErrorDomain.is_input` helper, kajson crafted-marker exceptions). None landed on `feature/post-pr933-followups`; still open upstream.
+- **Webhook-delivery SSRF DNS check.** `api/schemas/models.py::_is_disallowed_host` only blocks literal private/loopback/metadata IPs at request time — a callback URL like `https://attacker.example/cb` passes validation while its DNS record can resolve to `169.254.169.254` / `127.0.0.0/8` / `10.0.0.0/8` when the worker later fires the webhook. The fix belongs at delivery time in `pipelex/pipe_run/delivery_executor.py`'s webhook HTTP client: a custom resolver (or `httpx` event hook) that re-checks the resolved IP against the same `_is_disallowed_host` rule and aborts on a private destination, plus optionally an egress allowlist / proxy at the deploy layer. Keep the literal-host check in the API as a cheap first line of defense.
 
 ## Next track — webhook signing
 

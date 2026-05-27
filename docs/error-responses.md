@@ -142,7 +142,7 @@ WWW-Authenticate: Bearer
 X-Request-ID: 9f2c1ab3-…
 
 {
-  "type": "https://docs.pipelex.com/latest/errors/unauthenticated-error/",
+  "type": "https://docs.pipelex.com/latest/errors/unauthenticated/",
   "title": "Unauthenticated",
   "status": 401,
   "detail": "Missing bearer token.",
