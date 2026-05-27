@@ -9,9 +9,11 @@ for automatic request validation. Covers regression checks T1 (413), T2
 (storage 403) and T5 (`X-Request-ID` on every error response).
 """
 
+from collections.abc import Iterator
 from importlib.metadata import PackageNotFoundError
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -118,6 +120,44 @@ class TestErrorResponses:
         assert body["status"] == 413
         assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
         assert body["retryable"] is False
+
+    def test_payload_too_large_chunked_does_not_buffer_oversized_body(self, mocker: MockerFixture):
+        # REGRESSION T1b: a chunked / no-content-length over-limit body must reject
+        # before the route can buffer or process it. Without the fix, the middleware
+        # only flips `too_large` after `call_next` returns, leaving the route free to
+        # fully `await request.body()` on the oversized stream — defeating memory/CPU
+        # protection and allowing route side effects to run before the 413.
+        mocker.patch("api.middleware.MAX_REQUEST_BODY_BYTES", 1024)
+
+        bytes_seen_by_route: list[int] = []
+
+        async def echo(request: Request) -> JSONResponse:
+            body = await request.body()
+            bytes_seen_by_route.append(len(body))
+            return JSONResponse({"length": len(body)})
+
+        app = FastAPI(redirect_slashes=False)
+        app.add_middleware(BaseHTTPMiddleware, dispatch=request_body_size_middleware)
+        app.add_api_route("/echo", echo, methods=["POST"])
+        register_exception_handlers(app)
+
+        client = TestClient(RequestIdMiddleware(app))
+
+        # 4 KiB body, 4x the patched 1 KiB cap. A generator forces httpx to use
+        # chunked transfer encoding, exercising the counting branch instead of
+        # the fast Content-Length reject.
+        def streaming_body() -> Iterator[bytes]:
+            yield b"x" * 4096
+
+        response = client.post("/echo", content=streaming_body())
+
+        assert response.status_code == 413
+        assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
+        assert response.json()["error_type"] == "PayloadTooLarge"
+        # With the fix, the over-limit first chunk is replaced with an end-of-stream
+        # marker, so the route observes an empty body. Without the fix, the route
+        # would see all 4096 bytes.
+        assert bytes_seen_by_route == [0]
 
     def test_internal_server_error_is_rfc7807_config_domain(self, mocker: MockerFixture):
         # Absent package metadata → raise_internal_server_error → 500 CONFIG.

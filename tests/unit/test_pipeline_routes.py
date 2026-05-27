@@ -99,6 +99,31 @@ class TestPipelineRoutes:
         assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "InvalidJSON"
 
+    def test_execute_rejects_recursion_error(self, mocker: MockerFixture):
+        # A `RecursionError` raised inside `kajson.loads` (e.g. from a deeply-
+        # nested JSON array exhausting the interpreter's recursion budget) is a
+        # caller-input failure and must map to 422 InvalidJSON, not escape to the
+        # catch-all 500 handler. Mocked rather than crafted because whether
+        # `json.JSONDecoder` recurses on a given input depends on the C accelerator
+        # availability — the mock pins the post-catch contract regardless.
+        client, _, _ = _build_client(mocker)
+        mocker.patch(
+            "api.routes.pipelex.pipeline.kajson.loads",
+            side_effect=RecursionError("maximum recursion depth exceeded"),
+        )
+        response = client.post(
+            "/api/v1/pipeline/execute",
+            content=b'{"any": "valid-json-here"}',
+            headers={"content-type": "application/json"},
+        )
+        assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
+        problem = response.json()
+        assert problem["error_type"] == "InvalidJSON"
+        assert problem["error_domain"] == "input"
+        # The opaque-500 sentinel must never appear for a caller-input failure.
+        assert problem["error_type"] != "InternalServerError"
+
     @pytest.mark.parametrize(
         ("label", "body"),
         [

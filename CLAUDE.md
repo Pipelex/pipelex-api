@@ -155,10 +155,10 @@ async def execute(
 
 Every error is rendered as RFC 7807 `application/problem+json` by the global handlers in `api/exception_handlers.py`. **Route handlers do not shape errors themselves** — they call into pipelex and let exceptions propagate. The wire contract is documented at `docs/error-responses.md`.
 
-- **Domain errors** (pipelex `PipelexError` subclasses) — raise from your code and let them propagate. The `PipelexError` global handler renders them via `report.to_problem_document(...)`. Do not wrap, classify, or re-shape.
+- **Domain errors** (pipelex `PipelexError` subclasses) — raise from your code and let them propagate. The `PipelexError` global handler obtains an `ErrorReport` via `to_error_report()` and renders it into a problem document. Do not wrap, classify, or re-shape.
 - **API-authored 4xx/5xx** — use the helpers in `api/errors.py`: `raise_validation_error`, `raise_bad_request`, `raise_forbidden`, `raise_unauthenticated`, `raise_payload_too_large`, `raise_internal_server_error`. Each raises an `ApiError` carrying a pre-built problem document; the global handler emits it. **Do not raise `HTTPException` directly** — FastAPI's default handler wraps the body as `{"detail": <whatever>}` and cannot emit a flat RFC 7807 document.
 - **Auth errors** — the helpers set `WWW-Authenticate: Bearer` automatically on 401.
-- **Logging** — the global handlers emit one structured log line per error (`event=api_error` / `event=pipelex_error` / `event=unexpected_error`) with `request_id`, `route`, `error_type`, `error_domain`, `retryable`, `status`, and `user_id` when authenticated. `INPUT` domain logs at `warning`; everything else at `error` with traceback. Routes should not log error tracebacks themselves.
+- **Logging** — the global handlers emit one structured log line per error (`event=api_error`) with `request_id`, `route`, `error_type`, `error_domain`, `retryable`, `status`, and `user_id` when authenticated. `INPUT` domain logs at `warning`; everything else at `error` with traceback. Routes should not log error tracebacks themselves.
 
 Typical route:
 
@@ -177,10 +177,7 @@ For an API-authored failure that has no `PipelexError`:
 
 ```python
 if upload_size > MAX_UPLOAD_BYTES:
-    raise_payload_too_large(
-        message=f"Upload exceeds {MAX_UPLOAD_BYTES} bytes.",
-        instance=str(request.url.path),
-    )
+    raise_payload_too_large(message=f"Upload exceeds {MAX_UPLOAD_BYTES} bytes.")
 ```
 
 ## Request/Response Models

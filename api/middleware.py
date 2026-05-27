@@ -42,8 +42,13 @@ async def request_body_size_middleware(request: Request, call_next: Callable[[Re
     Two layers of defense:
       1. Trust `Content-Length` header when present — fast reject before any body is read.
       2. For chunked / missing-header requests, wrap `receive` so we count bytes as
-         they arrive and bail out as soon as the limit is exceeded. This avoids
-         buffering the full body before refusing.
+         they arrive. When the cumulative count crosses the cap, the over-limit
+         chunk is NOT forwarded: it is replaced with an end-of-stream marker so
+         `await request.body()` returns a bounded (often empty) body rather than
+         the full oversized payload, and any further read keeps returning the
+         same terminator (NOT `http.disconnect`, which would raise
+         `ClientDisconnect` and escape past the 413 override). The 413 response
+         then overrides whatever the route returned on its truncated input.
     """
     content_length = request.headers.get("content-length")
     if content_length is not None:
@@ -60,6 +65,13 @@ async def request_body_size_middleware(request: Request, call_next: Callable[[Re
 
     async def counting_receive() -> Message:
         nonlocal bytes_seen, too_large
+        if too_large:
+            # Idempotent end-of-stream on every subsequent read. Returning
+            # `http.disconnect` instead would raise `ClientDisconnect` in
+            # Starlette's body reader, which would escape `call_next` as an
+            # exception and bypass the 413 override below — the request would
+            # land as a sanitized 500 instead of 413.
+            return {"type": "http.request", "body": b"", "more_body": False}
         message = await original_receive()
         if message.get("type") == "http.request":
             body = message.get("body", b"")
@@ -67,6 +79,7 @@ async def request_body_size_middleware(request: Request, call_next: Callable[[Re
                 bytes_seen += len(body)
                 if bytes_seen > MAX_REQUEST_BODY_BYTES:
                     too_large = True
+                    return {"type": "http.request", "body": b"", "more_body": False}
         return message
 
     request._receive = counting_receive  # type: ignore[assignment]  # noqa: SLF001

@@ -22,11 +22,12 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-# Pinned to a specific commit on pipelex's `feature/post-pr933-followups` branch
-# so CI can resolve the dependency from GitHub (the prior `path = "../_for_api"`
-# editable install only worked locally — `_for_api/` is a workspace worktree, not
-# a CI checkout). Update the `rev` when bumping to a newer pipelex commit.
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "8b04ff142e2ece16c9db34191d87074ebc8372cb" }
+# Pinned to a specific commit on pipelex's `feature/Adapt-to-api` branch so
+# CI / Docker can resolve the dependency from GitHub (the prior
+# `path = "../_for_api"` editable install only worked locally — `_for_api/` is
+# a workspace worktree, not reachable from a CI checkout or a Docker build
+# context). Update the `rev` when bumping to a newer pipelex commit.
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "0be0e3327e242c9639f71a9b2a904ff3ed95b9cd" }
 
 [build-system]
 requires = ["hatchling"]

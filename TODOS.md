@@ -9,8 +9,9 @@ This document tracks the error-handling rework for `pipelex-api`. The original d
 - **This PR delivers Phases 0–3** — the synchronous error path. Every API error response now emits RFC 7807 `application/problem+json` with the same field set across pipelex domain errors, validation errors (4xx), auth (401/403), payload limits (413), and the catch-all 500.
 - **Phase A0 (adapt to post-#931/#933 pipelex) is now ALSO on this branch** — see the section near the bottom for the commit shape and what landed. Phase 4 partially folded in (T6 cross-path regression test only; structured-logging item deferred upstream).
 - **Phase 5 (docs + CHANGELOG + CLAUDE.md) is now ALSO on this branch** — see the "Phase 5 — Documentation (✅ landed)" section near the bottom. Archive cleanup already shipped in Phase A0.
-- **This PR ends at Phase 5.** Next track is webhook signing — its plan is split out to `wip/webhook-signing-cross-repo.md` (workspace-level) and `_for_api/wip/security/webhook-signing.md` (authoritative pipelex-side plan). Cross-repo, lockstep, Louis-gated.
-- **Branch:** `feature/Adapt-to-pipelex-update-2`.
+- **Phase A1 (sync to pipelex `feature/API-readiness-2`) is now ALSO on this branch.** Pipelex merged `dev` into the readiness branch (picking up releases v0.30.0 / v0.30.1 / v0.30.2) and added `request_id` threading through `DeliveryExecutor` on top. Nothing on the API consumption surface changed; the work was a pin bump + revalidation. See "Phase A1 — Sync to `feature/API-readiness-2`" near the bottom.
+- **This PR ends at Phase A1.** Next track is webhook signing — its plan is split out to `wip/webhook-signing-cross-repo.md` (workspace-level) and `_for_api/wip/security/webhook-signing.md` (authoritative pipelex-side plan). Cross-repo, lockstep, Louis-gated.
+- **Branch:** `feature/Adapt-to-pipelex-update-3`. Pipelex side: `feature/API-readiness-2` (carries upstream `dev`).
 - **Phase 3 review** (13 questions surfaced by a multi-agent review at Checkpoint C) **is fully resolved.** Each got a verdict (fix / document-as-intended / file upstream) and the code/tests landed across commits `e683338` → `2a78409`. See the "Phase 3 review resolutions" section below for the one-paragraph summary; the per-question detail lives in those commit messages and in `wip/pipelex-changes.md` Stage 7 (for the upstream items filed).
 
 ---
@@ -198,7 +199,6 @@ Upstream items filed during the review (in `pipelex-changes.md` Stage 7, none bl
 - **JSON log sink.** The structured-log strings (`event=api_error key=value ...`) are greppable today; swap to native structured emission once a JSON sink lands. Plan-sanctioned followup from Checkpoint B reconciliation #2.
 - **`pipe_code` / `pipeline_run_id` body-derived log fields.** Mechanism is in place (`request.state` + `_*_of` getters in the handler) — wiring deferred. Open piece of Checkpoint B reconciliation #4.
 - **Kajson untrusted-deserialization design pass.** Separate track at `wip/security/kajson-untrusted-deserialization.md`. Realistic attack surface bounded today; needs `pipelex-app` and `pipelex-api-deploy` in the conversation.
-- **`RecursionError` from deeply-nested JSON.** Follow-up to Q10; one-line catch widening or json-stream-validator pre-pass once the contract question lands. **Discuss:** decide whether to fold `RecursionError` into `_decode_body`'s catch tuple (one-token change, makes the 1000+ deep-nested-array case land as a 422 instead of a sanitized 500) or close it upstream with a stream-pre-pass. Either lands; the question is where the validator lives. Re-surface during Phase 5 cleanup.
 
 ---
 
@@ -221,7 +221,7 @@ Upstream items filed during the review (in `pipelex-changes.md` Stage 7, none bl
 
 Reacts to the hardening tail of pipelex `feature/post-pr933-followups` (the body of work that originally shipped as PRs #931 / #933 plus the follow-ups landing on top of it). Surface-area changes: error-class import paths, STRICT disclosure keying provenance, native end-to-end `request_id`, acronym-casing in error titles.
 
-**Pipelex source pin — temporary git-rev (was: editable path).** `pyproject.toml` `[tool.uv.sources]` originally declared `pipelex = { path = "../_for_api", editable = true }` so `make install` resolved to whatever was checked out on `_for_api/`. That breaks CI (the GHA runner only checks out `pipelex-api/`, not the sibling `pipelex` repo), so commit `5be3c06` flipped it to `pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "<sha>" }`, pinned to the HEAD of `feature/post-pr933-followups` at that moment. **This is a temporary stopgap** — the intended end-state is to bump the PyPI floor (`pipelex==0.29.1` in `dependencies`) once the pipelex side and the API side are both ready to ship together. Bump the `rev` to pick up newer pipelex commits in the meantime. Owner: Louis decides when to flip back to a PyPI pin (cross-repo release coordination).
+**Pipelex source pin — temporary git-rev (was: editable path).** `pyproject.toml` `[tool.uv.sources]` originally declared `pipelex = { path = "../_for_api", editable = true }` so `make install` resolved to whatever was checked out on `_for_api/`. That breaks CI (the GHA runner only checks out `pipelex-api/`, not the sibling `pipelex` repo), so commit `5be3c06` flipped it to `pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "<sha>" }`, pinned to the HEAD of `feature/post-pr933-followups` at that moment. Phase A1 bumped the pin again to track `feature/API-readiness-2` (current rev `0be0e332`). **This is still a temporary stopgap** — the intended end-state is to bump the PyPI floor (`pipelex>=<next-release>` in `dependencies`) once the pipelex side and the API side are both ready to ship together. Bump the `rev` to pick up newer pipelex commits in the meantime. Owner: Louis decides when to flip back to a PyPI pin (cross-repo release coordination).
 
 ### What landed
 
@@ -277,14 +277,40 @@ The `/validate` failure envelope change (Q11) breaks consumers that read the old
 
 ---
 
+## Phase A1 — Sync to pipelex `feature/API-readiness-2` (✅ landed on `feature/Adapt-to-pipelex-update-3`)
+
+Pipelex consolidated work onto `feature/API-readiness-2`: merged `origin/dev` (carrying releases v0.30.0 / v0.30.1 / v0.30.2 — agent CLI silencing, doctor command hardening, validation/log discipline) and added four commits on top — none of them touching the pipelex surface this API consumes.
+
+**What landed on the API side.** A pin bump and a clean revalidation. `pyproject.toml` `[tool.uv.sources]` flipped `rev` to `0be0e3327e242c9639f71a9b2a904ff3ed95b9cd` (HEAD of `feature/API-readiness-2`). No production code changed. `make c` and `make tp` are green: 205 tests pass (was 193 at the end of Phase A0; the +12 are the new tests that already landed during Phase A0, not new work here).
+
+**What landed upstream that's relevant to us.**
+
+- `9092b81d` — `fix(validate)`: scoped down `current-library` restore to the bundle-load failure path. No-op for the API (our `/build/*` routes' `try/finally` teardown is unchanged on our side).
+- `ceb018b5` + `07f9cce9` — `DeliveryExecutor` now threads `request_id` through both the workflow path and `PipeRun`'s direct-mode dispatcher. This is the **plumbing** that the deferred "structured `event=webhook_delivery` / `event=webhook_failure`" item needed. The structured event-name emission itself is still WIP upstream (see `_for_api/wip/console-targets-and-agent-cli-stdout.md` for the kick-off doc). Our existing T6 cross-path test (`tests/unit/test_webhook_recovery.py`) is unaffected — it pins error rendering consistency, not `request_id` presence in the webhook payload.
+- `0be0e332` — docs only; kicks off the upstream structured-logging refactor.
+
+**Dev merge content (recorded for cold-start readers).** The merge brought 0.30.0 / 0.30.1 / 0.30.2 release work: doctor command preserves partial health report on bootstrap config errors; agent CLI silences logging via `app_callback` for full subcommand coverage; stdout discipline + `tomlkit` migration. Tests live entirely under `pipelex/cli/agent_cli/` — does not touch any module we import.
+
+### Verification at commit time
+
+- `make install && make c && make tp` clean.
+- 205 tests pass. Pyright + mypy: 0 errors. Ruff: clean.
+
+### Out of scope (recorded, not in this branch)
+
+- Same set as Phase A0. The `DeliveryExecutor` `request_id` plumbing landing upstream does **not** discharge the structured-log follow-up — it just unblocks it. The event-name emission still belongs in a pipelex PR.
+
+---
+
 # Deferred / next-track work
 
 ## Upstream-pipelex follow-ups
 
 Items that belong in `pipelex/` rather than `pipelex-api/`, surfaced during this PR's audits. Track here so they don't get lost; land via separate pipelex PRs.
 
-- **Structured `event=webhook_delivery` / `event=webhook_failure` logging** at `pipelex/pipe_run/delivery_executor.py:270`. The receiver-side consistency T6 test landed in Phase A0; the sender-side log enrichment is upstream-pipelex work. Surface to the next pipelex session.
+- **Structured `event=webhook_delivery` / `event=webhook_failure` logging** at `pipelex/pipe_run/delivery_executor.py:270`. The receiver-side consistency T6 test landed in Phase A0. The plumbing landed upstream in Phase A1 (`ceb018b5` / `07f9cce9` thread `request_id` through `DeliveryExecutor`). The remaining work is the actual structured event-name emission — kick-off doc lives at `_for_api/wip/console-targets-and-agent-cli-stdout.md`. Surface to the next pipelex session.
 - **Stage 7 items #10–#15** in `wip/pipelex-changes.md` (`EnvVarNotFoundError` → `CONFIG` domain, `parse_concept_spec` shape validation, `LocalStorageProvider` `OSError` wrap, `S3StorageProvider` `BotoCoreError` widening, `ErrorDomain.is_input` helper, kajson crafted-marker exceptions). None landed on `feature/post-pr933-followups`; still open upstream.
+- **Webhook-delivery SSRF DNS check.** `api/schemas/models.py::_is_disallowed_host` only blocks literal private/loopback/metadata IPs at request time — a callback URL like `https://attacker.example/cb` passes validation while its DNS record can resolve to `169.254.169.254` / `127.0.0.0/8` / `10.0.0.0/8` when the worker later fires the webhook. The fix belongs at delivery time in `pipelex/pipe_run/delivery_executor.py`'s webhook HTTP client: a custom resolver (or `httpx` event hook) that re-checks the resolved IP against the same `_is_disallowed_host` rule and aborts on a private destination, plus optionally an egress allowlist / proxy at the deploy layer. Keep the literal-host check in the API as a cheap first line of defense.
 
 ## Next track — webhook signing
 
