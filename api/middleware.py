@@ -45,9 +45,10 @@ async def request_body_size_middleware(request: Request, call_next: Callable[[Re
          they arrive. When the cumulative count crosses the cap, the over-limit
          chunk is NOT forwarded: it is replaced with an end-of-stream marker so
          `await request.body()` returns a bounded (often empty) body rather than
-         the full oversized payload, and any further read returns `http.disconnect`.
-         The 413 response then overrides whatever the route returned on its
-         truncated input.
+         the full oversized payload, and any further read keeps returning the
+         same terminator (NOT `http.disconnect`, which would raise
+         `ClientDisconnect` and escape past the 413 override). The 413 response
+         then overrides whatever the route returned on its truncated input.
     """
     content_length = request.headers.get("content-length")
     if content_length is not None:
@@ -65,7 +66,12 @@ async def request_body_size_middleware(request: Request, call_next: Callable[[Re
     async def counting_receive() -> Message:
         nonlocal bytes_seen, too_large
         if too_large:
-            return {"type": "http.disconnect"}
+            # Idempotent end-of-stream on every subsequent read. Returning
+            # `http.disconnect` instead would raise `ClientDisconnect` in
+            # Starlette's body reader, which would escape `call_next` as an
+            # exception and bypass the 413 override below — the request would
+            # land as a sanitized 500 instead of 413.
+            return {"type": "http.request", "body": b"", "more_body": False}
         message = await original_receive()
         if message.get("type") == "http.request":
             body = message.get("body", b"")
