@@ -72,12 +72,12 @@ If the bundle is invalid, the endpoint returns **HTTP 422** with an [RFC 7807 pr
 
 ```json
 {
-  "type": "https://docs.pipelex.com/latest/errors/validate-bundle-error/",
-  "title": "Validate bundle error",
+  "type": "https://docs.pipelex.com/latest/errors/validation-error/",
+  "title": "Validation error",
   "status": 422,
-  "detail": "Bundle does not declare a main_pipe, which is required for validation.",
+  "detail": "Bundle does not declare a main_pipe, which is required for validation",
   "instance": "/api/v1/validate",
-  "error_type": "ValidateBundleError",
+  "error_type": "ValidationError",
   "error_domain": "input",
   "retryable": false,
   "request_id": "9f2c1ab3-…"

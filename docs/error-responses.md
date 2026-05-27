@@ -8,12 +8,12 @@ A failure response looks like this:
 
 ```json
 {
-  "type": "https://docs.pipelex.com/latest/errors/validate-bundle-error/",
-  "title": "Validate bundle error",
+  "type": "https://docs.pipelex.com/latest/errors/validation-error/",
+  "title": "Validation error",
   "status": 422,
-  "detail": "Bundle does not declare a main_pipe, which is required for validation.",
+  "detail": "Bundle does not declare a main_pipe, which is required for validation",
   "instance": "/api/v1/validate",
-  "error_type": "ValidateBundleError",
+  "error_type": "ValidationError",
   "error_domain": "input",
   "retryable": false,
   "request_id": "9f2c1ab3-…"
@@ -26,11 +26,11 @@ A failure response looks like this:
 
 **Standard RFC 7807 members** — `type`, `title`, `status`, `detail`, `instance`.
 
-**Extension members** — all optional except `error_type`, `error_domain`, `retryable`:
+**Extension members** — only `error_type` is always present; the others appear when the originating error populates them:
 
 - `error_type` — stable class name of the originating error (`ValidateBundleError`, `EnvVarNotFoundError`, `WorkflowExecutionError`, …). The same identifier the `type` URI is derived from.
-- `error_domain` — one of `input`, `config`, `runtime`. See [Status codes](#status-codes).
-- `retryable` — whether retrying the same request can plausibly succeed. `false` for 4xx; `true` only when the originating error explicitly classifies itself as transient (e.g. inference provider rate limits).
+- `error_domain` — one of `input`, `config`, `runtime`. See [Status codes](#status-codes). Absent for domain-less pipelex errors (some pipelex tool errors, e.g. `EnvVarNotFoundError`, do not classify a domain — the HTTP status still defaults to **500**).
+- `retryable` — whether retrying the same request can plausibly succeed. Always emitted for API-authored 4xx/5xx (always `false`). For pipelex-originated errors, present only when the source error populates it — `true` only when the originating error explicitly classifies itself as transient (e.g. inference provider rate limits); absent on pipelex errors that don't set it (e.g. `EnvVarNotFoundError`, `PipelexConfigError`).
 - `request_id` — server-correlated identifier for the request. Echoed from inbound `X-Request-ID` if provided, otherwise generated. Use this when reporting issues.
 - `error_category` — finer classification when the originating error provides one (currently used by inference errors — see [`InferenceErrorCategory`](https://docs.pipelex.com/latest/errors/) upstream).
 - `user_action` — structured suggestion of what the caller should do next, when the error can author one.
@@ -99,12 +99,12 @@ Content-Type: application/problem+json
 X-Request-ID: 9f2c1ab3-…
 
 {
-  "type": "https://docs.pipelex.com/latest/errors/validate-bundle-error/",
-  "title": "Validate bundle error",
+  "type": "https://docs.pipelex.com/latest/errors/validation-error/",
+  "title": "Validation error",
   "status": 422,
-  "detail": "Bundle does not declare a main_pipe, which is required for validation.",
+  "detail": "Bundle does not declare a main_pipe, which is required for validation",
   "instance": "/api/v1/validate",
-  "error_type": "ValidateBundleError",
+  "error_type": "ValidationError",
   "error_domain": "input",
   "retryable": false,
   "request_id": "9f2c1ab3-…"
@@ -120,16 +120,16 @@ X-Request-ID: 9f2c1ab3-…
 
 {
   "type": "https://docs.pipelex.com/latest/errors/env-var-not-found-error/",
-  "title": "Env var not found error",
+  "title": "Environment variable not set",
   "status": 500,
   "detail": "Missing required environment variable: COMPLETION_CALLBACK_SECRET",
   "instance": "/api/v1/pipeline/start",
   "error_type": "EnvVarNotFoundError",
-  "error_domain": "config",
-  "retryable": false,
   "request_id": "9f2c1ab3-…"
 }
 ```
+
+`EnvVarNotFoundError` is a domain-less pipelex tool error — neither `error_domain` nor `retryable` is populated on the report, so both extension members are absent on the wire. The HTTP status is still **500** (the deployment, not the caller, has to fix it), but the classification fields only ride along when the originating error sets them. See [Fields](#fields).
 
 Under `ERROR_DISCLOSURE=strict` the same failure has `detail` redacted to `"Server configuration error"` — the env var name lives in the server log only.
 
