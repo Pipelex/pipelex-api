@@ -182,6 +182,32 @@ def _validate_extras(request_data: dict[str, Any]) -> PipelineApiExtras:
         )
 
 
+# Per-field bound applied at the request.state binding site so an oversized
+# caller-supplied `pipe_code` cannot blow up downstream log-line size.
+# `PipelineRequest.pipe_code` carries no Pydantic `max_length`; this is the
+# narrow cap that protects the structured error log without changing the
+# upstream type contract. 256 covers any realistic pipe code (kebab-case
+# identifier, typically tens of chars) with headroom.
+_MAX_CORRELATION_FIELD_LEN = 256
+
+
+def _coerce_correlation_field(value: Any) -> str | None:
+    """Normalize a body-derived correlation identifier for `request.state` binding.
+
+    Returns `None` when the value is missing, empty, or non-string — so the
+    handler's `_pipe_code_of` / `_pipeline_run_id_of` getters see a uniform
+    `None` and `emit_error_log` drops the field rather than rendering a bare
+    `pipe_code=` token (the empty-string case would otherwise pass the
+    `is not None` filter in `emit_error_log` and look like a logfmt parse
+    error to downstream sinks). Truncates oversized strings to
+    `_MAX_CORRELATION_FIELD_LEN` so a caller cannot inflate every error log
+    line for the request by sending a megabyte-long pipe_code.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    return value[:_MAX_CORRELATION_FIELD_LEN]
+
+
 async def _parse_request(request: Request) -> tuple[PipelineRequest, PipelineApiExtras]:
     """Parse and validate the request body.
 
@@ -196,6 +222,15 @@ async def _parse_request(request: Request) -> tuple[PipelineRequest, PipelineApi
     """
     body = await request.body()
     request_data = _decode_body(body)
+    # Bind body-derived correlation identifiers onto `request.state` as soon as
+    # the raw dict is in hand — before `_validate_extras` or `from_body`, so a
+    # later validation failure (a rejected callback URL, a Pydantic coercion
+    # error on a sibling field) still rides the identifiers the caller named.
+    # `_coerce_correlation_field` normalizes empty / non-string / oversized.
+    # Mirrors the `_set_request_user` pattern in `api.security` (binding the
+    # earliest known identity onto the request).
+    request.state.pipe_code = _coerce_correlation_field(request_data.get("pipe_code"))
+    request.state.pipeline_run_id = _coerce_correlation_field(request_data.get("pipeline_run_id"))
     extras = _validate_extras(request_data)
     try:
         pipeline_request = PipelineRequest.from_body(request_data)

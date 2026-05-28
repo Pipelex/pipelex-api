@@ -68,6 +68,52 @@ def _user_id_of(request: Request) -> str | None:
     return user.user_id if user is not None else None
 
 
+def _pipe_code_of(request: Request) -> str | None:
+    """Return the body-derived `pipe_code` when `_parse_request` bound one.
+
+    `api.routes.pipelex.pipeline._parse_request` writes `pipe_code` onto
+    `request.state` right after the body decodes (before
+    `_validate_extras` / `from_body`), normalized through
+    `_coerce_correlation_field` — empty / non-string / oversized inputs become
+    `None` so a caller cannot inject a bare `pipe_code=` token or inflate the
+    log line. Returns `None` for routes that don't use `_parse_request`, for
+    requests whose body never decoded (`_decode_body` raised 422), and for
+    bodies that legitimately omitted `pipe_code` (the `mthds_contents`-only
+    invocation). `emit_error_log` drops `None`-valued fields.
+    """
+    return getattr(request.state, "pipe_code", None)
+
+
+def _pipeline_run_id_of(request: Request) -> str | None:
+    """Return the parsed `pipeline_run_id` when `_parse_request` bound one on the request.
+
+    Same shape as `_pipe_code_of`. Source: the raw body's `pipeline_run_id`,
+    normalized through `_coerce_correlation_field` at the binding site (empty
+    string → `None`, oversized → truncated). Letting the field ride every
+    error log lets an operator correlate the API-side failure with the
+    worker-side traces that share the same run id, without each backend frame
+    having to forward it.
+    """
+    return getattr(request.state, "pipeline_run_id", None)
+
+
+def _request_correlation_fields(request: Request) -> dict[str, str | None]:
+    """Return the request-scoped correlation fields every error log carries.
+
+    Single source of truth for the `user_id` / `pipe_code` / `pipeline_run_id`
+    field set so the three log paths (`_log_error_report`,
+    `_log_api_authored_error`, `handle_unexpected_error`) cannot drift. Each
+    value is `None` when the corresponding state is not bound on this request;
+    `emit_error_log` drops `None`-valued fields, so unbound identifiers are
+    absent from the rendered line rather than appearing as `pipe_code=None`.
+    """
+    return {
+        "user_id": _user_id_of(request),
+        "pipe_code": _pipe_code_of(request),
+        "pipeline_run_id": _pipeline_run_id_of(request),
+    }
+
+
 def _retry_after_header(report: ErrorReport) -> dict[str, str]:
     """Return a `Retry-After` header dict when a retry hint applies to this response.
 
@@ -160,7 +206,7 @@ def _log_error_report(report: ErrorReport, *, request: Request, request_id: str 
         "event": "api_error",
         "request_id": request_id,
         "route": request.url.path,
-        "user_id": _user_id_of(request),
+        **_request_correlation_fields(request),
         "error_type": report.error_type,
         "error_category": report.error_category,
         "error_domain": report.error_domain,
@@ -209,7 +255,7 @@ def _log_api_authored_error(*, document: dict[str, Any], status: int, request: R
         "event": "api_error",
         "request_id": request_id,
         "route": request.url.path,
-        "user_id": _user_id_of(request),
+        **_request_correlation_fields(request),
         "error_type": document.get("error_type"),
         "error_domain": error_domain,
         "retryable": document.get("retryable"),
@@ -350,7 +396,7 @@ async def handle_unexpected_error(request: Request, exc: Exception) -> Response:
             "event": "api_error",
             "request_id": request_id,
             "route": request.url.path,
-            "user_id": _user_id_of(request),
+            **_request_correlation_fields(request),
             "error_type": type(exc).__name__,
             "error_category": "unknown",
             "error_domain": ErrorDomain.RUNTIME,

@@ -10,6 +10,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from mthds.client.pipeline import PipelineState
+from pipelex.base_exceptions import PipelexConfigError
 from pipelex.pipeline.pipeline_response import PipelexPipelineStartResponse
 from pytest_mock import MockerFixture
 
@@ -181,6 +182,114 @@ class TestPipelineRoutes:
         start_mock.assert_awaited_once()
         kwargs = start_mock.await_args.kwargs
         assert kwargs["callback_urls"] == ["https://example.com/done"]
+
+    def test_parse_request_binds_pipe_code_and_pipeline_run_id_to_state(self, mocker: MockerFixture):
+        # End-to-end: a real POST that goes through `_parse_request` must bind
+        # `pipe_code` / `pipeline_run_id` on `request.state` so that a
+        # downstream failure (here: `start_pipeline` raising `PipelexConfigError`)
+        # is logged with both fields. The unit-level tests pin the
+        # handler->getter->log path; this one pins that `_parse_request` itself
+        # actually writes to `request.state` against the production route.
+        # Both values are kept free of logfmt-active characters (whitespace,
+        # `=`, `"`) so the substring assertions below match the unquoted
+        # rendering. Future test additions that exercise quoted values should
+        # parse the logfmt line via the `_parse_logfmt` helper in
+        # `test_exception_handlers.py` instead of substring matching.
+        client, _, start_mock = _build_client(mocker)
+        body_pipe_code = "echo"
+        body_pipeline_run_id = "run-end-to-end-0001"
+        start_mock.side_effect = PipelexConfigError("simulated config fault inside the runner")
+        log_spy = mocker.patch("api.exception_handlers.log")
+        response = client.post(
+            "/api/v1/pipeline/start",
+            json={
+                "pipe_code": body_pipe_code,
+                "mthds_contents": [VALID_MTHDS],
+                "inputs": {"text": "hello"},
+                "pipeline_run_id": body_pipeline_run_id,
+            },
+        )
+        assert response.status_code == 500
+        log_spy.error.assert_called_once()
+        rendered = log_spy.error.call_args.args[0]
+        assert f"pipe_code={body_pipe_code}" in rendered
+        assert f"pipeline_run_id={body_pipeline_run_id}" in rendered
+
+    def test_parse_request_drops_empty_correlation_fields(self, mocker: MockerFixture):
+        # An empty-string `pipe_code` / `pipeline_run_id` in the body must NOT
+        # render as a bare `pipe_code=` token in the operator log — the bare
+        # token reads as a logfmt parse error to downstream sinks and defeats
+        # grep-by-value. `_coerce_correlation_field` normalizes empty strings
+        # to `None`, and `emit_error_log` drops `None`-valued fields.
+        client, _, start_mock = _build_client(mocker)
+        start_mock.side_effect = PipelexConfigError("simulated config fault")
+        log_spy = mocker.patch("api.exception_handlers.log")
+        response = client.post(
+            "/api/v1/pipeline/start",
+            json={
+                "pipe_code": "",
+                "mthds_contents": [VALID_MTHDS],
+                "inputs": {"text": "hello"},
+                "pipeline_run_id": "",
+            },
+        )
+        assert response.status_code == 500
+        log_spy.error.assert_called_once()
+        rendered = log_spy.error.call_args.args[0]
+        # No bare token of either kind — neither `pipe_code= ` nor at end-of-line.
+        assert "pipe_code=" not in rendered
+        assert "pipeline_run_id=" not in rendered
+
+    def test_parse_request_caps_oversized_pipe_code(self, mocker: MockerFixture):
+        # `PipelineRequest.pipe_code` carries no Pydantic max_length, so a
+        # caller can in principle send a megabyte-long string. The binding
+        # site caps the value rendered into operator logs so a single failed
+        # request cannot blow per-line log-sink budgets. 256 is the limit;
+        # anything longer is silently truncated for the log surface (the
+        # actual `pipeline_request.pipe_code` passed to the runner is
+        # unchanged — only the `request.state` mirror is capped).
+        client, _, start_mock = _build_client(mocker)
+        start_mock.side_effect = PipelexConfigError("simulated config fault")
+        log_spy = mocker.patch("api.exception_handlers.log")
+        oversized = "x" * 5000
+        response = client.post(
+            "/api/v1/pipeline/start",
+            json={
+                "pipe_code": oversized,
+                "mthds_contents": [VALID_MTHDS],
+                "inputs": {"text": "hello"},
+            },
+        )
+        assert response.status_code == 500
+        log_spy.error.assert_called_once()
+        rendered = log_spy.error.call_args.args[0]
+        # The capped value (256 x's) appears in the log; the original 5000-x
+        # string does NOT — proves the cap fires and bounds the per-line cost.
+        assert f"pipe_code={'x' * 256}" in rendered
+        assert "x" * 5000 not in rendered
+
+    def test_parse_request_binds_pipe_code_before_extras_validation(self, mocker: MockerFixture):
+        # The binding must run BEFORE `_validate_extras` so an SSRF-rejected
+        # callback URL (or any other extras-validation 422) still rides the
+        # caller's `pipe_code` into the operator log. The unit-level tests
+        # cannot exercise this ordering — only an end-to-end POST does.
+        client, _, _ = _build_client(mocker)
+        log_spy = mocker.patch("api.exception_handlers.log")
+        body_pipe_code = "echo"
+        response = client.post(
+            "/api/v1/pipeline/start",
+            json={
+                "pipe_code": body_pipe_code,
+                # An AWS-metadata URL — blocked by `_is_disallowed_host`, so
+                # `_validate_extras` raises 422 before `from_body` runs.
+                "callback_urls": ["http://169.254.169.254/latest/meta-data/"],
+            },
+        )
+        assert response.status_code == 422
+        # An INPUT-domain 422 logs at `warning`, not `error`.
+        log_spy.warning.assert_called_once()
+        rendered = log_spy.warning.call_args.args[0]
+        assert f"pipe_code={body_pipe_code}" in rendered
 
     def test_start_propagates_request_id_to_runner(self, mocker: MockerFixture):
         # The middleware binds the inbound `X-Request-ID` onto the request-scoped
