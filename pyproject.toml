@@ -15,11 +15,16 @@ classifiers = [
 ]
 
 dependencies = [
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal,temporal]==0.28.0",
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal,temporal]==0.31.0",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",
 ]
+
+[tool.uv.sources]
+# Pinned to a specific commit on pipelex's `feature/Adapt-to-api` branch so
+# CI / Docker can resolve the dependency from GitHub
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "11a10ed73e22d91a0ddf75979b9f0ac06bcc5f13" }
 
 [build-system]
 requires = ["hatchling"]

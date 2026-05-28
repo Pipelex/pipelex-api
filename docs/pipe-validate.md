@@ -68,12 +68,20 @@ Validate MTHDS content by parsing, loading, and dry-running pipes without execut
 
 **Error Responses:**
 
-If the bundle is invalid, the endpoint returns HTTP 200 with `success: false`:
+If the bundle is invalid, the endpoint returns **HTTP 422** with an [RFC 7807 problem document](error-responses.md):
 
 ```json
 {
-  "success": false,
-  "mthds_contents": ["..."],
-  "message": "Bundle does not declare a main_pipe, which is required for validation"
+  "type": "https://docs.pipelex.com/latest/errors/validation-error/",
+  "title": "Validation error",
+  "status": 422,
+  "detail": "Bundle does not declare a main_pipe, which is required for validation",
+  "instance": "/api/v1/validate",
+  "error_type": "ValidationError",
+  "error_domain": "input",
+  "retryable": false,
+  "request_id": "9f2c1ab3-…"
 }
 ```
+
+The HTTP status code is the source of truth — a 200 always means success, and the success body never carries a `success: false` failure mode. See [Error Responses](error-responses.md) for the full envelope and disclosure modes.

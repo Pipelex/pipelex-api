@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Annotated, Any, cast
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from kajson import kajson
+from kajson.exceptions import KajsonDecoderError
+from mthds.client.exceptions import PipelineRequestError
 from mthds.client.pipeline import PipelineRequest, PipelineState
 from pipelex.config import get_config
 from pipelex.pipe_run.delivery_assignment import DeliveryAssignment, StorageTarget, WebhookTarget
@@ -19,7 +21,8 @@ from pydantic import ValidationError
 from typing_extensions import override
 
 from api.error_types import ErrorType
-from api.errors import ENDPOINT_HANDLED_EXCEPTIONS, raise_internal_error, raise_validation_error
+from api.errors import raise_validation_error
+from api.logging_context import get_request_id
 from api.routes.pipelex.utils import get_current_iso_timestamp
 from api.schemas.models import PipelineApiExtras
 
@@ -70,6 +73,7 @@ class ApiRunner(PipelexRunner):
         dynamic_output_concept_ref: str | None = None,
         pipeline_run_id: str | None = None,
         callback_urls: list[str] | None = None,
+        request_id: str | None = None,
     ) -> PipelexPipelineStartResponse:
         """Start a pipeline execution asynchronously without waiting for completion."""
         created_at = get_current_iso_timestamp()
@@ -91,6 +95,7 @@ class ApiRunner(PipelexRunner):
             search_domain_codes=self.search_domain_codes,
             user_id=self.user_id,
             pipeline_run_id=pipeline_run_id,
+            request_id=request_id,
         )
 
         delivery_assignment = DeliveryAssignment(
@@ -121,10 +126,34 @@ class ApiRunner(PipelexRunner):
 
 
 def _decode_body(body: bytes) -> dict[str, Any]:
-    """kajson-decode the body and confirm it's a dict. Raises 422 if not."""
+    """kajson-decode the body and confirm it's a dict. Raises 422 if not.
+
+    The catch covers the kajson decode failures we've documented and
+    verified empirically against the pinned kajson:
+      - `UnicodeDecodeError` — body bytes are not valid UTF-8.
+      - `ValueError` — `json.JSONDecodeError` (it subclasses `ValueError`).
+      - `KajsonDecoderError` — kajson's named class for bad module name,
+        class-not-found, enum mismatch, and pydantic validation failures.
+      - bare `KeyError` / `AttributeError` / `TypeError` — protocol-shape
+        leaks where kajson dereferences crafted `__class__` / `__module__`
+        markers without wrapping (a `__class__` without a `__module__`, a
+        non-string marker, a generic-typed class whose base fallback also
+        resolves nothing). Tracked upstream so kajson eventually wraps
+        them in `KajsonDecoderError`; see
+        `wip/pipelex-changes.md` #15.
+      - `RecursionError` — a deeply-nested JSON array or object exhausts
+        the interpreter's recursion budget inside the JSON parser. Still
+        a caller-controllable input shape, so it maps to 422 alongside
+        the rest rather than escaping to a sanitized 500.
+    All of these are caller mistakes — the body is malformed against
+    kajson's contract — so they map to a 422, not a sanitized 500. The
+    scope here is one line (`kajson.loads(...)`), so catching the bare
+    three cannot mask a programming bug in our code — the only source of
+    those types within this try block is kajson's internal handling.
+    """
     try:
         decoded = kajson.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError) as exc:
+    except (UnicodeDecodeError, ValueError, KajsonDecoderError, KeyError, AttributeError, TypeError, RecursionError) as exc:
         raise_validation_error(
             message=f"Request body is not valid JSON: {exc!s}",
             error_type=ErrorType.INVALID_JSON,
@@ -153,6 +182,32 @@ def _validate_extras(request_data: dict[str, Any]) -> PipelineApiExtras:
         )
 
 
+# Per-field bound applied at the request.state binding site so an oversized
+# caller-supplied `pipe_code` cannot blow up downstream log-line size.
+# `PipelineRequest.pipe_code` carries no Pydantic `max_length`; this is the
+# narrow cap that protects the structured error log without changing the
+# upstream type contract. 256 covers any realistic pipe code (kebab-case
+# identifier, typically tens of chars) with headroom.
+_MAX_CORRELATION_FIELD_LEN = 256
+
+
+def _coerce_correlation_field(value: Any) -> str | None:
+    """Normalize a body-derived correlation identifier for `request.state` binding.
+
+    Returns `None` when the value is missing, empty, or non-string — so the
+    handler's `_pipe_code_of` / `_pipeline_run_id_of` getters see a uniform
+    `None` and `emit_error_log` drops the field rather than rendering a bare
+    `pipe_code=` token (the empty-string case would otherwise pass the
+    `is not None` filter in `emit_error_log` and look like a logfmt parse
+    error to downstream sinks). Truncates oversized strings to
+    `_MAX_CORRELATION_FIELD_LEN` so a caller cannot inflate every error log
+    line for the request by sending a megabyte-long pipe_code.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    return value[:_MAX_CORRELATION_FIELD_LEN]
+
+
 async def _parse_request(request: Request) -> tuple[PipelineRequest, PipelineApiExtras]:
     """Parse and validate the request body.
 
@@ -167,30 +222,48 @@ async def _parse_request(request: Request) -> tuple[PipelineRequest, PipelineApi
     """
     body = await request.body()
     request_data = _decode_body(body)
+    # Bind body-derived correlation identifiers onto `request.state` as soon as
+    # the raw dict is in hand — before `_validate_extras` or `from_body`, so a
+    # later validation failure (a rejected callback URL, a Pydantic coercion
+    # error on a sibling field) still rides the identifiers the caller named.
+    # `_coerce_correlation_field` normalizes empty / non-string / oversized.
+    # Mirrors the `_set_request_user` pattern in `api.security` (binding the
+    # earliest known identity onto the request).
+    request.state.pipe_code = _coerce_correlation_field(request_data.get("pipe_code"))
+    request.state.pipeline_run_id = _coerce_correlation_field(request_data.get("pipeline_run_id"))
     extras = _validate_extras(request_data)
-    pipeline_request = PipelineRequest.from_body(request_data)
+    try:
+        pipeline_request = PipelineRequest.from_body(request_data)
+    except (PipelineRequestError, ValidationError) as exc:
+        # `from_body` rejects a body where neither `pipe_code` nor
+        # `mthds_contents` is supplied (PipelineRequestError) and a body whose
+        # fields fail Pydantic coercion (ValidationError) — both are caller
+        # mistakes, not server faults, so they map to a 422 rather than
+        # escaping to the generic-500 fallback.
+        raise_validation_error(message=str(exc))
     return pipeline_request, extras
 
 
 @router.post("/pipeline/execute", response_model=PipelexPipelineExecuteResponse)
 async def execute(request: Request) -> JSONResponse:
-    """Execute a pipeline and wait for completion."""
+    """Execute a pipeline and wait for completion.
+
+    Pipelex domain failures propagate untouched: the global `PipelexError`
+    handler in `api.exception_handlers` turns them into an RFC 7807 problem response.
+    """
     pipeline_request, _extras = await _parse_request(request)
-    try:
-        runner = ApiRunner(user_id=_get_user_id(request))
-        response = await runner.execute_pipeline(
-            pipe_code=pipeline_request.pipe_code,
-            mthds_contents=pipeline_request.mthds_contents,
-            inputs=pipeline_request.inputs,
-            output_name=pipeline_request.output_name,
-            output_multiplicity=pipeline_request.output_multiplicity,
-            dynamic_output_concept_ref=pipeline_request.dynamic_output_concept_ref,
-        )
-        return JSONResponse(
-            content=response.model_dump(mode="json", serialize_as_any=True, by_alias=True),
-        )
-    except ENDPOINT_HANDLED_EXCEPTIONS as exc:
-        raise_internal_error(exc, context="pipeline_execute failed")
+    runner = ApiRunner(user_id=_get_user_id(request))
+    response = await runner.execute_pipeline(
+        pipe_code=pipeline_request.pipe_code,
+        mthds_contents=pipeline_request.mthds_contents,
+        inputs=pipeline_request.inputs,
+        output_name=pipeline_request.output_name,
+        output_multiplicity=pipeline_request.output_multiplicity,
+        dynamic_output_concept_ref=pipeline_request.dynamic_output_concept_ref,
+    )
+    return JSONResponse(
+        content=response.model_dump(mode="json", serialize_as_any=True, by_alias=True),
+    )
 
 
 @router.post("/pipeline/start", response_model=PipelexPipelineStartResponse)
@@ -198,19 +271,21 @@ async def start(
     request: Request,
     parsed: Annotated[tuple[PipelineRequest, PipelineApiExtras], Depends(_parse_request)],
 ) -> PipelexPipelineStartResponse:
-    """Start a pipeline execution asynchronously without waiting for completion."""
+    """Start a pipeline execution asynchronously without waiting for completion.
+
+    Pipelex domain failures propagate untouched: the global `PipelexError`
+    handler in `api.exception_handlers` turns them into an RFC 7807 problem response.
+    """
     pipeline_request, extras = parsed
-    try:
-        runner = ApiRunner(user_id=_get_user_id(request))
-        return await runner.start_pipeline(
-            pipe_code=pipeline_request.pipe_code,
-            mthds_contents=pipeline_request.mthds_contents,
-            inputs=pipeline_request.inputs,
-            output_name=pipeline_request.output_name,
-            output_multiplicity=pipeline_request.output_multiplicity,
-            dynamic_output_concept_ref=pipeline_request.dynamic_output_concept_ref,
-            pipeline_run_id=extras.pipeline_run_id,
-            callback_urls=extras.callback_urls,
-        )
-    except ENDPOINT_HANDLED_EXCEPTIONS as exc:
-        raise_internal_error(exc, context="pipeline_start failed")
+    runner = ApiRunner(user_id=_get_user_id(request))
+    return await runner.start_pipeline(
+        pipe_code=pipeline_request.pipe_code,
+        mthds_contents=pipeline_request.mthds_contents,
+        inputs=pipeline_request.inputs,
+        output_name=pipeline_request.output_name,
+        output_multiplicity=pipeline_request.output_multiplicity,
+        dynamic_output_concept_ref=pipeline_request.dynamic_output_concept_ref,
+        pipeline_run_id=extras.pipeline_run_id,
+        callback_urls=extras.callback_urls,
+        request_id=get_request_id(),
+    )

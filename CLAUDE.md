@@ -153,21 +153,31 @@ async def execute(
 
 ## Error Responses
 
-- Use `HTTPException` with structured `detail` dict containing `error_type` and `message`
-- Include `headers={"WWW-Authenticate": "Bearer"}` for auth errors
-- Log tracebacks for 500 errors
+Every error is rendered as RFC 7807 `application/problem+json` by the global handlers in `api/exception_handlers.py`. **Route handlers do not shape errors themselves** — they call into pipelex and let exceptions propagate. The wire contract is documented at `docs/error-responses.md`.
+
+- **Domain errors** (pipelex `PipelexError` subclasses) — raise from your code and let them propagate. The `PipelexError` global handler obtains an `ErrorReport` via `to_error_report()` and renders it into a problem document. Do not wrap, classify, or re-shape.
+- **API-authored 4xx/5xx** — use the helpers in `api/errors.py`: `raise_validation_error`, `raise_bad_request`, `raise_forbidden`, `raise_unauthenticated`, `raise_payload_too_large`, `raise_internal_server_error`. Each raises an `ApiError` carrying a pre-built problem document; the global handler emits it. **Do not raise `HTTPException` directly** — FastAPI's default handler wraps the body as `{"detail": <whatever>}` and cannot emit a flat RFC 7807 document.
+- **Auth errors** — the helpers set `WWW-Authenticate: Bearer` automatically on 401.
+- **Logging** — the global handlers emit one structured log line per error (`event=api_error`) with `request_id`, `route`, `error_type`, `error_domain`, `retryable`, `status`, and `user_id` when authenticated. `INPUT` domain logs at `warning`; everything else at `error` with traceback. Routes should not log error tracebacks themselves.
+
+Typical route:
 
 ```python
-except Exception as exc:
-    log.error("Pipeline execution error details:")
-    traceback.print_exc()
-    raise HTTPException(
-        status_code=500,
-        detail={
-            "error_type": type(exc).__name__,
-            "message": str(exc),
-        },
-    ) from exc
+@router.post("/start", response_model=PipelineStartResponse)
+async def start(
+    request: Annotated[PipelineRequest, Depends(request_deserialization)],
+    user: Annotated[RequestUser | None, Depends(get_optional_user)],
+    request_id: Annotated[str, Depends(get_request_id)],
+) -> PipelineStartResponse:
+    # Let PipelexError / EnvVarNotFoundError / etc. propagate to the global handler.
+    return await api_runner.start_pipeline(request, user=user, request_id=request_id)
+```
+
+For an API-authored failure that has no `PipelexError`:
+
+```python
+if upload_size > MAX_UPLOAD_BYTES:
+    raise_payload_too_large(message=f"Upload exceeds {MAX_UPLOAD_BYTES} bytes.")
 ```
 
 ## Request/Response Models

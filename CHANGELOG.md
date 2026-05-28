@@ -1,5 +1,31 @@
 # Changelog
 
+## [Unreleased]
+
+### Breaking Changes
+
+- **Every error response is now [RFC 7807 `application/problem+json`](https://github.com/Pipelex/pipelex-api/blob/main/docs/error-responses.md).** Replaces the legacy `{"detail": {"error_type", "message"}}` envelope across pipelex domain errors, validation (422), auth (401/403), payload limits (413), and the catch-all 500. Standard members on the wire: `type` / `title` / `status` / `detail` / `instance`. Extension members: `error_type`, `error_domain`, `retryable`, `request_id`, and — when populated by pipelex — `error_category`, `user_action`, `provider_metadata`, `model`, `provider`. Content-Type is `application/problem+json`. Clients reading the legacy `data.detail.message` must read RFC 7807 `detail` (top-level string) instead.
+- **`/validate` failure envelope removed.** A failing validation no longer returns `HTTP 200` with `{success: false, mthds_contents, message}`; it now returns `HTTP 422` (`ValidateBundleError`) with the RFC 7807 envelope. The former 400 "no `main_pipe`" path is also 422 now. **Success path (200 `ValidateResponse`) is unchanged** — same `mthds_contents`, `pipelex_bundle_blueprint`, `graph_spec`, `pipe_structures`, `success: true`, `message` fields. Cross-repo consumers in `pipelex-app` and `mthds-js` updated in companion PRs.
+- **`X-Request-ID` is now echoed on every response** (success and error). Inbound `X-Request-ID` is respected; otherwise the server generates a UUID. The same id rides through `JobMetadata.request_id` to every Temporal worker log record.
+
+### Added
+
+- **`ERROR_DISCLOSURE` env var.** `verbose` (default) renders the full `ErrorReport`; `strict` redacts `detail` for non-caller-facing errors and always strips `model` / `provider` / `provider_metadata`. Provenance-gated via pipelex's `_authors_caller_facing_message` ClassVar — `error_domain` no longer drives redaction. Server logs stay verbose regardless of disclosure mode.
+- **[`docs/error-responses.md`](https://github.com/Pipelex/pipelex-api/blob/main/docs/error-responses.md)** — public API error-contract page describing the envelope, status-code mapping (`input`→422, `config`/`runtime`→500), the `type` URI namespace, disclosure modes, request correlation, and worked examples. Linked from `docs/pipe-run.md` and `docs/pipe-validate.md`.
+
+### Changed
+
+- **Adapt to post-#931/#933 pipelex surface.**
+  - Phase 6 module relocation: `EnvVarNotFoundError` is now imported from `pipelex.system.exceptions` (was `pipelex.system.environment`). Tests updated; no production code touched the moved import.
+  - Acronym-casing fix: pipelex's `pascal_case_to_sentence` now preserves trailing acronym casing (`InvalidJSON` → `Invalid JSON`); the `test_error_uri.py::test_error_type_title` assertion updated.
+  - **Native `request_id` wiring at dispatch.** `POST /pipeline/start` now reads the request-scoped `request_id` contextvar and passes it as `request_id=` to `pipeline_run_setup(...)`, so it lands on `JobMetadata.request_id` and rides every worker-side `WorkflowLog` record. No more `webhook.payload["request_id"]` piggyback needed (and `WebhookTarget.payload` would now reject it as a reserved key anyway).
+  - **Cross-path consistency regression (T6).** New `tests/unit/test_webhook_recovery.py` pins the invariant: given the same source `ErrorReport`, the classification fields surface identically via the sync HTTP RFC 7807 response and via the webhook `error` payload (composed upstream by `DeliveryExecutor._notify_webhook`).
+  - **STRICT-disclosure audit (no code change).** Confirmed `api/problem_document.py` delegates wholesale to `report.to_problem_document(disclosure_mode=...)`, so pipelex's provenance-gated keying flip (Decision D1) flows through untouched. The two `error_domain == INPUT` sites in `api/exception_handlers.py` are log-level switches, not wire-disclosure switches, and remain correct.
+
+### Known follow-ups (deferred, not in this set of changes)
+
+- Structured logging on `_notify_webhook` (`event=webhook_delivery` / `event=webhook_failure`) — lives in pipelex upstream at `delivery_executor.py`, not in this repo. Tracked for a separate pipelex PR.
+
 ## [v0.1.2] - 2026-05-20
 
 ### Changed

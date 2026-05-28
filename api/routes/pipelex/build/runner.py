@@ -6,7 +6,6 @@ from pipelex.hub import get_library_manager, get_required_pipe, set_current_libr
 from pipelex.pipe_run.dry_run import dry_run_pipes
 from pydantic import BaseModel, Field, field_validator
 
-from api.errors import ENDPOINT_HANDLED_EXCEPTIONS, raise_internal_error
 from api.limits import MAX_MTHDS_FILE_BYTES, MAX_MTHDS_FILES_PER_REQUEST, MAX_PIPE_CODE_LEN
 
 router = APIRouter(tags=["build"])
@@ -40,12 +39,22 @@ class BuildRunnerResponse(BaseModel):
 
 @router.post("/build/runner", response_model=BuildRunnerResponse)
 async def build_runner(request_data: BuildRunnerRequest) -> JSONResponse:
-    """Generate Python runner code for a pipe from MTHDS content."""
+    """Generate Python runner code for a pipe from MTHDS content.
+
+    Pipelex domain failures propagate untouched: the global `PipelexError`
+    handler in `api.exception_handlers` turns them into an RFC 7807 problem response. The
+    `try`/`finally` guarantees the library is torn down on every path that
+    actually opened one — `library_id` stays `None` until `open_library`
+    returns, so a failure before that point is a no-op for teardown rather
+    than a leak. Matches the pattern in `build/inputs.py` and `build/output.py`.
+    """
     library_manager = get_library_manager()
-    library_id, _ = library_manager.open_library()
-    set_current_library(library_id)
+    library_id: str | None = None
 
     try:
+        library_id, _ = library_manager.open_library()
+        set_current_library(library_id)
+
         converter = PipelexInterpreter()
         blueprints = [converter.make_pipelex_bundle_blueprint(mthds_content=content) for content in request_data.mthds_contents]
         pipes = library_manager.load_from_blueprints(library_id=library_id, blueprints=blueprints)
@@ -64,8 +73,6 @@ async def build_runner(request_data: BuildRunnerRequest) -> JSONResponse:
             message="Runner code generated successfully",
         )
         return JSONResponse(content=response_data.model_dump(serialize_as_any=True))
-
-    except ENDPOINT_HANDLED_EXCEPTIONS as exc:
-        raise_internal_error(exc, context=f"build_runner for pipe '{request_data.pipe_code}'")
     finally:
-        library_manager.teardown(library_id=library_id)
+        if library_id is not None:
+            library_manager.teardown(library_id=library_id)
