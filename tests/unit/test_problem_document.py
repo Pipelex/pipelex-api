@@ -58,10 +58,10 @@ class TestProblemDocument:
         assert doc["error_type"] == "EnvVarNotFoundError"
         assert doc["instance"] == "/api/v1/pipeline/start"
         assert doc["request_id"] == "REQ1"
-        # Reconciliation: EnvVarNotFoundError is domain-less in this pipelex version
-        # (a ToolError, no error_domain) — it still maps to HTTP 500, but the
-        # error_domain extension member is absent rather than "config".
-        assert "error_domain" not in doc
+        # EnvVarNotFoundError is a ToolError that pipelex classifies under the
+        # config domain — a missing required env var is an operator-fixable
+        # misconfiguration, so it maps to HTTP 500 with error_domain "config".
+        assert doc["error_domain"] == "config"
 
     def test_builds_from_report_with_provider_metadata(self):
         report = _synthetic_llm_report()

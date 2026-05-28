@@ -397,17 +397,16 @@ class TestExceptionHandlers:
         assert body["instance"] == "/config-error"
         assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
 
-    def test_env_var_not_found_error_is_domainless_500(self):
-        # Reconciliation #1: EnvVarNotFoundError is a domain-less ToolError in
-        # this pipelex version — HTTP 500, but no `error_domain` member. The
-        # plan's original "error_domain = config" expectation is wrong here;
-        # the test above covers a genuine config-domain error.
+    def test_env_var_not_found_error_is_config_500(self):
+        # EnvVarNotFoundError is a ToolError that pipelex classifies under the
+        # config domain: a missing required env var is an operator-fixable
+        # misconfiguration, so it maps to HTTP 500 with error_domain "config".
         response = _build_client().get("/env-error")
         assert response.status_code == 500
         body = response.json()
         assert "COMPLETION_CALLBACK_SECRET" in body["detail"]
         assert body["error_type"] == "EnvVarNotFoundError"
-        assert "error_domain" not in body
+        assert body["error_domain"] == "config"
 
     def test_strict_disclosure_redacts_config_preserves_input(self):
         # The handler forwards the disclosure mode it was registered under
