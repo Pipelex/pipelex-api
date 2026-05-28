@@ -24,7 +24,7 @@ dependencies = [
 [tool.uv.sources]
 # Pinned to a specific commit on pipelex's `feature/Adapt-to-api` branch so
 # CI / Docker can resolve the dependency from GitHub
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "11a10ed73e22d91a0ddf75979b9f0ac06bcc5f13" }
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "8244be5999ccda4aaebb65b199b1d4832fedbee5" }
 
 [build-system]
 requires = ["hatchling"]
