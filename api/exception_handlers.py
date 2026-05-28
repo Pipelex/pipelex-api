@@ -29,7 +29,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pipelex import log
-from pipelex.base_exceptions import DisclosureMode, ErrorDomain, ErrorReport, PipelexError
+from pipelex.base_exceptions import DisclosureMode, ErrorDomain, ErrorReport, PipelexError, error_domain_is_input
 from temporalio.exceptions import TemporalError
 
 from api.error_types import ErrorType
@@ -201,7 +201,7 @@ def _log_error_report(report: ErrorReport, *, request: Request, request_id: str 
     log line then agrees with the HTTP status actually sent rather than the
     domain default.
     """
-    is_caller_error = report.error_domain == ErrorDomain.INPUT
+    is_caller_error = error_domain_is_input(report.error_domain)
     fields: dict[str, Any] = {
         "event": "api_error",
         "request_id": request_id,
@@ -250,7 +250,7 @@ def _log_api_authored_error(*, document: dict[str, Any], status: int, request: R
     `_log_error_report` uses, so a sink dedup'ing by level sees one shape.
     """
     error_domain = document.get("error_domain")
-    is_caller_error = error_domain == ErrorDomain.INPUT
+    is_caller_error = error_domain_is_input(error_domain)
     fields: dict[str, Any] = {
         "event": "api_error",
         "request_id": request_id,
