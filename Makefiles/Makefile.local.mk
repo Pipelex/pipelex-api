@@ -30,6 +30,8 @@ export HELP_LOCAL
 #################################    API    #################################
 #################################################################################
 
+.PHONY: docker-build docker-run docker-stop docker-logs
+
 # Build the generic pipelex-api image from local source.
 docker-build:
 	@echo "\n=== Build $(LOCAL_IMAGE) from local source ==="
@@ -65,6 +67,8 @@ docker-logs:
 # [temporal.search_attributes].attributes in the pipelex config.
 TEMPORAL_SEARCH_ATTRS := PipeCode PipelineRunId SessionId UserId DomainCode
 
+.PHONY: temporal-server ts temporal-server-bare ts-bare tsb temporal-stop tstop
+
 # Start a local Temporal dev server WITH the search attributes registered. Only
 # needed when the API runs with TEMPORAL enabled (selected_server pointed at the
 # local server). Runs in the foreground — start it in its own terminal.
@@ -97,13 +101,21 @@ temporal-server-bare:
 ts-bare: temporal-server-bare
 tsb: temporal-server-bare
 
-# Stop the local Temporal dev server (kills whatever is listening on :7233).
+# Stop the local Temporal dev server. Only kills processes on :7233 whose
+# command is the Temporal binary, so an unrelated service bound to that port
+# is left alone.
 temporal-stop:
-	@PID=$$(lsof -tiTCP:7233 -sTCP:LISTEN 2>/dev/null); \
-	if [ -z "$$PID" ]; then \
+	@PIDS=$$(lsof -tiTCP:7233 -sTCP:LISTEN 2>/dev/null); \
+	if [ -z "$$PIDS" ]; then \
 		echo "• No process found on port 7233"; \
 	else \
-		kill $$PID && echo "• Killed Temporal server (PID $$PID)"; \
+		for PID in $$PIDS; do \
+			CMD=$$(ps -p $$PID -o comm= 2>/dev/null); \
+			case "$$CMD" in \
+				*temporal*) kill $$PID && echo "• Killed Temporal server (PID $$PID)";; \
+				*) echo "• Skipped PID $$PID on :7233 — not a Temporal process ($$CMD)";; \
+			esac; \
+		done; \
 	fi
 
 tstop: temporal-stop
