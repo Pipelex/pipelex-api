@@ -17,6 +17,7 @@ export HELP_DEPLOY_API
 # to main (see .github/workflows/deploy.yml). This repo only publishes to
 # Docker Hub — anything beyond (private registries, ECR/ACR/GCR, ECS/k8s
 # deploys) is the user's responsibility, typically in a separate infra repo.
+.PHONY: deploy-docker-hub
 deploy-docker-hub:
 	@echo "\n########################### Docker Hub Build ##########################"
 	@echo "Logging in to Docker Hub..."
