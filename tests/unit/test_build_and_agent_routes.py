@@ -4,22 +4,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pipelex.hub import get_library_manager
+from pipelex.pipeline.bundle_validator import DryRunOutput, DryRunStatus
 from pytest_mock import MockerFixture
 
 from api.exception_handlers import register_exception_handlers
 from api.routes import router as api_router
-
-VALID_MTHDS = (
-    'domain = "smoke"\n'
-    'main_pipe = "echo"\n'
-    "\n"
-    "[pipe.echo]\n"
-    'type = "PipeLLM"\n'
-    'description = "Echo"\n'
-    'inputs = { text = "Text" }\n'
-    'output = "Text"\n'
-    'prompt = "@text"\n'
-)
+from tests.unit._constants import VALID_MTHDS
 
 
 def _build_client() -> TestClient:
@@ -230,3 +220,58 @@ class TestBuildAndAgentRoutes:
         )
         assert response.status_code == 200, response.text
         teardown_spy.assert_called_once()
+
+    @pytest.mark.parametrize("path", ["/api/v1/build/inputs", "/api/v1/build/output"])
+    def test_build_route_reuses_validate_bundle_library_without_leaking(self, path: str, mocker: MockerFixture):
+        # C-2 / Q-5: /build/inputs and /build/output must NOT open a second library. validate_bundle
+        # opens exactly one library and leaves it loaded + current on success; the route reads the pipe
+        # from that library and tears down the same id. Before the fix the route opened a SECOND library
+        # and tore down only that one, orphaning validate_bundle's library on every successful call.
+        library_manager = get_library_manager()
+        open_spy = mocker.spy(library_manager, "open_library")
+        teardown_spy = mocker.spy(library_manager, "teardown")
+
+        client = _build_client()
+        response = client.post(path, json={"mthds_contents": [VALID_MTHDS], "pipe_code": "echo"})
+
+        assert response.status_code == 200, response.text
+        # Exactly one library opened (inside validate_bundle) — no second open in the route.
+        assert open_spy.call_count == 1
+        created_library_id, _ = open_spy.spy_return
+        # ...and that exact library is the one torn down — no orphan left in LibraryManager._libraries.
+        teardown_spy.assert_called_once_with(library_id=created_library_id)
+
+    def test_build_runner_rejects_when_requested_pipe_is_skipped(self, mocker: MockerFixture):
+        # C-3: a cross-package unresolved dependency makes validate_pipes record the requested pipe
+        # SKIPPED (not a hard failure), so the sweep returns normally. generate_runner_code reads only
+        # the pipe's own inputs/output, so without a guard the route would emit runner code for a
+        # pipeline that cannot run. The guard must reject the requested-pipe-SKIPPED case with a 422
+        # and never reach code generation. (Other, unrelated SKIPPED pipes stay tolerated.)
+        skipped_result = {
+            "smoke.echo": DryRunOutput(
+                pipe_code="echo",
+                pipe_ref="smoke.echo",
+                status=DryRunStatus.SKIPPED,
+                error_message="Skipped dry run for pipe 'smoke.echo': unresolved dependency: other_pkg.missing",
+            )
+        }
+        mocker.patch(
+            "api.routes.pipelex.build.runner.BundleValidator.validate_pipes",
+            new=mocker.AsyncMock(return_value=skipped_result),
+        )
+        generate_spy = mocker.patch("api.routes.pipelex.build.runner.generate_runner_code")
+
+        client = _build_client()
+        response = client.post(
+            "/api/v1/build/runner",
+            json={"mthds_contents": [VALID_MTHDS], "pipe_code": "echo"},
+        )
+
+        assert response.status_code == 422, response.text
+        assert response.headers["content-type"] == "application/problem+json"
+        body = response.json()
+        assert body["error_type"] == "ValidationError"
+        assert body["error_domain"] == "input"
+        assert "echo" in body["detail"]
+        # The guard short-circuits before code generation.
+        generate_spy.assert_not_called()

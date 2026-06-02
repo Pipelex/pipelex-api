@@ -10,35 +10,16 @@ from pipelex.core.pipes.pipe_abstract import PipeAbstract
 from pipelex.graph.graphspec import GraphSpec
 from pipelex.pipe_run.dry_run_pipeline import dry_run_pipeline
 from pipelex.pipeline.validate_bundle import validate_bundle
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from api.errors import raise_validation_error
-from api.limits import MAX_MTHDS_FILE_BYTES, MAX_MTHDS_FILES_PER_REQUEST
+from api.schemas.models import MthdsContentsRequest
 
 router = APIRouter(tags=["validate"])
 
 
-class ValidateRequest(BaseModel):
-    mthds_contents: list[str] = Field(
-        ...,
-        min_length=1,
-        max_length=MAX_MTHDS_FILES_PER_REQUEST,
-        description="MTHDS contents to validate (always an array, even for single file).",
-    )
-    allow_signatures: bool = Field(
-        default=False,
-        description="When true, the validation sweep tolerates unimplemented pipe signatures instead of rejecting the "
-        "bundle (signatures dry-run trivially by minting a mock). Defaults to false (strict).",
-    )
-
-    @field_validator("mthds_contents")
-    @classmethod
-    def _bound_each_file(cls, value: list[str]) -> list[str]:
-        for content in value:
-            if len(content.encode("utf-8")) > MAX_MTHDS_FILE_BYTES:
-                msg = f"MTHDS file exceeds {MAX_MTHDS_FILE_BYTES // 1024} KiB limit"
-                raise ValueError(msg)
-        return value
+class ValidateRequest(MthdsContentsRequest):
+    """`/validate` needs nothing beyond the shared `mthds_contents` + `allow_signatures` payload."""
 
 
 class ValidateResponse(BaseModel):

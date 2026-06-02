@@ -13,28 +13,7 @@ from fastapi.testclient import TestClient
 
 from api.exception_handlers import register_exception_handlers
 from api.routes import router as api_router
-
-# A bundle whose PipeSequence references an unimplemented PipeSignature step. It loads and wires
-# cleanly, so the only thing that rejects it in strict mode is the signature pre-pass — isolating
-# the `allow_signatures` behavior from any other validation failure.
-SIGNATURE_MTHDS = (
-    'domain = "sig_api"\n'
-    'main_pipe = "caller_seq"\n\n'
-    "[concept]\n"
-    'ApiDoc = "A document used in API signature tests."\n'
-    'ApiSummary = "A summary used in API signature tests."\n\n'
-    "[pipe.caller_seq]\n"
-    'type = "PipeSequence"\n'
-    'description = "Caller sequence referencing a signature step."\n'
-    'inputs = { doc = "ApiDoc" }\n'
-    'output = "ApiSummary"\n'
-    'steps = [ { pipe = "summary_sig", result = "summary" } ]\n\n'
-    "[pipe.summary_sig]\n"
-    'type = "PipeSignature"\n'
-    'description = "Signature placeholder for the summary step."\n'
-    'inputs = { doc = "ApiDoc" }\n'
-    'output = "ApiSummary"\n'
-)
+from tests.unit._constants import SIGNATURE_MTHDS
 
 
 def _build_client() -> TestClient:
@@ -65,8 +44,9 @@ class TestAllowSignatures:
         body = response.json()
         assert body["error_type"] == expected_error_type
         assert body["error_domain"] == "input"
-        # The message points the caller at the opt-out.
-        assert "allow" in body["detail"].lower() or "signature" in body["detail"].lower()
+        # The message names the offending construct so the caller knows what to fix (not a
+        # tautological "allow" OR "signature" — assert the actual subject of the rejection).
+        assert "signature" in body["detail"].lower()
 
     @pytest.mark.parametrize(
         ("path", "payload"),

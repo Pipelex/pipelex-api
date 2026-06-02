@@ -3,36 +3,18 @@ from fastapi.responses import JSONResponse
 from pipelex.builder.runner_code import generate_runner_code
 from pipelex.core.interpreter.interpreter import PipelexInterpreter
 from pipelex.hub import get_library_manager, get_required_pipe, set_current_library
-from pipelex.pipeline.bundle_validator import BundleValidator
-from pydantic import BaseModel, Field, field_validator
+from pipelex.pipeline.bundle_validator import BundleValidator, DryRunOutput, DryRunStatus
+from pydantic import BaseModel, Field
 
-from api.limits import MAX_MTHDS_FILE_BYTES, MAX_MTHDS_FILES_PER_REQUEST, MAX_PIPE_CODE_LEN
+from api.errors import raise_validation_error
+from api.limits import MAX_PIPE_CODE_LEN
+from api.schemas.models import MthdsContentsRequest
 
 router = APIRouter(tags=["build"])
 
 
-class BuildRunnerRequest(BaseModel):
-    mthds_contents: list[str] = Field(
-        ...,
-        min_length=1,
-        max_length=MAX_MTHDS_FILES_PER_REQUEST,
-        description="MTHDS contents to load and generate runner code for (always an array, even for single file).",
-    )
+class BuildRunnerRequest(MthdsContentsRequest):
     pipe_code: str = Field(..., min_length=1, max_length=MAX_PIPE_CODE_LEN, description="Pipe code to generate runner code for.")
-    allow_signatures: bool = Field(
-        default=False,
-        description="When true, the validation sweep tolerates unimplemented pipe signatures instead of rejecting the "
-        "bundle (signatures dry-run trivially by minting a mock). Defaults to false (strict).",
-    )
-
-    @field_validator("mthds_contents")
-    @classmethod
-    def _bound_each_file(cls, value: list[str]) -> list[str]:
-        for content in value:
-            if len(content.encode("utf-8")) > MAX_MTHDS_FILE_BYTES:
-                msg = f"MTHDS file exceeds {MAX_MTHDS_FILE_BYTES // 1024} KiB limit"
-                raise ValueError(msg)
-        return value
 
 
 class BuildRunnerResponse(BaseModel):
@@ -40,6 +22,27 @@ class BuildRunnerResponse(BaseModel):
     pipe_code: str = Field(..., description="Pipe code that was used")
     success: bool = Field(default=True, description="Whether the operation was successful")
     message: str = Field(default="Runner code generated successfully", description="Status message")
+
+
+def _reject_if_requested_pipe_skipped(sweep_result: dict[str, DryRunOutput], pipe_code: str) -> None:
+    """Reject when the *requested* pipe was SKIPPED (its cross-package dependency is unresolved).
+
+    `validate_pipes` records a pipe SKIPPED — rather than failing the whole sweep — when a controller
+    references a sub-pipe in a package not included in the request (the cross-package tolerance shared
+    with `/validate` and `/build/{inputs,output}`). For a code-generation endpoint that is a footgun:
+    `generate_runner_code` reads only the pipe's own inputs/output and never resolves sub-pipes, so it
+    would happily emit runner code for a pipeline that cannot actually run. Reject the *requested* pipe
+    being SKIPPED with a 422; unrelated SKIPPED pipes elsewhere in the bundle stay tolerated.
+    """
+    for output in sweep_result.values():
+        if pipe_code not in (output.pipe_code, output.pipe_ref):
+            continue
+        match output.status:
+            case DryRunStatus.SKIPPED:
+                detail = output.error_message or "its dependencies could not be resolved"
+                raise_validation_error(f"Cannot generate runner code for pipe '{pipe_code}': {detail}")
+            case DryRunStatus.SUCCESS | DryRunStatus.FAILURE:
+                return
 
 
 @router.post("/build/runner", response_model=BuildRunnerResponse)
@@ -69,7 +72,11 @@ async def build_runner(request_data: BuildRunnerRequest) -> JSONResponse:
         # opts in via `allow_signatures`), and the per-pipe dry run, raising on any unexpected
         # failure — and crucially never tears the library down, so it stays loaded + current for
         # `generate_runner_code` below.
-        await BundleValidator().validate_pipes(pipes=pipes, library_id=library_id, allow_signatures=request_data.allow_signatures)
+        sweep_result = await BundleValidator().validate_pipes(pipes=pipes, library_id=library_id, allow_signatures=request_data.allow_signatures)
+
+        # The sweep tolerates a cross-package unresolved dependency by recording the pipe SKIPPED
+        # instead of failing. Don't hand back runner code for the *requested* pipe in that state.
+        _reject_if_requested_pipe_skipped(sweep_result, request_data.pipe_code)
 
         the_pipe = get_required_pipe(request_data.pipe_code)
         python_code = generate_runner_code(pipe=the_pipe)
