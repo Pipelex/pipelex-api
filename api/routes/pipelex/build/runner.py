@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from pipelex.builder.runner_code import generate_runner_code
 from pipelex.core.interpreter.interpreter import PipelexInterpreter
 from pipelex.hub import get_library_manager, get_required_pipe, set_current_library
-from pipelex.pipe_run.dry_run import dry_run_pipes
+from pipelex.pipeline.bundle_validator import BundleValidator
 from pydantic import BaseModel, Field, field_validator
 
 from api.limits import MAX_MTHDS_FILE_BYTES, MAX_MTHDS_FILES_PER_REQUEST, MAX_PIPE_CODE_LEN
@@ -19,6 +19,11 @@ class BuildRunnerRequest(BaseModel):
         description="MTHDS contents to load and generate runner code for (always an array, even for single file).",
     )
     pipe_code: str = Field(..., min_length=1, max_length=MAX_PIPE_CODE_LEN, description="Pipe code to generate runner code for.")
+    allow_signatures: bool = Field(
+        default=False,
+        description="When true, the validation sweep tolerates unimplemented pipe signatures instead of rejecting the "
+        "bundle (signatures dry-run trivially by minting a mock). Defaults to false (strict).",
+    )
 
     @field_validator("mthds_contents")
     @classmethod
@@ -59,9 +64,12 @@ async def build_runner(request_data: BuildRunnerRequest) -> JSONResponse:
         blueprints = [converter.make_pipelex_bundle_blueprint(mthds_content=content) for content in request_data.mthds_contents]
         pipes = library_manager.load_from_blueprints(library_id=library_id, blueprints=blueprints)
 
-        for pipe in pipes:
-            pipe.validate_with_libraries()
-            await dry_run_pipes(pipes=[pipe], raise_on_failure=True)
+        # Public inner sweep against the library we just opened: it runs the static
+        # `validate_with_libraries` wiring check, the signature pre-pass (strict unless the request
+        # opts in via `allow_signatures`), and the per-pipe dry run, raising on any unexpected
+        # failure — and crucially never tears the library down, so it stays loaded + current for
+        # `generate_runner_code` below.
+        await BundleValidator().validate_pipes(pipes=pipes, library_id=library_id, allow_signatures=request_data.allow_signatures)
 
         the_pipe = get_required_pipe(request_data.pipe_code)
         python_code = generate_runner_code(pipe=the_pipe)

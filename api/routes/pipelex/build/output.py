@@ -22,6 +22,11 @@ class BuildOutputRequest(BaseModel):
     )
     pipe_code: str = Field(..., min_length=1, max_length=MAX_PIPE_CODE_LEN, description="Pipe code to generate output JSON for.")
     format: ConceptRepresentationFormat = Field(default=ConceptRepresentationFormat.SCHEMA, description="Format to generate output in.")
+    allow_signatures: bool = Field(
+        default=False,
+        description="When true, the validation sweep tolerates unimplemented pipe signatures instead of rejecting the "
+        "bundle (signatures dry-run trivially by minting a mock). Defaults to false (strict).",
+    )
 
     @field_validator("mthds_contents")
     @classmethod
@@ -48,7 +53,7 @@ async def build_output(request_data: BuildOutputRequest) -> Any:
     library_id: str | None = None
 
     try:
-        validate_bundle_result = await validate_bundle(mthds_contents=request_data.mthds_contents)
+        validate_bundle_result = await validate_bundle(mthds_contents=request_data.mthds_contents, allow_signatures=request_data.allow_signatures)
         blueprint = validate_bundle_result.blueprints[0]
 
         library_id, _ = library_manager.open_library()

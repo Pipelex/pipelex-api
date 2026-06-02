@@ -199,3 +199,34 @@ class TestBuildAndAgentRoutes:
         created_library_id, _ = open_spy.spy_return
         # The fix: teardown runs anyway, with the exact id open_library returned.
         teardown_spy.assert_called_once_with(library_id=created_library_id)
+
+    def test_build_runner_succeeds_and_returns_python_code(self):
+        # Phase 3b: /build/runner now validates via BundleValidator.validate_pipes (the public inner
+        # sweep) against the library it just opened. The inner sweep never tears the library down, so
+        # it stays loaded + current for generate_runner_code. A 200 with non-empty python_code proves
+        # both halves: the dry-run sweep passed AND the library survived for code generation.
+        client = _build_client()
+        response = client.post(
+            "/api/v1/build/runner",
+            json={"mthds_contents": [VALID_MTHDS], "pipe_code": "echo"},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["success"] is True
+        assert body["pipe_code"] == "echo"
+        assert body["python_code"]
+        assert "echo" in body["python_code"]
+
+    def test_build_runner_keeps_library_open_for_codegen_then_tears_down_once(self, mocker: MockerFixture):
+        # The loaded-on-success contract (D6): the inner sweep must NOT tear the library down — if it
+        # did, get_required_pipe + generate_runner_code would have failed before the response. Teardown
+        # happens exactly once, in the route's finally, after code generation.
+        library_manager = get_library_manager()
+        teardown_spy = mocker.spy(library_manager, "teardown")
+        client = _build_client()
+        response = client.post(
+            "/api/v1/build/runner",
+            json={"mthds_contents": [VALID_MTHDS], "pipe_code": "echo"},
+        )
+        assert response.status_code == 200, response.text
+        teardown_spy.assert_called_once()

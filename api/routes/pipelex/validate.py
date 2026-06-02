@@ -25,6 +25,11 @@ class ValidateRequest(BaseModel):
         max_length=MAX_MTHDS_FILES_PER_REQUEST,
         description="MTHDS contents to validate (always an array, even for single file).",
     )
+    allow_signatures: bool = Field(
+        default=False,
+        description="When true, the validation sweep tolerates unimplemented pipe signatures instead of rejecting the "
+        "bundle (signatures dry-run trivially by minting a mock). Defaults to false (strict).",
+    )
 
     @field_validator("mthds_contents")
     @classmethod
@@ -108,7 +113,7 @@ async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
     # message (caller-facing under `_authors_caller_facing_message`), the
     # docs `type_uri`, and the `user_action` hint. We do not catch and
     # re-shape it here — Phase 3 deleted every per-route error catch.
-    validate_bundle_result = await validate_bundle(mthds_contents=mthds_contents)
+    validate_bundle_result = await validate_bundle(mthds_contents=mthds_contents, allow_signatures=request_data.allow_signatures)
 
     primary_blueprint = _find_main_blueprint(validate_bundle_result.blueprints) or validate_bundle_result.blueprints[0]
 
