@@ -25,11 +25,12 @@ define HELP_LOCAL
 	make temporal-stop$(RESET) ($(GREEN)tstop$(RESET)):          Stop the local Temporal dev server.
 
 	$(YELLOW)Run an MTHDS bundle through the API (resolves like `pipelex run bundle`):$(RESET)
-	make bundle-run$(RESET) BUNDLE=<dir|.mthds>:     POST the bundle to a running API and print the response (start `make run` first).
-	make bundle-curl$(RESET) BUNDLE=<dir|.mthds>:    Emit a ready-to-run curl command for the bundle.
-	make bundle-postman$(RESET) BUNDLE=<dir|.mthds>: Push Execute/Start requests into the live Pipelex FastAPI Postman collection.
-	make bundle-dry$(RESET) BUNDLE=<dir|.mthds>:     Print the request body only — touch nothing.
-	  Optional: ENDPOINT=execute|start|both  PIPE=<code>  INPUTS=<path>  NAME=<folder>  BASE_URL=<url>  TOKEN=<bearer>  ARGS=<extra>
+	make bundle-run$(RESET) BUNDLE=<dir|.mthds>:      POST the bundle to a running API and print the response (start `make run` first).
+	make bundle-validate$(RESET) BUNDLE=<dir|.mthds>: Dry-run validate the bundle via /api/v1/validate — no pipe_code/inputs, no inference, no cost.
+	make bundle-curl$(RESET) BUNDLE=<dir|.mthds>:     Emit a ready-to-run curl command for the bundle.
+	make bundle-postman$(RESET) BUNDLE=<dir|.mthds>:  Push Execute/Start requests into the live Pipelex FastAPI Postman collection.
+	make bundle-dry$(RESET) BUNDLE=<dir|.mthds>:      Print the request body only — touch nothing.
+	  Optional: ENDPOINT=execute|start|validate|both  PIPE=<code>  INPUTS=<path>  NAME=<folder>  ALLOW_SIGNATURES=1  BASE_URL=<url>  TOKEN=<bearer>  ARGS=<extra>
 
 endef
 export HELP_LOCAL
@@ -166,22 +167,30 @@ tstop: temporal-stop
 #################################################################################
 
 # Resolve an MTHDS bundle the same way `pipelex run bundle <path>` does and send
-# it to the API as a request — run it directly, emit curl, push a Postman query,
-# or just print the body. Runs the skill's helper script with OUR venv python.
+# it to the API as a request — run it directly, dry-run validate it, emit curl,
+# push a Postman query, or just print the body. Runs the skill's helper script
+# with OUR venv python.
 #
-#   make bundle-run     BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
-#   make bundle-curl    BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
-#   make bundle-postman BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
-#   make bundle-dry     BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
+#   make bundle-run      BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
+#   make bundle-validate BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
+#   make bundle-curl     BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
+#   make bundle-postman  BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
+#   make bundle-dry      BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
 #
-# Optional pass-throughs: ENDPOINT, PIPE, INPUTS, NAME (all modes); BASE_URL,
-# TOKEN (run/curl); ARGS for anything else. bundle-postman needs POSTMAN_API_KEY
-# in the environment (it lives in ~/.zshenv, so any zsh-launched make has it).
+# bundle-validate hits /api/v1/validate — an inference-free dry-run that parses,
+# loads, and dry-runs every pipe (no pipe_code, no inputs, no cost). It is the
+# safe, free counterpart to bundle-run. The other modes accept ENDPOINT=validate
+# too (e.g. `make bundle-postman ENDPOINT=validate`).
+#
+# Optional pass-throughs: ENDPOINT, PIPE, INPUTS, NAME, ALLOW_SIGNATURES (all
+# modes); BASE_URL, TOKEN (run/curl); ARGS for anything else. bundle-postman
+# needs POSTMAN_API_KEY in the environment (it lives in ~/.zshenv, so any
+# zsh-launched make has it).
 BUNDLE_SCRIPT := .claude/skills/postman-run-bundle/scripts/build_postman_query.py
-BUNDLE_OPTS    = $(if $(ENDPOINT),--endpoint $(ENDPOINT)) $(if $(PIPE),--pipe $(PIPE)) $(if $(INPUTS),--inputs $(INPUTS)) $(if $(NAME),--name $(NAME)) $(ARGS)
+BUNDLE_OPTS    = $(if $(ENDPOINT),--endpoint $(ENDPOINT)) $(if $(PIPE),--pipe $(PIPE)) $(if $(INPUTS),--inputs $(INPUTS)) $(if $(NAME),--name $(NAME)) $(if $(ALLOW_SIGNATURES),--allow-signatures) $(ARGS)
 BUNDLE_RUN_OPTS = $(if $(BASE_URL),--base-url $(BASE_URL)) $(if $(TOKEN),--token $(TOKEN))
 
-.PHONY: check-bundle-arg bundle-run bundle-curl bundle-postman bundle-dry
+.PHONY: check-bundle-arg bundle-run bundle-validate bundle-curl bundle-postman bundle-dry
 
 check-bundle-arg:
 	@test -n "$(BUNDLE)" || { echo "ERROR: set BUNDLE=<bundle dir or .mthds file>, e.g. make bundle-run BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard"; exit 1; }
@@ -189,6 +198,13 @@ check-bundle-arg:
 bundle-run: env check-bundle-arg
 	$(call PRINT_TITLE,"Running bundle against the API")
 	$(VENV_PYTHON) $(BUNDLE_SCRIPT) $(BUNDLE) --run $(BUNDLE_RUN_OPTS) $(BUNDLE_OPTS)
+
+# Dry-run validate via /api/v1/validate — hardcodes --endpoint validate (so don't
+# pass ENDPOINT here). NAME/ALLOW_SIGNATURES/BASE_URL/TOKEN/ARGS still apply;
+# PIPE/INPUTS are intentionally omitted — the validate endpoint ignores them.
+bundle-validate: env check-bundle-arg
+	$(call PRINT_TITLE,"Validating bundle via the API - dry-run with no inference")
+	$(VENV_PYTHON) $(BUNDLE_SCRIPT) $(BUNDLE) --run --endpoint validate $(if $(ALLOW_SIGNATURES),--allow-signatures) $(if $(NAME),--name $(NAME)) $(BUNDLE_RUN_OPTS) $(ARGS)
 
 bundle-curl: env check-bundle-arg
 	$(call PRINT_TITLE,"Emitting curl for bundle")

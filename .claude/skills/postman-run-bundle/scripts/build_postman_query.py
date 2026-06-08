@@ -6,10 +6,12 @@ single ``.mthds`` file), it finds the bundle file(s), extracts ``main_pipe``,
 loads the sibling ``inputs.json``, and inserts a ready-to-run request into the
 live "Pipelex FastAPI" Postman collection under ``Run Bundle/<bundle>/``.
 
-Two requests are generated per bundle (configurable via ``--endpoint``):
-``Execute (sync)`` -> ``POST /api/v1/pipeline/execute`` and ``Start (async)`` ->
-``POST /api/v1/pipeline/start``. Both use the collection's ``{{base_url}}`` and
-inherit its ``{{auth_token}}`` bearer auth.
+Requests are generated per bundle (configurable via ``--endpoint``):
+``Execute (sync)`` -> ``POST /api/v1/pipeline/execute``, ``Start (async)`` ->
+``POST /api/v1/pipeline/start``, and ``Validate (dry-run)`` ->
+``POST /api/v1/validate`` (an inference-free check that parses, loads, and
+dry-runs every pipe — no pipe_code, no inputs, no cost). All use the
+collection's ``{{base_url}}`` and inherit its ``{{auth_token}}`` bearer auth.
 
 File/document inputs are NOT uploaded. Any local (non-http) ``url`` in
 inputs.json is copied verbatim and reported so you can swap in a real URL before
@@ -43,10 +45,14 @@ DEFAULT_INPUTS_FILE_NAME = "inputs.json"
 MTHDS_EXTENSION = ".mthds"
 TOP_FOLDER_NAME = "Run Bundle"
 
-# name -> (request display name, URL path segments)
-ENDPOINTS: dict[str, tuple[str, list[str]]] = {
-    "execute": ("Execute (sync)", ["api", "v1", "pipeline", "execute"]),
-    "start": ("Start (async)", ["api", "v1", "pipeline", "start"]),
+# name -> (request display name, URL path segments, body kind)
+# Body kind selects the request shape: "run" -> {pipe_code, mthds_contents, inputs}
+# for execute/start; "validate" -> {mthds_contents, allow_signatures} for the
+# inference-free /validate dry-run (no pipe_code, no inputs).
+ENDPOINTS: dict[str, tuple[str, list[str], str]] = {
+    "execute": ("Execute (sync)", ["api", "v1", "pipeline", "execute"], "run"),
+    "start": ("Start (async)", ["api", "v1", "pipeline", "start"], "run"),
+    "validate": ("Validate (dry-run)", ["api", "v1", "validate"], "validate"),
 }
 
 
@@ -165,13 +171,28 @@ def collect_local_urls(value: Any, acc: list[str] | None = None) -> list[str]:
 # --- Postman request construction -----------------------------------------
 
 
-def build_body(pipe_code: str | None, mthds_contents: list[str], inputs: Any) -> str:
+def build_run_body(pipe_code: str | None, mthds_contents: list[str], inputs: Any) -> str:
+    """Body for /pipeline/execute and /start: pipe_code + mthds_contents + inputs."""
     body: dict[str, Any] = {}
     if pipe_code:
         body["pipe_code"] = pipe_code
     body["mthds_contents"] = mthds_contents
     if inputs is not None:
         body["inputs"] = inputs
+    return json.dumps(body, indent=2, ensure_ascii=False)
+
+
+def build_validate_body(mthds_contents: list[str], allow_signatures: bool) -> str:
+    """Body for /validate: just the mthds_contents, plus the allow_signatures opt-in.
+
+    The endpoint takes no ``pipe_code`` and no ``inputs`` — it parses, loads, and
+    dry-runs every pipe with mock inputs and zero inference, so it needs only the
+    bundle text. ``allow_signatures`` is omitted when false (the strict default)
+    to keep the body minimal.
+    """
+    body: dict[str, Any] = {"mthds_contents": mthds_contents}
+    if allow_signatures:
+        body["allow_signatures"] = True
     return json.dumps(body, indent=2, ensure_ascii=False)
 
 
@@ -290,12 +311,21 @@ def main() -> None:
     )
     parser.add_argument("bundle", help="Path to a bundle directory or a .mthds file")
     parser.add_argument("--inputs", help="Override inputs JSON path (default: auto-detect inputs.json in a directory)")
-    parser.add_argument("--pipe", help="Override main_pipe (sets pipe_code)")
+    parser.add_argument("--pipe", help="Override main_pipe (sets pipe_code). Ignored by --endpoint validate.")
+    parser.add_argument(
+        "--allow-signatures",
+        action="store_true",
+        help="(validate only) Tolerate unimplemented pipe signatures instead of rejecting the bundle. Default: strict.",
+    )
     parser.add_argument(
         "--endpoint",
-        choices=["execute", "start", "both"],
+        choices=["execute", "start", "validate", "both"],
         default="both",
-        help="Which endpoint(s) to target (default: both). For --run, 'both' runs execute (sync).",
+        help=(
+            "Which endpoint(s) to target (default: both = execute + start). 'validate' hits "
+            "/api/v1/validate — an inference-free dry-run that parses, loads, and dry-runs every pipe "
+            "(no pipe_code/inputs, no cost). For --run, 'both' runs execute (sync)."
+        ),
     )
     parser.add_argument("--name", help="Override the per-bundle subfolder name (default: bundle domain or filename)")
     parser.add_argument("--collection-uid", default=DEFAULT_COLLECTION_UID, help="Target Postman collection UID")
@@ -316,27 +346,48 @@ def main() -> None:
     if mode == "postman" and not api_key:
         fail("POSTMAN_API_KEY is not set. Run `source ~/.zshenv` (or add the key there), then retry.")
 
+    selected = ["execute", "start"] if args.endpoint == "both" else [args.endpoint]
+    needs_run = any(ENDPOINTS[key][2] == "run" for key in selected)
+    needs_validate = any(ENDPOINTS[key][2] == "validate" for key in selected)
+
     main_file, all_mthds, inputs_path = resolve_bundle(args.bundle, args.inputs)
     main_text = main_file.read_text(encoding="utf-8")
     main_pipe, domain = parse_bundle_meta(main_text)
+
+    # `pipe_code` is required only by the run endpoints — /validate derives
+    # everything it needs from the bundle text and takes no pipe_code.
     pipe_code = args.pipe or main_pipe
-    if not pipe_code:
+    if needs_run and not pipe_code:
         fail(
             f"could not determine main_pipe from '{main_file}'. Declare main_pipe in the bundle, "
             "or pass --pipe <pipe_code>."
         )
 
     mthds_contents = [path.read_text(encoding="utf-8") for path in all_mthds]
-    inputs, local_url_warnings = load_inputs(inputs_path)
+
+    # inputs (and their local-url warnings) matter only to the run endpoints;
+    # /validate ignores them, so don't load or warn for a validate-only run.
+    inputs: Any = None
+    local_url_warnings: list[str] = []
+    if needs_run:
+        inputs, local_url_warnings = load_inputs(inputs_path)
 
     subfolder_name = args.name or domain or main_file.stem
-    body_raw = build_body(pipe_code, mthds_contents, inputs)
-    selected = ["execute", "start"] if args.endpoint == "both" else [args.endpoint]
+
+    # One body per endpoint kind in play (execute + start share the "run" body).
+    bodies: dict[str, str] = {}
+    if needs_run:
+        bodies["run"] = build_run_body(pipe_code, mthds_contents, inputs)
+    if needs_validate:
+        bodies["validate"] = build_validate_body(mthds_contents, args.allow_signatures)
 
     print(f"Bundle:      {main_file}")
-    print(f"pipe_code:   {pipe_code}")
     print(f"mthds files: {', '.join(path.name for path in all_mthds)}")
-    print(f"inputs:      {inputs_path or 'none'}")
+    if needs_run:
+        print(f"pipe_code:   {pipe_code}")
+        print(f"inputs:      {inputs_path or 'none'}")
+    if needs_validate:
+        print(f"validate:    POST /api/v1/validate (no inference) — allow_signatures={args.allow_signatures}")
     if local_url_warnings:
         warn_target = "the API" if mode in ("run", "curl") else "Postman"
         print("\nWARNING: inputs reference local (non-http) url(s) — file uploads are out of scope.")
@@ -345,25 +396,27 @@ def main() -> None:
             print(f"  - {url}")
 
     if mode == "dry":
-        print("\n--- request body (dry-run) ---")
-        print(body_raw)
+        for kind, body in bodies.items():
+            print(f"\n--- request body ({kind}) ---")
+            print(body)
         return
 
     if mode == "curl":
-        body_path = write_body_file(subfolder_name, body_raw)
-        print(f"\nBody written to {body_path}")
+        body_paths = {kind: write_body_file(f"{subfolder_name}-{kind}", body) for kind, body in bodies.items()}
+        for path in body_paths.values():
+            print(f"Body written to {path}")
         for key in selected:
             print(f"\n# {ENDPOINTS[key][0]}")
-            print(render_curl(args.base_url, args.token, ENDPOINTS[key][1], body_path))
+            print(render_curl(args.base_url, args.token, ENDPOINTS[key][1], body_paths[ENDPOINTS[key][2]]))
         return
 
     if mode == "run":
         # 'both' isn't meaningful for a single run — use execute (sync), which returns the result.
         run_key = "execute" if args.endpoint == "both" else selected[0]
-        name, path_parts = ENDPOINTS[run_key]
+        name, path_parts, kind = ENDPOINTS[run_key]
         url = args.base_url.rstrip("/") + "/" + "/".join(path_parts)
         print(f"\nRunning {name}: POST {url}")
-        status, response_text = run_pipeline(args.base_url, args.token, path_parts, body_raw)
+        status, response_text = run_pipeline(args.base_url, args.token, path_parts, bodies[kind])
         print(f"HTTP {status}")
         print(pretty_json(response_text))
         if status >= 400:
@@ -372,16 +425,29 @@ def main() -> None:
 
     # mode == "postman"
     assert api_key is not None  # guaranteed above for the postman path
-    description = (
-        f"Run the `{subfolder_name}` bundle (mirrors `pipelex run bundle`).\n\n"
-        f"- Source: `{main_file}`\n"
-        f"- main_pipe: `{pipe_code}`\n"
-        f"- .mthds files sent: {len(mthds_contents)}\n"
-        f"- inputs: {inputs_path or 'none'}\n\n"
-        "Generated by the postman-run-bundle skill. Set `base_url` and `auth_token` in your "
-        "Postman environment before running."
-    )
-    requests = [build_request_item(ENDPOINTS[key][0], ENDPOINTS[key][1], body_raw, description) for key in selected]
+    if needs_validate:
+        # validate is never combined with the run endpoints, so a single description fits.
+        description = (
+            f"Validate (dry-run) the `{subfolder_name}` bundle — parse, load, and dry-run every pipe "
+            "with NO inference (free, no LLM cost).\n\n"
+            f"- Source: `{main_file}`\n"
+            f"- .mthds files sent: {len(mthds_contents)}\n"
+            f"- allow_signatures: {args.allow_signatures}\n\n"
+            "Takes no pipe_code and no inputs. Returns the bundle blueprint, graph spec, and per-pipe "
+            "input/output structures. Generated by the postman-run-bundle skill. Set `base_url` and "
+            "`auth_token` in your Postman environment before running."
+        )
+    else:
+        description = (
+            f"Run the `{subfolder_name}` bundle (mirrors `pipelex run bundle`).\n\n"
+            f"- Source: `{main_file}`\n"
+            f"- main_pipe: `{pipe_code}`\n"
+            f"- .mthds files sent: {len(mthds_contents)}\n"
+            f"- inputs: {inputs_path or 'none'}\n\n"
+            "Generated by the postman-run-bundle skill. Set `base_url` and `auth_token` in your "
+            "Postman environment before running."
+        )
+    requests = [build_request_item(ENDPOINTS[key][0], ENDPOINTS[key][1], bodies[ENDPOINTS[key][2]], description) for key in selected]
     print(f"requests:    {', '.join(ENDPOINTS[key][0] for key in selected)} -> {TOP_FOLDER_NAME}/{subfolder_name}")
 
     envelope = postman_request(args.collection_uid, api_key, "GET", None)

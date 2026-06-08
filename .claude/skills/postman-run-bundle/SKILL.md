@@ -2,14 +2,16 @@
 name: postman-run-bundle
 description: >-
   Turn a Pipelex MTHDS bundle into an API request you can run — push it as a ready-to-run query into
-  the live "Pipelex FastAPI" Postman collection, emit a curl command, or execute it directly. Use this
-  whenever the user points at a bundle directory or a .mthds file (often with an inputs.json) and wants
-  to run or test it via the API — e.g. "make a Postman query for this bundle", "add a Postman request to
-  run cv_batch_screening.mthds", "run the fashion_moodboard bundle against the API", "give me the curl
-  for this bundle", or just "postman" said alongside a bundle path. It resolves the bundle exactly like
-  `pipelex run bundle <path>` (auto-detects bundle.mthds / the single .mthds, reads main_pipe, loads the
-  sibling inputs.json) and targets /api/v1/pipeline/execute and /start. Trigger it even when the user
-  does not name the endpoint or the word "skill".
+  the live "Pipelex FastAPI" Postman collection, emit a curl command, execute it directly, or just
+  dry-run validate it (no inference, no cost). Use this whenever the user points at a bundle directory
+  or a .mthds file (often with an inputs.json) and wants to run, validate, or test it via the API —
+  e.g. "make a Postman query for this bundle", "add a Postman request to run cv_batch_screening.mthds",
+  "run the fashion_moodboard bundle against the API", "validate this bundle via the API", "dry-run this
+  method against the API", "give me the curl for this bundle", or just "postman" said alongside a bundle
+  path. It resolves the bundle exactly like `pipelex run bundle <path>` (auto-detects bundle.mthds / the
+  single .mthds, reads main_pipe, loads the sibling inputs.json) and targets /api/v1/pipeline/execute,
+  /start, and /api/v1/validate. Trigger it even when the user does not name the endpoint or the word
+  "skill".
 ---
 
 # Postman Run Bundle
@@ -25,11 +27,14 @@ For the bundle the user names, it inserts requests into the collection under:
 ```
 Run Bundle/
   <bundle>/            (named by the bundle's `domain`, or the filename)
-    Execute (sync)     POST {{base_url}}/api/v1/pipeline/execute
-    Start (async)      POST {{base_url}}/api/v1/pipeline/start
+    Execute (sync)      POST {{base_url}}/api/v1/pipeline/execute
+    Start (async)       POST {{base_url}}/api/v1/pipeline/start
+    Validate (dry-run)  POST {{base_url}}/api/v1/validate
 ```
 
-Each request body is:
+Which of these appears depends on `--endpoint`: the default `both` is `execute` + `start`; `validate` is its own choice and is never bundled with the run endpoints (different body, see below).
+
+The **execute / start** body is:
 
 ```json
 {
@@ -39,19 +44,42 @@ Each request body is:
 }
 ```
 
+The **validate** body is different — `/validate` takes **no `pipe_code` and no `inputs`**, only the bundle text:
+
+```json
+{
+  "mthds_contents": ["<full text of the .mthds file(s)>"],
+  "allow_signatures": false
+}
+```
+
+(`allow_signatures` is emitted only when you opt in via `--allow-signatures`; the default is strict, and it's omitted from the body.)
+
 Requests use the collection variable `{{base_url}}` and inherit the collection's `{{auth_token}}` bearer auth — so the same query works against a local server or the hosted one by switching the Postman environment.
+
+## Validate = the API's dry-run
+
+The API has **no separate "dry-run" endpoint that takes inputs**. `POST /api/v1/validate` *is* the dry-run: it parses, loads, and dry-runs every pipe with mock inputs and **zero inference** (no LLM calls, no cost, no latency), then returns the validated bundle blueprint, a `graph_spec`, and per-pipe input/output JSON-Schema `pipe_structures`. It confirms the whole pipeline wires up — concepts resolve, pipe inputs/outputs match, controllers find their sub-pipes — without ever running it. That makes it the safe, free counterpart to `execute`/`start`: reach for it to "just check" or "dry-run" a bundle.
+
+Two things to know:
+
+- **The bundle must declare a `main_pipe`.** `/validate` derives everything from the bundle text and rejects a bundle with no `main_pipe` (clean 422: *"Bundle does not declare a main_pipe, which is required for validation"*). Unlike the run endpoints, you cannot substitute `--pipe` — the endpoint takes no `pipe_code`. If the user's bundle has no `main_pipe`, tell them to declare one.
+- **`allow_signatures`** (`--allow-signatures`) loosens one thing: by default the validation sweep rejects unimplemented pipe signatures; opt in and it tolerates them (each signature dry-runs trivially by minting a mock). Useful for an in-progress bundle whose pipes aren't all fleshed out yet.
 
 ## How to run it
 
 From the `pipelex-api` repo root, the make targets are the convenient wrapper (they run the script with the project venv):
 
 ```bash
-make bundle-run     BUNDLE=<dir|.mthds>   # POST to a running API, print the response
-make bundle-curl    BUNDLE=<dir|.mthds>   # emit a ready-to-run curl
-make bundle-postman BUNDLE=<dir|.mthds>   # push Execute/Start into the Postman collection
-make bundle-dry     BUNDLE=<dir|.mthds>   # print the request body only
-# optional: ENDPOINT=execute|start|both  PIPE=<code>  INPUTS=<path>  NAME=<folder>  BASE_URL=<url>  TOKEN=<bearer>  ARGS=<extra>
+make bundle-run      BUNDLE=<dir|.mthds>   # POST to a running API, print the response
+make bundle-validate BUNDLE=<dir|.mthds>   # dry-run validate via /api/v1/validate (no inference, no cost)
+make bundle-curl     BUNDLE=<dir|.mthds>   # emit a ready-to-run curl
+make bundle-postman  BUNDLE=<dir|.mthds>   # push Execute/Start into the Postman collection
+make bundle-dry      BUNDLE=<dir|.mthds>   # print the request body only
+# optional: ENDPOINT=execute|start|validate|both  PIPE=<code>  INPUTS=<path>  NAME=<folder>  ALLOW_SIGNATURES=1  BASE_URL=<url>  TOKEN=<bearer>  ARGS=<extra>
 ```
+
+`make bundle-validate` is the convenient way to dry-run validate a bundle live (it hardcodes `--endpoint validate --run`, since validate is free and safe to run). The other modes accept `ENDPOINT=validate` too — e.g. `make bundle-postman ENDPOINT=validate` pushes a Validate request into Postman, `make bundle-curl ENDPOINT=validate` emits the validate curl.
 
 Under the hood it's one script that resolves the bundle once and sends the request to one of four sinks. `<bundle-path>` is what the user pointed at — a bundle **directory** (preferred) or a single `.mthds` file. Call the script directly when you need a path outside the repo or finer control:
 
@@ -72,7 +100,16 @@ python3 .claude/skills/postman-run-bundle/scripts/build_postman_query.py <bundle
 #   --base-url https://api.pipelex.com/runner   --token <bearer>
 ```
 
-`--run` uses `Execute (sync)` so it waits for and prints the result; pass `--endpoint start` to fire-and-forget and get a `pipeline_run_id` back. The API must be up — start it locally with `make run` first. Heads-up: this triggers real inference (cost + latency), so for an image-gen bundle like `fashion_moodboard` confirm the user wants a live run.
+`--run` uses `Execute (sync)` so it waits for and prints the result; pass `--endpoint start` to fire-and-forget and get a `pipeline_run_id` back. The API must be up — start it locally with `make run` first. Heads-up: `execute`/`start` trigger real inference (cost + latency), so for an image-gen bundle like `fashion_moodboard` confirm the user wants a live run.
+
+**Dry-run validate it** — `--endpoint validate` hits `/api/v1/validate`, which parses, loads, and dry-runs every pipe with **no inference** (free, no cost, no latency). Safe to run live without confirmation:
+
+```bash
+python3 .claude/skills/postman-run-bundle/scripts/build_postman_query.py <bundle-path> --run --endpoint validate
+# add --allow-signatures to tolerate unimplemented pipe signatures (in-progress bundles)
+```
+
+On success it returns the validated bundle blueprint, a graph spec, and per-pipe input/output structures. On a wiring problem it returns an RFC 7807 `422` naming the offending pipe — that's the dry-run doing its job. Validate ignores `--pipe`/`--inputs`, but the bundle must declare a `main_pipe` (the endpoint takes no `pipe_code`).
 
 **Emit a curl command** (to share, or to run in a separate terminal). It writes the body to a temp file and prints a `curl --data @file` so the multi-line `mthds_contents` never has to be shell-escaped:
 
@@ -90,9 +127,10 @@ Useful options (apply across modes):
 
 | Option | When to use |
 |---|---|
-| `--endpoint execute` / `start` / `both` | Pick the endpoint. Default `both` for Postman/curl; `--run both` runs `execute`. |
-| `--inputs <path>` | Inputs JSON lives elsewhere, or you point at a `.mthds` file directly (file mode does not auto-detect inputs, matching the CLI). |
-| `--pipe <pipe_code>` | The bundle has no `main_pipe`, or you want a different entry pipe. |
+| `--endpoint execute` / `start` / `validate` / `both` | Pick the endpoint. Default `both` (= execute + start) for Postman/curl; `--run both` runs `execute`. `validate` is the inference-free dry-run. |
+| `--allow-signatures` | (validate only) Tolerate unimplemented pipe signatures instead of rejecting the bundle. Default strict. |
+| `--inputs <path>` | Inputs JSON lives elsewhere, or you point at a `.mthds` file directly (file mode does not auto-detect inputs, matching the CLI). Ignored by `validate`. |
+| `--pipe <pipe_code>` | The bundle has no `main_pipe`, or you want a different entry pipe. Ignored by `validate` (the endpoint takes no `pipe_code`). |
 | `--base-url` / `--token` | Target server + bearer for `--run`/`--curl`. |
 | `--name <folder>` | Override the per-bundle Postman subfolder name. |
 
@@ -100,8 +138,9 @@ Useful options (apply across modes):
 
 - The user wants it **in Postman** to click around → default (push).
 - The user wants **Claude Code to actually run it** → `--run` (this is the answer to "run the same query yourself").
+- The user wants to **validate / dry-run it without running it** (no cost) → `--run --endpoint validate` (or `make bundle-validate`). This is the answer to "validate this bundle" / "dry-run this method via the API".
 - The user wants a **curl to paste elsewhere / share** → `--curl`.
-- Just **confirming resolution** → `--dry-run`.
+- Just **confirming resolution** (print the body locally) → `--dry-run`.
 
 ## Resolution rules (mirrors `pipelex run bundle`)
 
@@ -119,7 +158,8 @@ A related limit: the API receives only the inline `mthds_contents`, not the bund
 ## If something's missing
 
 - **No `POSTMAN_API_KEY`** → the script exits asking you to `source ~/.zshenv`. Do that and retry. If it's still unset, the user needs to add it to `~/.zshenv` (Postman → Settings → API keys → Generate).
-- **No `main_pipe` and no `--pipe`** → the script exits; ask the user which pipe to run and pass `--pipe`.
+- **No `main_pipe` and no `--pipe`** (run endpoints) → the script exits; ask the user which pipe to run and pass `--pipe`.
+- **No `main_pipe`, validating** → the script proceeds (validate needs no `pipe_code`), but the API returns a `422` *"Bundle does not declare a main_pipe"*. `--pipe` can't help here — `/validate` takes no `pipe_code`; the bundle itself must declare a `main_pipe`.
 
 ## Constants
 
