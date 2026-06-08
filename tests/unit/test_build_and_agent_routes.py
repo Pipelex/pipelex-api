@@ -4,6 +4,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pipelex.hub import get_library_manager
+from pipelex.pipe_run.exceptions import DryRunError
 from pipelex.pipeline.bundle_validator import DryRunOutput, DryRunStatus
 from pytest_mock import MockerFixture
 
@@ -275,3 +276,48 @@ class TestBuildAndAgentRoutes:
         assert "echo" in body["detail"]
         # The guard short-circuits before code generation.
         generate_spy.assert_not_called()
+
+    def test_build_runner_translates_dry_run_failure_to_422_not_500(self, mocker: MockerFixture):
+        # /build/runner calls BundleValidator.validate_pipes directly (not through validate_bundle), so a
+        # bare DryRunError — which carries no error_domain — would otherwise render as a 500 server fault.
+        # A failed dry-run of a caller-submitted bundle is a caller-fixable INPUT error: the route
+        # translates it to ValidateBundleError so it renders 422, matching what /validate, /build/inputs
+        # and /build/output return for the identical failure (they go through validate_bundle's
+        # _translate_to_validate_bundle_error). Without the translation this would be a 500.
+        mocker.patch(
+            "api.routes.pipelex.build.runner.BundleValidator.validate_pipes",
+            new=mocker.AsyncMock(side_effect=DryRunError("Dry run failed with 1 unexpected pipe failure(s): 'smoke.echo'")),
+        )
+        generate_spy = mocker.patch("api.routes.pipelex.build.runner.generate_runner_code")
+
+        client = _build_client()
+        response = client.post(
+            "/api/v1/build/runner",
+            json={"mthds_contents": [VALID_MTHDS], "pipe_code": "echo"},
+        )
+
+        assert response.status_code == 422, response.text
+        assert response.headers["content-type"] == "application/problem+json"
+        body = response.json()
+        # Same wire shape the other three routes return for a dry-run failure: ValidateBundleError, INPUT.
+        assert body["error_type"] == "ValidateBundleError"
+        assert body["error_domain"] == "input"
+        # The failure short-circuits before code generation.
+        generate_spy.assert_not_called()
+
+    def test_validate_tears_down_validate_bundle_library_without_leaking(self, mocker: MockerFixture):
+        # validate_bundle opens a library and leaves it loaded + current on success (the D6 contract);
+        # /validate must own that teardown. Before the fix the route never tore it down, orphaning it on
+        # every successful call (the best-effort graph dry-run opens + tears down its OWN library via
+        # PipelexRunner, so that one was balanced). Assert the conservation property: every library opened
+        # during the request is torn down — open count == teardown count. A leak shows up as opens > teardowns.
+        library_manager = get_library_manager()
+        open_spy = mocker.spy(library_manager, "open_library")
+        teardown_spy = mocker.spy(library_manager, "teardown")
+
+        client = _build_client()
+        response = client.post("/api/v1/validate", json={"mthds_contents": [VALID_MTHDS]})
+
+        assert response.status_code == 200, response.text
+        assert open_spy.call_count >= 1
+        assert open_spy.call_count == teardown_spy.call_count

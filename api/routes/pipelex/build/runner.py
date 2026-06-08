@@ -3,7 +3,9 @@ from fastapi.responses import JSONResponse
 from pipelex.builder.runner_code import generate_runner_code
 from pipelex.core.interpreter.interpreter import PipelexInterpreter
 from pipelex.hub import get_library_manager, get_required_pipe, set_current_library
+from pipelex.pipe_run.exceptions import DryRunError
 from pipelex.pipeline.bundle_validator import BundleValidator, DryRunOutput, DryRunStatus
+from pipelex.pipeline.exceptions import ValidateBundleError
 from pydantic import BaseModel, Field
 
 from api.errors import raise_validation_error
@@ -72,7 +74,22 @@ async def build_runner(request_data: BuildRunnerRequest) -> JSONResponse:
         # opts in via `allow_signatures`), and the per-pipe dry run, raising on any unexpected
         # failure — and crucially never tears the library down, so it stays loaded + current for
         # `generate_runner_code` below.
-        sweep_result = await BundleValidator().validate_pipes(pipes=pipes, library_id=library_id, allow_signatures=request_data.allow_signatures)
+        try:
+            sweep_result = await BundleValidator().validate_pipes(pipes=pipes, library_id=library_id, allow_signatures=request_data.allow_signatures)
+        except DryRunError as dry_run_error:
+            # `validate_pipes` raises a bare `DryRunError` on a non-allowed dry-run failure. This route
+            # calls the inner sweep directly instead of through `validate_bundle`, so nothing translates
+            # it — and `DryRunError` carries no `error_domain`, which the global handler would render as a
+            # 500 server fault. A failed dry-run of a caller-submitted bundle is a caller-fixable INPUT
+            # error, so translate it to `ValidateBundleError` (error_domain=INPUT → 422) — the exact shape
+            # `/validate`, `/build/inputs`, and `/build/output` return for the identical failure via
+            # `validate_bundle`'s `_translate_to_validate_bundle_error`. (`SignaturesNotAllowedError` is a
+            # sibling class, not a `DryRunError`, and already carries error_domain=INPUT, so it is left to
+            # propagate untouched and still renders as 422.)
+            raise ValidateBundleError(
+                message=dry_run_error.message,
+                dry_run_error_message=dry_run_error.message,
+            ) from dry_run_error
 
         # The sweep tolerates a cross-package unresolved dependency by recording the pipe SKIPPED
         # instead of failing. Don't hand back runner code for the *requested* pipe in that state.

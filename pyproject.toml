@@ -89,9 +89,19 @@ ignore_missing_imports = true
 module = ["api", "tests"]
 
 [tool.pyright]
+venvPath = "."
+venv = ".venv"
 pythonVersion = "3.11"
 include = ["api", "tests"]
-exclude = ["**/__pycache__", ".venv", ".git", "build", "dist"]
+exclude = [
+  "**/__pycache__",
+  ".venv",
+  ".git",
+  "build",
+  "dist",
+  "**/node_modules",
+  "**/.*",
+]
 analyzeUnannotatedFunctions = true
 deprecateTypingAliases = false
 disableBytesTypePromotions = true
