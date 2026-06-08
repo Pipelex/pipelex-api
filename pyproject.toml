@@ -216,6 +216,7 @@ exclude_lines = [
 
 [tool.ruff]
 exclude = [
+  ".claude",
   ".cursor",
   ".git",
   ".github",

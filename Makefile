@@ -14,6 +14,8 @@ RESET = \033[0m
 help:
 	@echo "$(YELLOW)Available commands:$(RESET)"
 	@echo ""
+	@echo "$$HELP"
+	@echo ""
 	@echo "$$HELP_LOCAL"
 	@echo ""
 	@echo "$$HELP_DEPLOY_API"

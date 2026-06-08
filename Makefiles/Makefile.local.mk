@@ -24,6 +24,13 @@ define HELP_LOCAL
 	make temporal-server-bare$(RESET) ($(GREEN)ts-bare$(RESET)): Start it WITHOUT search attributes (reproduce the missing-attribute error).
 	make temporal-stop$(RESET) ($(GREEN)tstop$(RESET)):          Stop the local Temporal dev server.
 
+	$(YELLOW)Run an MTHDS bundle through the API (resolves like `pipelex run bundle`):$(RESET)
+	make bundle-run$(RESET) BUNDLE=<dir|.mthds>:     POST the bundle to a running API and print the response (start `make run` first).
+	make bundle-curl$(RESET) BUNDLE=<dir|.mthds>:    Emit a ready-to-run curl command for the bundle.
+	make bundle-postman$(RESET) BUNDLE=<dir|.mthds>: Push Execute/Start requests into the live Pipelex FastAPI Postman collection.
+	make bundle-dry$(RESET) BUNDLE=<dir|.mthds>:     Print the request body only — touch nothing.
+	  Optional: ENDPOINT=execute|start|both  PIPE=<code>  INPUTS=<path>  NAME=<folder>  BASE_URL=<url>  TOKEN=<bearer>  ARGS=<extra>
+
 endef
 export HELP_LOCAL
 
@@ -153,3 +160,44 @@ temporal-stop:
 	fi
 
 tstop: temporal-stop
+
+#################################################################################
+##########################   RUN A BUNDLE VIA THE API   #########################
+#################################################################################
+
+# Resolve an MTHDS bundle the same way `pipelex run bundle <path>` does and send
+# it to the API as a request — run it directly, emit curl, push a Postman query,
+# or just print the body. Runs the skill's helper script with OUR venv python.
+#
+#   make bundle-run     BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
+#   make bundle-curl    BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
+#   make bundle-postman BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
+#   make bundle-dry     BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
+#
+# Optional pass-throughs: ENDPOINT, PIPE, INPUTS, NAME (all modes); BASE_URL,
+# TOKEN (run/curl); ARGS for anything else. bundle-postman needs POSTMAN_API_KEY
+# in the environment (it lives in ~/.zshenv, so any zsh-launched make has it).
+BUNDLE_SCRIPT := .claude/skills/postman-run-bundle/scripts/build_postman_query.py
+BUNDLE_OPTS    = $(if $(ENDPOINT),--endpoint $(ENDPOINT)) $(if $(PIPE),--pipe $(PIPE)) $(if $(INPUTS),--inputs $(INPUTS)) $(if $(NAME),--name $(NAME)) $(ARGS)
+BUNDLE_RUN_OPTS = $(if $(BASE_URL),--base-url $(BASE_URL)) $(if $(TOKEN),--token $(TOKEN))
+
+.PHONY: check-bundle-arg bundle-run bundle-curl bundle-postman bundle-dry
+
+check-bundle-arg:
+	@test -n "$(BUNDLE)" || { echo "ERROR: set BUNDLE=<bundle dir or .mthds file>, e.g. make bundle-run BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard"; exit 1; }
+
+bundle-run: env check-bundle-arg
+	$(call PRINT_TITLE,"Running bundle against the API")
+	$(VENV_PYTHON) $(BUNDLE_SCRIPT) $(BUNDLE) --run $(BUNDLE_RUN_OPTS) $(BUNDLE_OPTS)
+
+bundle-curl: env check-bundle-arg
+	$(call PRINT_TITLE,"Emitting curl for bundle")
+	$(VENV_PYTHON) $(BUNDLE_SCRIPT) $(BUNDLE) --curl $(BUNDLE_RUN_OPTS) $(BUNDLE_OPTS)
+
+bundle-postman: env check-bundle-arg
+	$(call PRINT_TITLE,"Pushing Postman query for bundle")
+	$(VENV_PYTHON) $(BUNDLE_SCRIPT) $(BUNDLE) $(BUNDLE_OPTS)
+
+bundle-dry: env check-bundle-arg
+	$(call PRINT_TITLE,"Bundle request body - dry run only")
+	$(VENV_PYTHON) $(BUNDLE_SCRIPT) $(BUNDLE) --dry-run $(BUNDLE_OPTS)
