@@ -34,7 +34,7 @@ class BuildOutputRequest(BaseModel):
         return value
 
 
-@router.post("/build/output")
+@router.post("/build/output", summary="Generate a pipe's output representation (schema, JSON, or Python)")
 async def build_output(request_data: BuildOutputRequest) -> Any:
     library_manager = get_library_manager()
     library_id: str | None = None

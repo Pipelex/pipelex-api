@@ -38,7 +38,7 @@ class BuildRunnerResponse(BaseModel):
     message: str = Field(default="Runner code generated successfully", description="Status message")
 
 
-@router.post("/build/runner", response_model=BuildRunnerResponse)
+@router.post("/build/runner", response_model=BuildRunnerResponse, summary="Generate Python runner code for a pipe")
 async def build_runner(request_data: BuildRunnerRequest) -> JSONResponse:
     """Generate Python runner code for a pipe from MTHDS content."""
     library_manager = get_library_manager()

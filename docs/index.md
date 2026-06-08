@@ -54,9 +54,31 @@ curl -s http://localhost:8081/api/v1/pipeline/execute \
 
 The response contains `pipeline_state: "COMPLETED"` and the result under `pipe_output.working_memory.root.<main_stuff_name>.content`. See **[Pipe Run →](pipe-run.md)** for every input shape (text, structured objects, `Document`, `Image`, …) and the full `/execute` and `/start` reference.
 
+> **Long-running pipelines:** `/pipeline/execute` blocks until the run finishes. There is no Pipelex-imposed time limit when you self-host, but your own reverse proxy or load balancer almost always has one (nginx `proxy_read_timeout`, ALB idle timeout, Cloud Run request timeout — often ~60s). Raise it for long pipelines, or use `/pipeline/start` with `callback_urls` to be notified on completion instead of holding the connection open.
+
 ### 4. Customize the configuration
 
 Need to disable Temporal, point to a different storage backend, or ship your own model deck? See **[Configuration →](configuration.md)** for how to provide your own `.pipelex/` config files to the Docker image and a quick recipe for running without Temporal.
+
+### 5. Drive it with mthds-js (CLI / SDK)
+
+Point the [`mthds`](https://www.npmjs.com/package/mthds) CLI/SDK at your self-hosted runner. Select the HTTP `api` runner and set the **runner URL** — you do **not** set a platform URL, and pointing the runner at a non-hosted URL automatically disables the (hosted-only) platform surface:
+
+```bash
+mthds config set runner api
+mthds config set runner-url http://localhost:8081/api/v1
+mthds run pipe bundle.mthds
+```
+
+`run pipe` against a self-hosted runner uses the blocking `/pipeline/execute` (no gateway 30s cap). For long pipelines, the runner also serves the **async lifecycle** — `POST /api/v1/runs` returns a `pipeline_run_id`, then poll `GET /api/v1/runs/by-id/{id}` and `GET /api/v1/runs/by-id/{id}/result` (202 running → 200 completed). The SDK's `run start` / `status` / `result` / `poll` drive this against the runner with no extra infrastructure (an in-process store; no Temporal or database). The hosted Pipelex Platform is the durable, multi-tenant version of the same surface.
+
+## Interactive API reference
+
+The full contract is self-documenting and served by the running container:
+
+- **Swagger UI** — `http://localhost:8081/docs`
+- **ReDoc** — `http://localhost:8081/redoc`
+- **OpenAPI schema** — `http://localhost:8081/openapi.json` (also published as a versioned snapshot in [openapi.json](openapi.json))
 
 ## Base URL
 

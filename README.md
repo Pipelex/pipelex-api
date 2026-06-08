@@ -65,35 +65,11 @@ The API is now running at `http://localhost:8081`. To customize behavior (enable
 
 # 🧪 Run your first pipeline
 
-Once `/health` is green, send an inline pipeline definition and inputs to `/api/v1/pipeline/execute`. The example below summarizes a string with a one-pipe MTHDS bundle — no files, no auth, copy-paste:
+Once `/health` is green, `POST` an inline MTHDS bundle and inputs to `/api/v1/pipeline/execute` and you get the result back synchronously. The full walkthrough — copy-paste curl, passing `Document`/`Image` files, every input shape, and the interactive Swagger UI at `/docs` — lives in the docs so there's one source of truth:
 
-```bash
-curl -s http://localhost:8081/api/v1/pipeline/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "pipe_code": "summarize",
-    "mthds_contents": ["domain = \"hello\"\nmain_pipe = \"summarize\"\n\n[pipe.summarize]\ntype = \"PipeLLM\"\ndescription = \"Summarize the input text in one sentence\"\ninputs = { text = \"Text\" }\noutput = \"Text\"\nprompt = \"Summarize in one sentence:\\n@text\"\n"],
-    "inputs": { "text": "Pipelex turns plain-language pipeline definitions into reproducible AI workflows that run as HTTP endpoints." }
-  }'
-```
-
-You'll get back a JSON response with `pipeline_state: "COMPLETED"` and the summary under `pipe_output.working_memory.root.<main_stuff_name>.content`.
-
-**Passing files (PDFs, images) as inputs.** Use the `Document` concept and point it at any HTTP(S) URL:
-
-```json
-{
-  "pipe_code": "your_pipe",
-  "mthds_contents": ["...your MTHDS..."],
-  "inputs": {
-    "cv": { "concept": "Document", "content": { "url": "https://example.com/resume.pdf" } }
-  }
-}
-```
-
-`Document` accepts public HTTP/HTTPS URLs, `pipelex-storage://` URIs, or base64 data URLs. For images, use the `Image` concept with the same `{ "url": "..." }` shape.
-
-For inline MTHDS in the request, `mthds_contents` is a JSON array of raw `.mthds` (TOML) file contents as strings — typically `[open("my_pipe.mthds").read()]` from a client. See [docs/pipe-run.md](docs/pipe-run.md) for every supported input shape and the full `/execute` reference.
+- **[Quickstart & first pipeline →](docs/index.md)** — boot, auth modes, first `/execute` call, driving it with the `mthds` CLI.
+- **[Pipe Run reference →](docs/pipe-run.md)** — every input shape and the full `/execute` + `/start` contract.
+- **Interactive API reference** — `http://localhost:8081/docs` (Swagger), `/redoc`, `/openapi.json`.
 
 # 📈 How to scale Pipelex
 

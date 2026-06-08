@@ -12,7 +12,7 @@ class VersionResponse(BaseModel):
     version: str = Field(..., description="Semantic version string")
 
 
-@router.get("/pipelex_version")
+@router.get("/pipelex_version", summary="Pipelex library version")
 async def pipelex_version() -> VersionResponse:
     try:
         return VersionResponse(version=version("pipelex"))
@@ -26,7 +26,7 @@ async def pipelex_version() -> VersionResponse:
         ) from exc
 
 
-@router.get("/api_version")
+@router.get("/api_version", summary="API server version")
 async def api_version() -> VersionResponse:
     try:
         return VersionResponse(version=version("pipelex-api"))

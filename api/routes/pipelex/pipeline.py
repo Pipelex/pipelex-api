@@ -34,8 +34,78 @@ if TYPE_CHECKING:
 
 router = APIRouter(tags=["pipeline"])
 
+# Request bodies are parsed from the raw Request (see `_parse_request`) so structured
+# inputs survive kajson decoding and callback_urls get SSRF-validated. FastAPI therefore
+# can't infer the body schema from a typed parameter, so we publish it explicitly via
+# `openapi_extra`. Keep these in sync with `PipelineRequest` + `PipelineApiExtras`.
+_PIPELINE_BODY_PROPERTIES: dict[str, Any] = {
+    "pipe_code": {
+        "type": "string",
+        "description": "Code of the pipe to run. Provide this and/or `mthds_contents`.",
+        "example": "summarize",
+    },
+    "mthds_contents": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Inline MTHDS bundle(s) defining the pipe(s). Always an array, even for one file.",
+    },
+    "inputs": {
+        "type": "object",
+        "description": "Pipeline inputs keyed by name. Values may be plain text, structured objects, or Document/Image references.",
+        "additionalProperties": True,
+    },
+    "output_name": {"type": "string", "description": "Optional name of the output stuff to return."},
+    "output_multiplicity": {"description": "Optional output multiplicity override (bool or int)."},
+    "dynamic_output_concept_ref": {"type": "string", "description": "Optional concept ref to coerce the output to."},
+}
+_PIPELINE_EXECUTE_EXAMPLE: dict[str, Any] = {
+    "pipe_code": "summarize",
+    "mthds_contents": [
+        'domain = "hello"\nmain_pipe = "summarize"\n\n[pipe.summarize]\ntype = "PipeLLM"\n'
+        'description = "Summarize the input text in one sentence"\ninputs = { text = "Text" }\n'
+        'output = "Text"\nprompt = "Summarize in one sentence:\\n@text"\n'
+    ],
+    "inputs": {"text": "Pipelex turns plain-language pipeline definitions into reproducible AI workflows."},
+}
+_EXECUTE_OPENAPI_EXTRA: dict[str, Any] = {
+    "requestBody": {
+        "required": True,
+        "content": {
+            "application/json": {
+                "schema": {"type": "object", "properties": _PIPELINE_BODY_PROPERTIES},
+                "example": _PIPELINE_EXECUTE_EXAMPLE,
+            }
+        },
+    }
+}
+_START_OPENAPI_EXTRA: dict[str, Any] = {
+    "requestBody": {
+        "required": True,
+        "content": {
+            "application/json": {
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        **_PIPELINE_BODY_PROPERTIES,
+                        "pipeline_run_id": {"type": "string", "description": "Optional client-supplied run id (<=128 chars)."},
+                        "callback_urls": {
+                            "type": "array",
+                            "items": {"type": "string", "format": "uri"},
+                            "description": (
+                                "Optional http(s) URLs notified on completion (HMAC-signed via "
+                                "X-Completion-Signature). Private/loopback/metadata hosts are rejected."
+                            ),
+                        },
+                    },
+                },
+                "example": {**_PIPELINE_EXECUTE_EXAMPLE, "callback_urls": ["https://example.com/pipelex/webhook"]},
+            }
+        },
+    }
+}
 
-def _get_user_id(request: Request) -> str:
+
+def get_request_user_id(request: Request) -> str:
     """Extract the user UUID from request state (set during auth)."""
     user: RequestUser | None = getattr(request.state, "user", None)
     return user.user_id if user else "anonymous"
@@ -153,7 +223,7 @@ def _validate_extras(request_data: dict[str, Any]) -> PipelineApiExtras:
         )
 
 
-async def _parse_request(request: Request) -> tuple[PipelineRequest, PipelineApiExtras]:
+async def parse_pipeline_request(request: Request) -> tuple[PipelineRequest, PipelineApiExtras]:
     """Parse and validate the request body.
 
     Splits the body into:
@@ -172,12 +242,23 @@ async def _parse_request(request: Request) -> tuple[PipelineRequest, PipelineApi
     return pipeline_request, extras
 
 
-@router.post("/pipeline/execute", response_model=PipelexPipelineExecuteResponse)
+@router.post(
+    "/pipeline/execute",
+    response_model=PipelexPipelineExecuteResponse,
+    summary="Run a pipeline and wait for the result (blocking)",
+    description=(
+        "Runs the pipeline and returns its full output in the response. This is the core "
+        "self-hosted primitive — it has no time limit beyond what your own client/proxy "
+        "allows. (Behind the hosted Pipelex gateway a ~30s synchronous cap applies; off-gateway "
+        "it does not, but your own reverse proxy's read/idle timeout still does.)"
+    ),
+    openapi_extra=_EXECUTE_OPENAPI_EXTRA,
+)
 async def execute(request: Request) -> JSONResponse:
     """Execute a pipeline and wait for completion."""
-    pipeline_request, _extras = await _parse_request(request)
+    pipeline_request, _extras = await parse_pipeline_request(request)
     try:
-        runner = ApiRunner(user_id=_get_user_id(request))
+        runner = ApiRunner(user_id=get_request_user_id(request))
         response = await runner.execute_pipeline(
             pipe_code=pipeline_request.pipe_code,
             mthds_contents=pipeline_request.mthds_contents,
@@ -193,15 +274,26 @@ async def execute(request: Request) -> JSONResponse:
         raise_internal_error(exc, context="pipeline_execute failed")
 
 
-@router.post("/pipeline/start", response_model=PipelexPipelineStartResponse)
+@router.post(
+    "/pipeline/start",
+    response_model=PipelexPipelineStartResponse,
+    summary="Start a pipeline asynchronously (fire-and-callback)",
+    description=(
+        "Starts the pipeline and returns a `pipeline_run_id` immediately without waiting. "
+        "Optionally posts the result to `callback_urls` on completion (HMAC-signed). The runner "
+        "keeps no run store, so there is no by-id polling here — durable run lifecycle "
+        "(`status`/`result`/`poll`) is a Pipelex Platform feature."
+    ),
+    openapi_extra=_START_OPENAPI_EXTRA,
+)
 async def start(
     request: Request,
-    parsed: Annotated[tuple[PipelineRequest, PipelineApiExtras], Depends(_parse_request)],
+    parsed: Annotated[tuple[PipelineRequest, PipelineApiExtras], Depends(parse_pipeline_request)],
 ) -> PipelexPipelineStartResponse:
     """Start a pipeline execution asynchronously without waiting for completion."""
     pipeline_request, extras = parsed
     try:
-        runner = ApiRunner(user_id=_get_user_id(request))
+        runner = ApiRunner(user_id=get_request_user_id(request))
         return await runner.start_pipeline(
             pipe_code=pipeline_request.pipe_code,
             mthds_contents=pipeline_request.mthds_contents,

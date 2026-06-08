@@ -11,7 +11,7 @@ from api.errors import ENDPOINT_HANDLED_EXCEPTIONS, raise_internal_error, raise_
 router = APIRouter(tags=["agent"])
 
 
-@router.get("/models")
+@router.get("/models", summary="List available model presets, aliases, and waterfalls")
 async def get_models(
     model_type: Annotated[list[str] | None, Query(alias="type", description="Filter by model category: llm, extract, img_gen, search")] = None,
 ) -> dict[str, Any]:

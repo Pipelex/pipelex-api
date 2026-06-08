@@ -117,7 +117,15 @@ def expires_at_from_presigned(presigned_url: str) -> datetime:
     return signed_at + timedelta(seconds=expires_seconds)
 
 
-@router.post("/resolve-storage-url")
+@router.post(
+    "/resolve-storage-url",
+    summary="Resolve a pipelex-storage:// URI to a presigned URL (Pipelex Platform feature)",
+    description=(
+        "**Pipelex Platform feature — not part of the open-source self-host standard.** "
+        "Requires `AUTH_MODE=jwt` (a per-user identity). Only needed for `pipelex-storage://` "
+        "URIs produced by `/upload`; self-hosters using public URLs never need this."
+    ),
+)
 async def resolve_storage_url(
     body: ResolveStorageUrlRequest,
     user: Annotated[RequestUser | None, Depends(get_request_user)],

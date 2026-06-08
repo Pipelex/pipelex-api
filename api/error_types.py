@@ -32,5 +32,8 @@ class ErrorType(StrEnum):
     UPLOAD_FAILED = "UploadFailed"
     PRESIGN_FAILED = "PresignFailed"
 
+    # Run lifecycle
+    RUN_NOT_FOUND = "RunNotFound"
+
     # Misc
     PACKAGE_NOT_FOUND = "PackageNotFound"

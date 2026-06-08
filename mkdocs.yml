@@ -102,6 +102,7 @@ nav:
   - API:
     - Overview: index.md
     - Configuration: configuration.md
+    - OpenAPI spec: openapi.json
     - Pipe Builder: pipe-builder.md
     - Pipe Run: pipe-run.md
     - Pipe Validate: pipe-validate.md

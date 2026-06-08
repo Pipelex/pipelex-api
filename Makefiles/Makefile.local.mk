@@ -22,6 +22,16 @@ endef
 export HELP_LOCAL
 
 #################################################################################
+#################################    OPENAPI    #################################
+#################################################################################
+
+# Regenerate the committed OpenAPI snapshot at docs/openapi.json.
+# CI guards it via tests/unit/test_openapi_contract.py (drift test).
+openapi:
+	$(call PRINT_TITLE,"Exporting OpenAPI schema to docs/openapi.json")
+	@uv run python -m scripts.export_openapi
+
+#################################################################################
 #################################    API    #################################
 #################################################################################
 

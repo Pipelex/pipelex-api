@@ -32,7 +32,7 @@ class BuildConceptResponse(BaseModel):
     toml: str = Field(..., description="Generated TOML content for the concept")
 
 
-@router.post("/build/concept")
+@router.post("/build/concept", summary="Convert a JSON concept spec to TOML")
 async def build_concept(request_data: BuildConceptRequest) -> BuildConceptResponse:
     """Convert a JSON concept spec to TOML format."""
     try:

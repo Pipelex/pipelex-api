@@ -34,7 +34,7 @@ class BuildPipeSpecResponse(BaseModel):
     toml: str = Field(..., description="Generated TOML content for the pipe")
 
 
-@router.post("/build/pipe-spec")
+@router.post("/build/pipe-spec", summary="Convert a JSON pipe spec to TOML")
 async def build_pipe_spec(request_data: BuildPipeSpecRequest) -> BuildPipeSpecResponse:
     """Convert a JSON pipe spec to TOML format."""
     try:

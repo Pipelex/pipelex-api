@@ -79,7 +79,7 @@ def _find_main_blueprint(blueprints: list[PipelexBundleBlueprint]) -> PipelexBun
     return None
 
 
-@router.post("/validate", response_model=ValidateResponse)
+@router.post("/validate", response_model=ValidateResponse, summary="Validate and dry-run an MTHDS bundle")
 async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
     """Validate MTHDS content by parsing, loading, and dry-running pipes."""
     mthds_contents = request_data.mthds_contents

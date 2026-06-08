@@ -63,7 +63,16 @@ class UploadResponse(BaseModel):
     filename: str = Field(..., description="Original filename")
 
 
-@router.post("/upload")
+@router.post(
+    "/upload",
+    summary="Upload a user-scoped file (Pipelex Platform feature)",
+    description=(
+        "**Pipelex Platform feature — not part of the open-source self-host standard.** "
+        "Requires `AUTH_MODE=jwt` (a per-user identity to scope storage under). Self-hosters "
+        "should pass a public HTTP(S) URL or a base64 data URL directly as a `Document`/`Image` "
+        "input instead of uploading."
+    ),
+)
 async def upload_file(
     body: UploadRequest,
     user: Annotated[RequestUser | None, Depends(get_request_user)],

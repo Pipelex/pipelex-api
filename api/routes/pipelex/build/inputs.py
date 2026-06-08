@@ -31,7 +31,7 @@ class BuildInputsRequest(BaseModel):
         return value
 
 
-@router.post("/build/inputs")
+@router.post("/build/inputs", summary="Generate example input JSON for a pipe")
 async def build_inputs(request_data: BuildInputsRequest) -> Any:
     """Generate example input JSON for a pipe."""
     library_manager = get_library_manager()

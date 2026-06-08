@@ -1,0 +1,4102 @@
+{
+  "components": {
+    "schemas": {
+      "AspectRatio": {
+        "enum": [
+          "square",
+          "landscape_4_3",
+          "landscape_3_2",
+          "landscape_16_9",
+          "landscape_21_9",
+          "portrait_3_4",
+          "portrait_2_3",
+          "portrait_9_16",
+          "portrait_9_21"
+        ],
+        "title": "AspectRatio",
+        "type": "string"
+      },
+      "Background": {
+        "enum": [
+          "transparent",
+          "opaque",
+          "auto"
+        ],
+        "title": "Background",
+        "type": "string"
+      },
+      "BuildConceptRequest": {
+        "properties": {
+          "spec": {
+            "additionalProperties": true,
+            "description": "JSON concept specification.",
+            "title": "Spec",
+            "type": "object"
+          }
+        },
+        "required": [
+          "spec"
+        ],
+        "title": "BuildConceptRequest",
+        "type": "object"
+      },
+      "BuildConceptResponse": {
+        "properties": {
+          "concept_code": {
+            "description": "The concept code that was generated",
+            "title": "Concept Code",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "description": "Whether the operation was successful",
+            "title": "Success",
+            "type": "boolean"
+          },
+          "toml": {
+            "description": "Generated TOML content for the concept",
+            "title": "Toml",
+            "type": "string"
+          }
+        },
+        "required": [
+          "concept_code",
+          "toml"
+        ],
+        "title": "BuildConceptResponse",
+        "type": "object"
+      },
+      "BuildInputsRequest": {
+        "properties": {
+          "mthds_contents": {
+            "description": "MTHDS contents to load pipes from (always an array, even for single file).",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Mthds Contents",
+            "type": "array"
+          },
+          "pipe_code": {
+            "description": "Pipe code to generate inputs JSON for.",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Pipe Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mthds_contents",
+          "pipe_code"
+        ],
+        "title": "BuildInputsRequest",
+        "type": "object"
+      },
+      "BuildOutputRequest": {
+        "properties": {
+          "format": {
+            "$ref": "#/components/schemas/ConceptRepresentationFormat",
+            "default": "schema",
+            "description": "Format to generate output in."
+          },
+          "mthds_contents": {
+            "description": "MTHDS contents to load pipes from (always an array, even for single file).",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Mthds Contents",
+            "type": "array"
+          },
+          "pipe_code": {
+            "description": "Pipe code to generate output JSON for.",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Pipe Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mthds_contents",
+          "pipe_code"
+        ],
+        "title": "BuildOutputRequest",
+        "type": "object"
+      },
+      "BuildPipeSpecRequest": {
+        "properties": {
+          "pipe_type": {
+            "description": "The pipe type (e.g. PipeLLM, PipeSequence, etc.).",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Pipe Type",
+            "type": "string"
+          },
+          "spec": {
+            "additionalProperties": true,
+            "description": "JSON pipe specification.",
+            "title": "Spec",
+            "type": "object"
+          }
+        },
+        "required": [
+          "pipe_type",
+          "spec"
+        ],
+        "title": "BuildPipeSpecRequest",
+        "type": "object"
+      },
+      "BuildPipeSpecResponse": {
+        "properties": {
+          "pipe_code": {
+            "description": "The pipe code that was generated",
+            "title": "Pipe Code",
+            "type": "string"
+          },
+          "pipe_type": {
+            "description": "The pipe type",
+            "title": "Pipe Type",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "description": "Whether the operation was successful",
+            "title": "Success",
+            "type": "boolean"
+          },
+          "toml": {
+            "description": "Generated TOML content for the pipe",
+            "title": "Toml",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pipe_code",
+          "pipe_type",
+          "toml"
+        ],
+        "title": "BuildPipeSpecResponse",
+        "type": "object"
+      },
+      "BuildRunnerRequest": {
+        "properties": {
+          "mthds_contents": {
+            "description": "MTHDS contents to load and generate runner code for (always an array, even for single file).",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Mthds Contents",
+            "type": "array"
+          },
+          "pipe_code": {
+            "description": "Pipe code to generate runner code for.",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Pipe Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mthds_contents",
+          "pipe_code"
+        ],
+        "title": "BuildRunnerRequest",
+        "type": "object"
+      },
+      "BuildRunnerResponse": {
+        "properties": {
+          "message": {
+            "default": "Runner code generated successfully",
+            "description": "Status message",
+            "title": "Message",
+            "type": "string"
+          },
+          "pipe_code": {
+            "description": "Pipe code that was used",
+            "title": "Pipe Code",
+            "type": "string"
+          },
+          "python_code": {
+            "description": "Generated Python code for running the workflow",
+            "title": "Python Code",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "description": "Whether the operation was successful",
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "python_code",
+          "pipe_code"
+        ],
+        "title": "BuildRunnerResponse",
+        "type": "object"
+      },
+      "Concept": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "domain_code": {
+            "title": "Domain Code",
+            "type": "string"
+          },
+          "refines": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refines"
+          },
+          "structure_class_name": {
+            "title": "Structure Class Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "domain_code",
+          "description",
+          "structure_class_name"
+        ],
+        "title": "Concept",
+        "type": "object"
+      },
+      "ConceptBlueprint": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "refines": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refines"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "structure": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ConceptStructureBlueprint"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Structure"
+          }
+        },
+        "required": [
+          "description"
+        ],
+        "title": "ConceptBlueprint",
+        "type": "object"
+      },
+      "ConceptRepresentationFormat": {
+        "description": "Output format for concept representations.",
+        "enum": [
+          "json",
+          "python",
+          "schema"
+        ],
+        "title": "ConceptRepresentationFormat",
+        "type": "string"
+      },
+      "ConceptStructureBlueprint": {
+        "properties": {
+          "choices": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choices"
+          },
+          "concept_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concept Ref"
+          },
+          "default_value": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Value"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "item_concept_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Concept Ref"
+          },
+          "item_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Type"
+          },
+          "key_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Type"
+          },
+          "required": {
+            "default": false,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConceptStructureBlueprintFieldType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "value_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Type"
+          }
+        },
+        "required": [
+          "description"
+        ],
+        "title": "ConceptStructureBlueprint",
+        "type": "object"
+      },
+      "ConceptStructureBlueprintFieldType": {
+        "enum": [
+          "text",
+          "list",
+          "dict",
+          "integer",
+          "boolean",
+          "number",
+          "date",
+          "concept"
+        ],
+        "title": "ConceptStructureBlueprintFieldType",
+        "type": "string"
+      },
+      "ConstructBlueprint": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "ConstructFieldBlueprint": {
+        "additionalProperties": false,
+        "description": "Blueprint for composing a single field in a StructuredContent.\n\nDefines how a field value is composed using one of 4 methods:\n1. Fixed value: literal string, number, bool, or list\n2. Variable reference (from): path to variable in working memory\n3. Template: Jinja2 template string (with $ preprocessing)\n4. Nested construct: recursive ConstructBlueprint\n\nAttributes:\n    method: The composition method to use\n    fixed_value: Literal value (for FIXED method)\n    from_path: Variable path in working memory (for FROM_VAR method)\n    template: Jinja2 template string (for TEMPLATE method)\n    nested: Nested ConstructBlueprint (for NESTED method)\n    list_to_dict_keyed_by: Optional modifier for FROM_VAR method that converts\n        a ListContent/list to dict keyed by the specified attribute name",
+        "properties": {
+          "fixed_value": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixed Value"
+          },
+          "from_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Path"
+          },
+          "list_to_dict_keyed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "List To Dict Keyed By"
+          },
+          "method": {
+            "$ref": "#/components/schemas/ConstructFieldMethod"
+          },
+          "nested": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConstructBlueprint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
+          }
+        },
+        "required": [
+          "method"
+        ],
+        "title": "ConstructFieldBlueprint",
+        "type": "object"
+      },
+      "ConstructFieldMethod": {
+        "description": "Method used to compose a field value.",
+        "enum": [
+          "fixed",
+          "from_var",
+          "template",
+          "nested"
+        ],
+        "title": "ConstructFieldMethod",
+        "type": "string"
+      },
+      "EdgeKind": {
+        "description": "Types of edges in the execution graph.",
+        "enum": [
+          "control",
+          "data",
+          "contains",
+          "selected_outcome",
+          "batch_item",
+          "batch_aggregate",
+          "parallel_combine"
+        ],
+        "title": "EdgeKind",
+        "type": "string"
+      },
+      "EdgeSpec": {
+        "additionalProperties": false,
+        "description": "Specification for an edge in the execution graph.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/EdgeKind"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "meta": {
+            "additionalProperties": true,
+            "title": "Meta",
+            "type": "object"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_stuff_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Stuff Digest"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "target_stuff_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Stuff Digest"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "target",
+          "kind"
+        ],
+        "title": "EdgeSpec",
+        "type": "object"
+      },
+      "ErrorSpec": {
+        "additionalProperties": false,
+        "description": "Error information for failed nodes.\n\nStack traces are automatically truncated to MAX_STACK_LENGTH.",
+        "properties": {
+          "error_type": {
+            "title": "Error Type",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "stack": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stack"
+          }
+        },
+        "required": [
+          "error_type",
+          "message"
+        ],
+        "title": "ErrorSpec",
+        "type": "object"
+      },
+      "ExtractSetting": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "image_min_size": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Min Size"
+          },
+          "max_nb_images": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Nb Images"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "title": "ExtractSetting",
+        "type": "object"
+      },
+      "GraphSpec": {
+        "additionalProperties": false,
+        "description": "The canonical specification for a pipeline execution graph.\n\nThis is the top-level model representing a complete run graph.\nIt is versioned and designed for JSON serialization.",
+        "properties": {
+          "concept_registry": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Concept Registry",
+            "type": "object"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/EdgeSpec"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "graph_id": {
+            "title": "Graph Id",
+            "type": "string"
+          },
+          "meta": {
+            "additionalProperties": true,
+            "title": "Meta",
+            "type": "object"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/NodeSpec"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "pipe_registry": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Pipe Registry",
+            "type": "object"
+          },
+          "pipeline_ref": {
+            "$ref": "#/components/schemas/PipelineRef"
+          }
+        },
+        "required": [
+          "graph_id",
+          "created_at"
+        ],
+        "title": "GraphSpec",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "IOSpec": {
+        "additionalProperties": false,
+        "description": "Specification for an input or output variable.\n\nPreviews are automatically truncated to MAX_PREVIEW_LENGTH to prevent\naccidental storage of large payloads or sensitive data.\n\nThe optional `data` field can hold the full serialized content when\nfull data capture is enabled (via --graph-full-data CLI option).",
+        "properties": {
+          "concept": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concept"
+          },
+          "content_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "data_html": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Html"
+          },
+          "data_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Text"
+          },
+          "digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Digest"
+          },
+          "extra": {
+            "additionalProperties": true,
+            "title": "Extra",
+            "type": "object"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preview"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "IOSpec",
+        "type": "object"
+      },
+      "ImageFormat": {
+        "enum": [
+          "png",
+          "jpeg",
+          "webp"
+        ],
+        "title": "ImageFormat",
+        "type": "string"
+      },
+      "ImgGenSetting": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "guidance_scale": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guidance Scale"
+          },
+          "is_moderated": {
+            "default": false,
+            "title": "Is Moderated",
+            "type": "boolean"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "nb_steps": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nb Steps"
+          },
+          "quality": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Quality"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "safety_tolerance": {
+            "anyOf": [
+              {
+                "maximum": 6.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Safety Tolerance"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "title": "ImgGenSetting",
+        "type": "object"
+      },
+      "LLMSetting": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "image_detail": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PromptImageDetail"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "enum": [
+                  "auto"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Tokens"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "prompting_target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PromptingTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reasoning_budget": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Budget"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReasoningEffort"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "temperature": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Temperature",
+            "type": "number"
+          }
+        },
+        "required": [
+          "model",
+          "temperature"
+        ],
+        "title": "LLMSetting",
+        "type": "object"
+      },
+      "LeanRunStatus": {
+        "description": "Lifecycle status of a runner-tracked run. A lean subset of the platform's status set.",
+        "enum": [
+          "PENDING",
+          "RUNNING",
+          "COMPLETED",
+          "FAILED"
+        ],
+        "title": "LeanRunStatus",
+        "type": "string"
+      },
+      "ModelReference": {
+        "type": "string"
+      },
+      "ModelReferenceKind": {
+        "description": "The kind of model reference.",
+        "enum": [
+          "preset",
+          "alias",
+          "waterfall",
+          "handle"
+        ],
+        "title": "ModelReferenceKind",
+        "type": "string"
+      },
+      "NodeIOSpec": {
+        "additionalProperties": false,
+        "description": "Input/output specification for a node.",
+        "properties": {
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/IOSpec"
+            },
+            "title": "Inputs",
+            "type": "array"
+          },
+          "outputs": {
+            "items": {
+              "$ref": "#/components/schemas/IOSpec"
+            },
+            "title": "Outputs",
+            "type": "array"
+          }
+        },
+        "title": "NodeIOSpec",
+        "type": "object"
+      },
+      "NodeKind": {
+        "description": "Types of nodes in the execution graph.",
+        "enum": [
+          "pipe_call",
+          "controller",
+          "operator",
+          "input",
+          "output",
+          "artifact",
+          "error"
+        ],
+        "title": "NodeKind",
+        "type": "string"
+      },
+      "NodeSpec": {
+        "additionalProperties": false,
+        "description": "Specification for a node in the execution graph.\n\nEach node represents a pipe invocation during execution.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "domain_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain Code"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "execution_data": {
+            "additionalProperties": true,
+            "title": "Execution Data",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "io": {
+            "$ref": "#/components/schemas/NodeIOSpec"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/NodeKind"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Metrics",
+            "type": "object"
+          },
+          "pipe_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pipe Code"
+          },
+          "pipe_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pipe Type"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NodeStatus"
+          },
+          "tags": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "object"
+          },
+          "timing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimingSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "status"
+        ],
+        "title": "NodeSpec",
+        "type": "object"
+      },
+      "NodeStatus": {
+        "description": "Execution status of a node.",
+        "enum": [
+          "scheduled",
+          "running",
+          "succeeded",
+          "failed",
+          "skipped",
+          "canceled"
+        ],
+        "title": "NodeStatus",
+        "type": "string"
+      },
+      "PipeBatchBlueprint": {
+        "additionalProperties": false,
+        "properties": {
+          "branch_pipe_code": {
+            "title": "Branch Pipe Code",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "input_item_name": {
+            "title": "Input Item Name",
+            "type": "string"
+          },
+          "input_list_name": {
+            "title": "Input List Name",
+            "type": "string"
+          },
+          "inputs": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputs"
+          },
+          "output": {
+            "title": "Output",
+            "type": "string"
+          },
+          "pipe_category": {
+            "const": "PipeController",
+            "default": "PipeController",
+            "title": "Pipe Category",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "type": {
+            "const": "PipeBatch",
+            "default": "PipeBatch",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "output",
+          "branch_pipe_code",
+          "input_list_name",
+          "input_item_name"
+        ],
+        "title": "PipeBatchBlueprint",
+        "type": "object"
+      },
+      "PipeComposeBlueprint": {
+        "additionalProperties": false,
+        "properties": {
+          "construct": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConstructBlueprint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "inputs": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputs"
+          },
+          "output": {
+            "title": "Output",
+            "type": "string"
+          },
+          "pipe_category": {
+            "const": "PipeOperator",
+            "default": "PipeOperator",
+            "title": "Pipe Category",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/TemplateBlueprint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
+          },
+          "type": {
+            "const": "PipeCompose",
+            "default": "PipeCompose",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "output"
+        ],
+        "title": "PipeComposeBlueprint",
+        "type": "object"
+      },
+      "PipeConditionBlueprint": {
+        "additionalProperties": false,
+        "properties": {
+          "add_alias_from_expression_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Add Alias From Expression To"
+          },
+          "default_outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/SpecialOutcome"
+              }
+            ],
+            "title": "Default Outcome"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "expression": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expression"
+          },
+          "expression_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expression Template"
+          },
+          "inputs": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputs"
+          },
+          "outcomes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Outcomes",
+            "type": "object",
+            "x-schema-required": true
+          },
+          "output": {
+            "title": "Output",
+            "type": "string"
+          },
+          "pipe_category": {
+            "const": "PipeController",
+            "default": "PipeController",
+            "title": "Pipe Category",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "type": {
+            "const": "PipeCondition",
+            "default": "PipeCondition",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "output",
+          "default_outcome"
+        ],
+        "title": "PipeConditionBlueprint",
+        "type": "object"
+      },
+      "PipeExtractBlueprint": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "include_raw_html": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Raw Html"
+          },
+          "inputs": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputs"
+          },
+          "max_page_images": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Page Images"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExtractSetting"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/ModelReference"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "output": {
+            "title": "Output",
+            "type": "string"
+          },
+          "page_image_captions": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Image Captions"
+          },
+          "page_views": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Views"
+          },
+          "page_views_dpi": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Views Dpi"
+          },
+          "pipe_category": {
+            "const": "PipeOperator",
+            "default": "PipeOperator",
+            "title": "Pipe Category",
+            "type": "string"
+          },
+          "render_js": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Render Js"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "type": {
+            "const": "PipeExtract",
+            "default": "PipeExtract",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "output"
+        ],
+        "title": "PipeExtractBlueprint",
+        "type": "object"
+      },
+      "PipeFuncBlueprint": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "function_name": {
+            "description": "The name of the function to call.",
+            "title": "Function Name",
+            "type": "string"
+          },
+          "inputs": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputs"
+          },
+          "output": {
+            "title": "Output",
+            "type": "string"
+          },
+          "pipe_category": {
+            "const": "PipeOperator",
+            "default": "PipeOperator",
+            "title": "Pipe Category",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "type": {
+            "const": "PipeFunc",
+            "default": "PipeFunc",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "output",
+          "function_name"
+        ],
+        "title": "PipeFuncBlueprint",
+        "type": "object"
+      },
+      "PipeImgGenBlueprint": {
+        "additionalProperties": false,
+        "properties": {
+          "aspect_ratio": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AspectRatio"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "background": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Background"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "inputs": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputs"
+          },
+          "is_raw": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Raw"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImgGenSetting"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/ModelReference"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "negative_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Negative Prompt"
+          },
+          "output": {
+            "title": "Output",
+            "type": "string"
+          },
+          "output_format": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageFormat"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pipe_category": {
+            "const": "PipeOperator",
+            "default": "PipeOperator",
+            "title": "Pipe Category",
+            "type": "string"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "const": "auto",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "type": {
+            "const": "PipeImgGen",
+            "default": "PipeImgGen",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "output",
+          "prompt"
+        ],
+        "title": "PipeImgGenBlueprint",
+        "type": "object"
+      },
+      "PipeLLMBlueprint": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "inputs": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputs"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LLMSetting"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/ModelReference"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "model_to_structure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LLMSetting"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/ModelReference"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model To Structure"
+          },
+          "output": {
+            "title": "Output",
+            "type": "string"
+          },
+          "pipe_category": {
+            "const": "PipeOperator",
+            "default": "PipeOperator",
+            "title": "Pipe Category",
+            "type": "string"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "structuring_method": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StructuringMethod"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Prompt"
+          },
+          "type": {
+            "const": "PipeLLM",
+            "default": "PipeLLM",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "output"
+        ],
+        "title": "PipeLLMBlueprint",
+        "type": "object"
+      },
+      "PipeOutput": {
+        "additionalProperties": false,
+        "properties": {
+          "graph_assembly_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graph Assembly Error"
+          },
+          "graph_spec": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GraphSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pipeline_run_id": {
+            "default": "untitled",
+            "title": "Pipeline Run Id",
+            "type": "string"
+          },
+          "working_memory": {
+            "$ref": "#/components/schemas/WorkingMemory"
+          },
+          "working_memory_raw": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Working Memory Raw"
+          }
+        },
+        "title": "PipeOutput",
+        "type": "object"
+      },
+      "PipeParallelBlueprint": {
+        "additionalProperties": false,
+        "properties": {
+          "add_each_output": {
+            "default": false,
+            "title": "Add Each Output",
+            "type": "boolean"
+          },
+          "branches": {
+            "items": {
+              "$ref": "#/components/schemas/SubPipeBlueprint"
+            },
+            "title": "Branches",
+            "type": "array"
+          },
+          "combined_output": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Combined Output"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "inputs": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputs"
+          },
+          "output": {
+            "title": "Output",
+            "type": "string"
+          },
+          "pipe_category": {
+            "const": "PipeController",
+            "default": "PipeController",
+            "title": "Pipe Category",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "type": {
+            "const": "PipeParallel",
+            "default": "PipeParallel",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "output",
+          "branches"
+        ],
+        "title": "PipeParallelBlueprint",
+        "type": "object"
+      },
+      "PipeSearchBlueprint": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "exclude_domains": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exclude Domains"
+          },
+          "from_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Date"
+          },
+          "include_domains": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Domains"
+          },
+          "include_images": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Images"
+          },
+          "inputs": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputs"
+          },
+          "max_results": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Results"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SearchSetting"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/ModelReference"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "output": {
+            "title": "Output",
+            "type": "string"
+          },
+          "pipe_category": {
+            "const": "PipeOperator",
+            "default": "PipeOperator",
+            "title": "Pipe Category",
+            "type": "string"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "to_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Date"
+          },
+          "type": {
+            "const": "PipeSearch",
+            "default": "PipeSearch",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "output",
+          "prompt"
+        ],
+        "title": "PipeSearchBlueprint",
+        "type": "object"
+      },
+      "PipeSequenceBlueprint": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "inputs": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputs"
+          },
+          "output": {
+            "title": "Output",
+            "type": "string"
+          },
+          "pipe_category": {
+            "const": "PipeController",
+            "default": "PipeController",
+            "title": "Pipe Category",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/SubPipeBlueprint"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "type": {
+            "const": "PipeSequence",
+            "default": "PipeSequence",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "output",
+          "steps"
+        ],
+        "title": "PipeSequenceBlueprint",
+        "type": "object"
+      },
+      "PipelexBundleBlueprint": {
+        "additionalProperties": false,
+        "properties": {
+          "concept": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ConceptBlueprint"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concept"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "domain": {
+            "title": "Domain",
+            "type": "string"
+          },
+          "main_pipe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Main Pipe"
+          },
+          "pipe": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "discriminator": {
+                    "mapping": {
+                      "PipeBatch": "#/components/schemas/PipeBatchBlueprint",
+                      "PipeCompose": "#/components/schemas/PipeComposeBlueprint",
+                      "PipeCondition": "#/components/schemas/PipeConditionBlueprint",
+                      "PipeExtract": "#/components/schemas/PipeExtractBlueprint",
+                      "PipeFunc": "#/components/schemas/PipeFuncBlueprint",
+                      "PipeImgGen": "#/components/schemas/PipeImgGenBlueprint",
+                      "PipeLLM": "#/components/schemas/PipeLLMBlueprint",
+                      "PipeParallel": "#/components/schemas/PipeParallelBlueprint",
+                      "PipeSearch": "#/components/schemas/PipeSearchBlueprint",
+                      "PipeSequence": "#/components/schemas/PipeSequenceBlueprint"
+                    },
+                    "propertyName": "type"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PipeFuncBlueprint"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PipeImgGenBlueprint"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PipeComposeBlueprint"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PipeLLMBlueprint"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PipeExtractBlueprint"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PipeSearchBlueprint"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PipeBatchBlueprint"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PipeConditionBlueprint"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PipeParallelBlueprint"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PipeSequenceBlueprint"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pipe"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Prompt"
+          }
+        },
+        "required": [
+          "domain"
+        ],
+        "title": "PipelexBundleBlueprint",
+        "type": "object"
+      },
+      "PipelexPipelineExecuteResponse": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "main_stuff_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Main Stuff Name"
+          },
+          "pipe_output": {
+            "$ref": "#/components/schemas/PipeOutput"
+          },
+          "pipeline_run_id": {
+            "title": "Pipeline Run Id",
+            "type": "string"
+          },
+          "pipeline_state": {
+            "$ref": "#/components/schemas/PipelineState"
+          }
+        },
+        "required": [
+          "pipeline_run_id",
+          "created_at",
+          "pipeline_state",
+          "pipe_output"
+        ],
+        "title": "PipelexPipelineExecuteResponse",
+        "type": "object"
+      },
+      "PipelexPipelineStartResponse": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "main_stuff_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Main Stuff Name"
+          },
+          "pipe_output": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PipeOutput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pipeline_run_id": {
+            "title": "Pipeline Run Id",
+            "type": "string"
+          },
+          "pipeline_state": {
+            "$ref": "#/components/schemas/PipelineState"
+          },
+          "workflow_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Id"
+          }
+        },
+        "required": [
+          "pipeline_run_id",
+          "created_at",
+          "pipeline_state"
+        ],
+        "title": "PipelexPipelineStartResponse",
+        "type": "object"
+      },
+      "PipelineRef": {
+        "additionalProperties": false,
+        "description": "Reference to the pipeline that was executed.",
+        "properties": {
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          },
+          "entrypoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entrypoint"
+          },
+          "main_pipe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Main Pipe"
+          }
+        },
+        "title": "PipelineRef",
+        "type": "object"
+      },
+      "PipelineState": {
+        "enum": [
+          "RUNNING",
+          "COMPLETED",
+          "FAILED",
+          "CANCELLED",
+          "ERROR",
+          "STARTED"
+        ],
+        "title": "PipelineState",
+        "type": "string"
+      },
+      "PromptImageDetail": {
+        "enum": [
+          "high",
+          "low",
+          "auto"
+        ],
+        "title": "PromptImageDetail",
+        "type": "string"
+      },
+      "PromptingTarget": {
+        "enum": [
+          "openai",
+          "anthropic",
+          "mistral",
+          "gemini",
+          "fal"
+        ],
+        "title": "PromptingTarget",
+        "type": "string"
+      },
+      "Quality": {
+        "enum": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "title": "Quality",
+        "type": "string"
+      },
+      "ReasoningEffort": {
+        "enum": [
+          "none",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "title": "ReasoningEffort",
+        "type": "string"
+      },
+      "ResolveStorageUrlRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "uri": {
+            "description": "pipelex-storage:// URI to resolve",
+            "maxLength": 512,
+            "title": "Uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "uri"
+        ],
+        "title": "ResolveStorageUrlRequest",
+        "type": "object"
+      },
+      "ResolveStorageUrlResponse": {
+        "properties": {
+          "content_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Content type guessed from the URI extension",
+            "title": "Content Type"
+          },
+          "expires_at": {
+            "description": "UTC expiry timestamp of the presigned URL",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "url": {
+            "description": "Short-lived presigned URL, fetchable directly by the browser",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "expires_at"
+        ],
+        "title": "ResolveStorageUrlResponse",
+        "type": "object"
+      },
+      "RunStartResponse": {
+        "properties": {
+          "created_at": {
+            "description": "ISO-8601 creation timestamp.",
+            "title": "Created At",
+            "type": "string"
+          },
+          "pipeline_run_id": {
+            "description": "Id to poll the run by.",
+            "title": "Pipeline Run Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/LeanRunStatus",
+            "description": "Lifecycle status at creation (PENDING/RUNNING)."
+          }
+        },
+        "required": [
+          "pipeline_run_id",
+          "status",
+          "created_at"
+        ],
+        "title": "RunStartResponse",
+        "type": "object"
+      },
+      "RunStatusResponse": {
+        "properties": {
+          "created_at": {
+            "description": "ISO-8601 creation timestamp.",
+            "title": "Created At",
+            "type": "string"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO-8601 completion timestamp, once terminal.",
+            "title": "Finished At"
+          },
+          "pipeline_run_id": {
+            "description": "The run id.",
+            "title": "Pipeline Run Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/LeanRunStatus",
+            "description": "Current lifecycle status."
+          }
+        },
+        "required": [
+          "pipeline_run_id",
+          "status",
+          "created_at"
+        ],
+        "title": "RunStatusResponse",
+        "type": "object"
+      },
+      "SearchSetting": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "include_images": {
+            "default": false,
+            "title": "Include Images",
+            "type": "boolean"
+          },
+          "include_inline_citations": {
+            "default": true,
+            "title": "Include Inline Citations",
+            "type": "boolean"
+          },
+          "max_results": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Results"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "title": "SearchSetting",
+        "type": "object"
+      },
+      "SpecialOutcome": {
+        "enum": [
+          "fail",
+          "continue"
+        ],
+        "title": "SpecialOutcome",
+        "type": "string"
+      },
+      "StructuringMethod": {
+        "enum": [
+          "direct",
+          "preliminary_text"
+        ],
+        "title": "StructuringMethod",
+        "type": "string"
+      },
+      "Stuff": {
+        "additionalProperties": false,
+        "properties": {
+          "concept": {
+            "$ref": "#/components/schemas/Concept"
+          },
+          "content": {
+            "$ref": "#/components/schemas/StuffContent"
+          },
+          "stuff_code": {
+            "title": "Stuff Code",
+            "type": "string"
+          },
+          "stuff_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stuff Name"
+          }
+        },
+        "required": [
+          "stuff_code",
+          "concept",
+          "content"
+        ],
+        "title": "Stuff",
+        "type": "object"
+      },
+      "StuffContent": {
+        "properties": {},
+        "title": "StuffContent",
+        "type": "object"
+      },
+      "SubPipeBlueprint": {
+        "additionalProperties": false,
+        "properties": {
+          "batch_as": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch As"
+          },
+          "batch_over": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Over"
+          },
+          "multiple_output": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Multiple Output"
+          },
+          "nb_output": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nb Output"
+          },
+          "pipe": {
+            "title": "Pipe",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          }
+        },
+        "required": [
+          "pipe"
+        ],
+        "title": "SubPipeBlueprint",
+        "type": "object"
+      },
+      "TagStyle": {
+        "enum": [
+          "no_tag",
+          "ticks",
+          "xml",
+          "square_brackets"
+        ],
+        "title": "TagStyle",
+        "type": "string"
+      },
+      "TemplateBlueprint": {
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/TemplateCategory",
+            "description": "Category of the template (could also be HTML, MARKDOWN, MERMAID, etc.), influences template rendering rules"
+          },
+          "extra_context": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Additional context variables for template rendering",
+            "title": "Extra Context"
+          },
+          "template": {
+            "description": "Raw template source",
+            "title": "Template",
+            "type": "string"
+          },
+          "templating_style": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TemplatingStyle"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Style of prompting to use (typically for different LLMs)"
+          }
+        },
+        "required": [
+          "template",
+          "category"
+        ],
+        "title": "TemplateBlueprint",
+        "type": "object"
+      },
+      "TemplateCategory": {
+        "enum": [
+          "basic",
+          "expression",
+          "html",
+          "markdown",
+          "mermaid",
+          "llm_prompt",
+          "img_gen_prompt"
+        ],
+        "title": "TemplateCategory",
+        "type": "string"
+      },
+      "TemplatingStyle": {
+        "properties": {
+          "tag_style": {
+            "$ref": "#/components/schemas/TagStyle"
+          },
+          "text_format": {
+            "$ref": "#/components/schemas/TextFormat",
+            "default": "plain"
+          }
+        },
+        "required": [
+          "tag_style"
+        ],
+        "title": "TemplatingStyle",
+        "type": "object"
+      },
+      "TextFormat": {
+        "enum": [
+          "plain",
+          "markdown",
+          "html",
+          "json"
+        ],
+        "title": "TextFormat",
+        "type": "string"
+      },
+      "TimingSpec": {
+        "additionalProperties": false,
+        "description": "Timing information for a node execution.",
+        "properties": {
+          "duration": {
+            "description": "Duration in seconds, included in JSON serialization.",
+            "readOnly": true,
+            "title": "Duration",
+            "type": "number"
+          },
+          "ended_at": {
+            "format": "date-time",
+            "title": "Ended At",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "started_at",
+          "ended_at",
+          "duration"
+        ],
+        "title": "TimingSpec",
+        "type": "object"
+      },
+      "UploadRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "content_type": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "MIME type (e.g. 'application/pdf')",
+            "title": "Content Type"
+          },
+          "data": {
+            "description": "File content as base64-encoded string (max 50 MiB decoded)",
+            "maxLength": 69905071,
+            "title": "Data",
+            "type": "string"
+          },
+          "filename": {
+            "description": "Original filename with extension (e.g. 'resume.pdf')",
+            "maxLength": 512,
+            "title": "Filename",
+            "type": "string"
+          }
+        },
+        "required": [
+          "filename",
+          "data"
+        ],
+        "title": "UploadRequest",
+        "type": "object"
+      },
+      "UploadResponse": {
+        "properties": {
+          "filename": {
+            "description": "Original filename",
+            "title": "Filename",
+            "type": "string"
+          },
+          "uri": {
+            "description": "pipelex-storage:// URI for the uploaded file",
+            "title": "Uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "uri",
+          "filename"
+        ],
+        "title": "UploadResponse",
+        "type": "object"
+      },
+      "ValidateRequest": {
+        "properties": {
+          "mthds_contents": {
+            "description": "MTHDS contents to validate (always an array, even for single file).",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Mthds Contents",
+            "type": "array"
+          }
+        },
+        "required": [
+          "mthds_contents"
+        ],
+        "title": "ValidateRequest",
+        "type": "object"
+      },
+      "ValidateResponse": {
+        "properties": {
+          "graph_spec": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GraphSpec"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Graph spec from the dry run"
+          },
+          "message": {
+            "default": "MTHDS content validated successfully",
+            "description": "Status message",
+            "title": "Message",
+            "type": "string"
+          },
+          "mthds_contents": {
+            "description": "The MTHDS contents that were validated",
+            "items": {
+              "type": "string"
+            },
+            "title": "Mthds Contents",
+            "type": "array"
+          },
+          "pipe_structures": {
+            "additionalProperties": true,
+            "description": "Per-pipe input/output JSON Schema structures",
+            "title": "Pipe Structures",
+            "type": "object"
+          },
+          "pipelex_bundle_blueprint": {
+            "$ref": "#/components/schemas/PipelexBundleBlueprint",
+            "description": "Generated pipelex bundle blueprint"
+          },
+          "success": {
+            "default": true,
+            "description": "Whether the validation was successful",
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mthds_contents",
+          "pipelex_bundle_blueprint"
+        ],
+        "title": "ValidateResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "VersionResponse": {
+        "properties": {
+          "version": {
+            "description": "Semantic version string",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "VersionResponse",
+        "type": "object"
+      },
+      "WorkingMemory": {
+        "additionalProperties": false,
+        "properties": {
+          "aliases": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "object"
+          },
+          "root": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Stuff"
+            },
+            "title": "Root",
+            "type": "object"
+          }
+        },
+        "title": "WorkingMemory",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "BearerAuth": {
+        "description": "Bearer token: the `API_KEY` (when `AUTH_MODE=api_key`) or a signed JWT (when `AUTH_MODE=jwt`). Omit when `AUTH_MODE=none`.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "contact": {
+      "name": "Pipelex",
+      "url": "https://docs.pipelex.com/"
+    },
+    "description": "The **Pipelex Runner API** is the open-source, self-hostable engine that executes\nPipelex pipelines (MTHDS bundles) over HTTP. It is **stateless**: it needs no\ndatabase, queue, or object store to run pipelines \u2014 boot the Docker image, give it\nan inference backend, and call `/api/v1/pipeline/execute`.\n\n### What you must provide\n- **Inference backend** \u2014 by default a `PIPELEX_GATEWAY_API_KEY` (the Pipelex Gateway\n  routes to every supported model with one credential). To call providers directly\n  (OpenAI, Anthropic, Bedrock, Vertex, \u2026) you reconfigure the mounted `.pipelex/`\n  config \u2014 not just an env var. See the Configuration docs.\n- **Auth mode** (`AUTH_MODE`) \u2014 `none` (default, local), `api_key` (`API_KEY`), or\n  `jwt` (`JWT_SECRET_KEY`). The caller is identified by the credential; the runner\n  never accepts a user id as a request argument.\n\n### What is NOT in this runner\nDurable run storage and by-id polling (`start`/`status`/`result`/`poll`), user-scoped\nfile storage (`/upload`, `/resolve-storage-url`), org/billing \u2014 these are **Pipelex\nPlatform** features. The open-source runner is execution-only; run a pipeline and get\nits output back synchronously via `/pipeline/execute`.\n",
+    "license": {
+      "name": "MIT",
+      "url": "https://opensource.org/license/mit"
+    },
+    "title": "Pipelex Runner API",
+    "version": "0.1.2"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Root  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Root"
+      }
+    },
+    "/api/v1/api_version": {
+      "get": {
+        "operationId": "api_version_api_v1_api_version_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "API server version",
+        "tags": [
+          "version"
+        ]
+      }
+    },
+    "/api/v1/build/concept": {
+      "post": {
+        "description": "Convert a JSON concept spec to TOML format.",
+        "operationId": "build_concept_api_v1_build_concept_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildConceptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildConceptResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Convert a JSON concept spec to TOML",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
+    "/api/v1/build/inputs": {
+      "post": {
+        "description": "Generate example input JSON for a pipe.",
+        "operationId": "build_inputs_api_v1_build_inputs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildInputsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Build Inputs Api V1 Build Inputs Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate example input JSON for a pipe",
+        "tags": [
+          "build"
+        ]
+      }
+    },
+    "/api/v1/build/output": {
+      "post": {
+        "operationId": "build_output_api_v1_build_output_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildOutputRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Build Output Api V1 Build Output Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate a pipe's output representation (schema, JSON, or Python)",
+        "tags": [
+          "build"
+        ]
+      }
+    },
+    "/api/v1/build/pipe-spec": {
+      "post": {
+        "description": "Convert a JSON pipe spec to TOML format.",
+        "operationId": "build_pipe_spec_api_v1_build_pipe_spec_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildPipeSpecRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildPipeSpecResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Convert a JSON pipe spec to TOML",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
+    "/api/v1/build/runner": {
+      "post": {
+        "description": "Generate Python runner code for a pipe from MTHDS content.",
+        "operationId": "build_runner_api_v1_build_runner_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildRunnerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildRunnerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Python runner code for a pipe",
+        "tags": [
+          "build"
+        ]
+      }
+    },
+    "/api/v1/models": {
+      "get": {
+        "description": "List available model presets, aliases, waterfalls, and talent mappings.",
+        "operationId": "get_models_api_v1_models_get",
+        "parameters": [
+          {
+            "description": "Filter by model category: llm, extract, img_gen, search",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by model category: llm, extract, img_gen, search",
+              "title": "Type"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Models Api V1 Models Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List available model presets, aliases, and waterfalls",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
+    "/api/v1/pipelex_version": {
+      "get": {
+        "operationId": "pipelex_version_api_v1_pipelex_version_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Pipelex library version",
+        "tags": [
+          "version"
+        ]
+      }
+    },
+    "/api/v1/pipeline/execute": {
+      "post": {
+        "description": "Runs the pipeline and returns its full output in the response. This is the core self-hosted primitive \u2014 it has no time limit beyond what your own client/proxy allows. (Behind the hosted Pipelex gateway a ~30s synchronous cap applies; off-gateway it does not, but your own reverse proxy's read/idle timeout still does.)",
+        "operationId": "execute_api_v1_pipeline_execute_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "inputs": {
+                  "text": "Pipelex turns plain-language pipeline definitions into reproducible AI workflows."
+                },
+                "mthds_contents": [
+                  "domain = \"hello\"\nmain_pipe = \"summarize\"\n\n[pipe.summarize]\ntype = \"PipeLLM\"\ndescription = \"Summarize the input text in one sentence\"\ninputs = { text = \"Text\" }\noutput = \"Text\"\nprompt = \"Summarize in one sentence:\\n@text\"\n"
+                ],
+                "pipe_code": "summarize"
+              },
+              "schema": {
+                "properties": {
+                  "dynamic_output_concept_ref": {
+                    "description": "Optional concept ref to coerce the output to.",
+                    "type": "string"
+                  },
+                  "inputs": {
+                    "additionalProperties": true,
+                    "description": "Pipeline inputs keyed by name. Values may be plain text, structured objects, or Document/Image references.",
+                    "type": "object"
+                  },
+                  "mthds_contents": {
+                    "description": "Inline MTHDS bundle(s) defining the pipe(s). Always an array, even for one file.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "output_multiplicity": {
+                    "description": "Optional output multiplicity override (bool or int)."
+                  },
+                  "output_name": {
+                    "description": "Optional name of the output stuff to return.",
+                    "type": "string"
+                  },
+                  "pipe_code": {
+                    "description": "Code of the pipe to run. Provide this and/or `mthds_contents`.",
+                    "example": "summarize",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelexPipelineExecuteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Run a pipeline and wait for the result (blocking)",
+        "tags": [
+          "pipeline"
+        ]
+      }
+    },
+    "/api/v1/pipeline/start": {
+      "post": {
+        "description": "Starts the pipeline and returns a `pipeline_run_id` immediately without waiting. Optionally posts the result to `callback_urls` on completion (HMAC-signed). The runner keeps no run store, so there is no by-id polling here \u2014 durable run lifecycle (`status`/`result`/`poll`) is a Pipelex Platform feature.",
+        "operationId": "start_api_v1_pipeline_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "callback_urls": [
+                  "https://example.com/pipelex/webhook"
+                ],
+                "inputs": {
+                  "text": "Pipelex turns plain-language pipeline definitions into reproducible AI workflows."
+                },
+                "mthds_contents": [
+                  "domain = \"hello\"\nmain_pipe = \"summarize\"\n\n[pipe.summarize]\ntype = \"PipeLLM\"\ndescription = \"Summarize the input text in one sentence\"\ninputs = { text = \"Text\" }\noutput = \"Text\"\nprompt = \"Summarize in one sentence:\\n@text\"\n"
+                ],
+                "pipe_code": "summarize"
+              },
+              "schema": {
+                "properties": {
+                  "callback_urls": {
+                    "description": "Optional http(s) URLs notified on completion (HMAC-signed via X-Completion-Signature). Private/loopback/metadata hosts are rejected.",
+                    "items": {
+                      "format": "uri",
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "dynamic_output_concept_ref": {
+                    "description": "Optional concept ref to coerce the output to.",
+                    "type": "string"
+                  },
+                  "inputs": {
+                    "additionalProperties": true,
+                    "description": "Pipeline inputs keyed by name. Values may be plain text, structured objects, or Document/Image references.",
+                    "type": "object"
+                  },
+                  "mthds_contents": {
+                    "description": "Inline MTHDS bundle(s) defining the pipe(s). Always an array, even for one file.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "output_multiplicity": {
+                    "description": "Optional output multiplicity override (bool or int)."
+                  },
+                  "output_name": {
+                    "description": "Optional name of the output stuff to return.",
+                    "type": "string"
+                  },
+                  "pipe_code": {
+                    "description": "Code of the pipe to run. Provide this and/or `mthds_contents`.",
+                    "example": "summarize",
+                    "type": "string"
+                  },
+                  "pipeline_run_id": {
+                    "description": "Optional client-supplied run id (<=128 chars).",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelexPipelineStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Start a pipeline asynchronously (fire-and-callback)",
+        "tags": [
+          "pipeline"
+        ]
+      }
+    },
+    "/api/v1/resolve-storage-url": {
+      "post": {
+        "description": "**Pipelex Platform feature \u2014 not part of the open-source self-host standard.** Requires `AUTH_MODE=jwt` (a per-user identity). Only needed for `pipelex-storage://` URIs produced by `/upload`; self-hosters using public URLs never need this.",
+        "operationId": "resolve_storage_url_api_v1_resolve_storage_url_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveStorageUrlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveStorageUrlResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve a pipelex-storage:// URI to a presigned URL (Pipelex Platform feature)",
+        "tags": [
+          "storage"
+        ]
+      }
+    },
+    "/api/v1/runs": {
+      "post": {
+        "description": "Starts the pipeline as a background run and returns its `pipeline_run_id` immediately. Poll `GET /runs/by-id/{id}` for status and `GET /runs/by-id/{id}/result` for the output \u2014 the standard async pattern for long pipelines, with no held connection. Same request body as `/pipeline/execute`.",
+        "operationId": "start_run_api_v1_runs_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Start a run asynchronously and poll it by id",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v1/runs/by-id/{pipeline_run_id}": {
+      "get": {
+        "operationId": "get_run_api_v1_runs_by_id__pipeline_run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pipeline_run_id",
+            "required": true,
+            "schema": {
+              "title": "Pipeline Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get a run's status by id",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v1/runs/by-id/{pipeline_run_id}/result": {
+      "get": {
+        "description": "Single-shot result lookup. **202** while the run is pending/running (retry after `Retry-After` seconds); **200** with the execute response when COMPLETED; **409** when the run reached a terminal failure.",
+        "operationId": "get_run_result_api_v1_runs_by_id__pipeline_run_id__result_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pipeline_run_id",
+            "required": true,
+            "schema": {
+              "title": "Pipeline Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get a run's result by id (202 running / 200 completed / 409 failed)",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v1/upload": {
+      "post": {
+        "description": "**Pipelex Platform feature \u2014 not part of the open-source self-host standard.** Requires `AUTH_MODE=jwt` (a per-user identity to scope storage under). Self-hosters should pass a public HTTP(S) URL or a base64 data URL directly as a `Document`/`Image` input instead of uploading.",
+        "operationId": "upload_file_api_v1_upload_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload a user-scoped file (Pipelex Platform feature)",
+        "tags": [
+          "uploader"
+        ]
+      }
+    },
+    "/api/v1/validate": {
+      "post": {
+        "description": "Validate MTHDS content by parsing, loading, and dry-running pipes.",
+        "operationId": "validate_mthds_api_v1_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate and dry-run an MTHDS bundle",
+        "tags": [
+          "validate"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "get_health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Health Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Health",
+        "tags": [
+          "health"
+        ]
+      }
+    }
+  },
+  "security": [
+    {},
+    {
+      "BearerAuth": []
+    }
+  ],
+  "servers": [
+    {
+      "description": "Local self-hosted runner",
+      "url": "http://localhost:8081"
+    },
+    {
+      "description": "Hosted Pipelex API (runner namespaced under /runner/v1)",
+      "url": "https://api.pipelex.com"
+    }
+  ],
+  "tags": [
+    {
+      "description": "Liveness probe (no auth).",
+      "name": "health"
+    },
+    {
+      "description": "Pipelex library and API server versions.",
+      "name": "version"
+    },
+    {
+      "description": "Run pipelines: blocking `execute` and fire-and-callback `start`.",
+      "name": "pipeline"
+    },
+    {
+      "description": "Parse, validate, and dry-run an MTHDS bundle.",
+      "name": "validate"
+    },
+    {
+      "description": "Scaffolding helpers: generate inputs, outputs, runner code, concepts, pipe specs.",
+      "name": "build"
+    },
+    {
+      "description": "Helpers for AI agents building pipelines (concept/pipe-spec \u2192 TOML, model catalog).",
+      "name": "agent"
+    },
+    {
+      "description": "User-scoped file storage. **Pipelex Platform feature** \u2014 requires `AUTH_MODE=jwt` (a per-user identity). Not part of the open-source self-host standard; self-hosters pass a public URL or base64 data URL directly instead.",
+      "name": "storage"
+    }
+  ]
+}
