@@ -1084,17 +1084,6 @@
         "title": "LLMSetting",
         "type": "object"
       },
-      "LeanRunStatus": {
-        "description": "Lifecycle status of a runner-tracked run. A lean subset of the platform's status set.",
-        "enum": [
-          "PENDING",
-          "RUNNING",
-          "COMPLETED",
-          "FAILED"
-        ],
-        "title": "LeanRunStatus",
-        "type": "string"
-      },
       "ModelReference": {
         "type": "string"
       },
@@ -2733,68 +2722,6 @@
         "title": "ResolveStorageUrlResponse",
         "type": "object"
       },
-      "RunStartResponse": {
-        "properties": {
-          "created_at": {
-            "description": "ISO-8601 creation timestamp.",
-            "title": "Created At",
-            "type": "string"
-          },
-          "pipeline_run_id": {
-            "description": "Id to poll the run by.",
-            "title": "Pipeline Run Id",
-            "type": "string"
-          },
-          "status": {
-            "$ref": "#/components/schemas/LeanRunStatus",
-            "description": "Lifecycle status at creation (PENDING/RUNNING)."
-          }
-        },
-        "required": [
-          "pipeline_run_id",
-          "status",
-          "created_at"
-        ],
-        "title": "RunStartResponse",
-        "type": "object"
-      },
-      "RunStatusResponse": {
-        "properties": {
-          "created_at": {
-            "description": "ISO-8601 creation timestamp.",
-            "title": "Created At",
-            "type": "string"
-          },
-          "finished_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "ISO-8601 completion timestamp, once terminal.",
-            "title": "Finished At"
-          },
-          "pipeline_run_id": {
-            "description": "The run id.",
-            "title": "Pipeline Run Id",
-            "type": "string"
-          },
-          "status": {
-            "$ref": "#/components/schemas/LeanRunStatus",
-            "description": "Current lifecycle status."
-          }
-        },
-        "required": [
-          "pipeline_run_id",
-          "status",
-          "created_at"
-        ],
-        "title": "RunStatusResponse",
-        "type": "object"
-      },
       "SearchSetting": {
         "additionalProperties": false,
         "properties": {
@@ -3837,111 +3764,6 @@
         "summary": "Resolve a pipelex-storage:// URI to a presigned URL (Pipelex Platform feature)",
         "tags": [
           "storage"
-        ]
-      }
-    },
-    "/api/v1/runs": {
-      "post": {
-        "description": "Starts the pipeline as a background run and returns its `pipeline_run_id` immediately. Poll `GET /runs/by-id/{id}` for status and `GET /runs/by-id/{id}/result` for the output \u2014 the standard async pattern for long pipelines, with no held connection. Same request body as `/pipeline/execute`.",
-        "operationId": "start_run_api_v1_runs_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RunStartResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Start a run asynchronously and poll it by id",
-        "tags": [
-          "runs"
-        ]
-      }
-    },
-    "/api/v1/runs/by-id/{pipeline_run_id}": {
-      "get": {
-        "operationId": "get_run_api_v1_runs_by_id__pipeline_run_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pipeline_run_id",
-            "required": true,
-            "schema": {
-              "title": "Pipeline Run Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RunStatusResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get a run's status by id",
-        "tags": [
-          "runs"
-        ]
-      }
-    },
-    "/api/v1/runs/by-id/{pipeline_run_id}/result": {
-      "get": {
-        "description": "Single-shot result lookup. **202** while the run is pending/running (retry after `Retry-After` seconds); **200** with the execute response when COMPLETED; **409** when the run reached a terminal failure.",
-        "operationId": "get_run_result_api_v1_runs_by_id__pipeline_run_id__result_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pipeline_run_id",
-            "required": true,
-            "schema": {
-              "title": "Pipeline Run Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get a run's result by id (202 running / 200 completed / 409 failed)",
-        "tags": [
-          "runs"
         ]
       }
     },

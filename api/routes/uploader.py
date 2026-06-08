@@ -16,6 +16,10 @@ from api.security import RequestUser, get_request_user
 
 router = APIRouter(tags=["uploader"])
 
+# TODO(platform): /upload is a Pipelex Platform concern (user-scoped file storage), not the
+# open-source runner's. It only lives here today because it leans on pipelex's storage
+# provider. Move it to pipelex-platform — the runner should stay execution-only.
+
 # Hard cap on uploaded files. Base64 encoding inflates by ~4/3, so the JSON
 # `data` field is bounded by `MAX_UPLOAD_BYTES * 4 / 3` characters. Enforced
 # via Pydantic max_length so oversized payloads are rejected during request

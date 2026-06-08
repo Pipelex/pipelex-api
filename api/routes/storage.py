@@ -24,6 +24,10 @@ from api.security import USER_ID_UUID_REGEX, RequestUser, get_request_user
 
 router = APIRouter(tags=["storage"])
 
+# TODO(platform): /resolve-storage-url is a Pipelex Platform concern (user-scoped file
+# storage), not the open-source runner's. Move it to pipelex-platform alongside /upload —
+# the runner should stay execution-only.
+
 _EXTENSION_REGEX = re.compile(r"^[a-zA-Z0-9]+$")
 _FALLBACK_LIFESPAN_SECONDS = 900
 

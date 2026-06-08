@@ -14,7 +14,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from api.middleware import request_body_size_middleware
 from api.routes import router as api_router
 from api.routes.health import router as health_router
-from api.run_store import make_run_store
 from api.security import get_auth_dependency
 
 # The runner contract — the open-source, self-hostable standard. See docs/index.md
@@ -69,13 +68,8 @@ def _resolve_api_version() -> str:
 
 
 @asynccontextmanager
-async def lifespan(app_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     Pipelex.make(integration_mode=IntegrationMode.FASTAPI)
-    # Process-wide state for the runner-native async run lifecycle (start/poll/result).
-    # `run_store` holds run records (in-memory by default); `run_tasks` keeps strong
-    # references to in-flight background executions so they aren't garbage-collected.
-    app_.state.run_store = make_run_store()
-    app_.state.run_tasks = set()
     try:
         yield
     finally:

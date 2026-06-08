@@ -70,7 +70,7 @@ mthds config set runner-url http://localhost:8081/api/v1
 mthds run pipe bundle.mthds
 ```
 
-`run pipe` against a self-hosted runner uses the blocking `/pipeline/execute` (no gateway 30s cap). For long pipelines, the runner also serves the **async lifecycle** — `POST /api/v1/runs` returns a `pipeline_run_id`, then poll `GET /api/v1/runs/by-id/{id}` and `GET /api/v1/runs/by-id/{id}/result` (202 running → 200 completed). The SDK's `run start` / `status` / `result` / `poll` drive this against the runner with no extra infrastructure (an in-process store; no Temporal or database). The hosted Pipelex Platform is the durable, multi-tenant version of the same surface.
+`run pipe` against a self-hosted runner uses the blocking `/pipeline/execute` (no gateway 30s cap). For fire-and-forget execution, the runner also offers `/pipeline/start`, which returns a `pipeline_run_id` and optionally posts the result to your `callback_urls` on completion (HMAC-signed) — the runner keeps no run store. Durable run lifecycle — by-id `status` / `result` / `poll` — is **not** part of the open-source runner; it's a separate run-management layer that sits on top, documented in **[Run Management & Polling →](run-management.md)**.
 
 ## Interactive API reference
 
