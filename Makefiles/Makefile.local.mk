@@ -11,6 +11,7 @@ define HELP_LOCAL
 
 	$(YELLOW)Native (uvicorn, hot reload — fastest dev loop):$(RESET)
 	make run$(RESET):           Run the API with uvicorn (requires `make install` first).
+	make run-wip$(RESET) ($(GREEN)wip$(RESET)):     Run against a LOCAL pipelex checkout (editable overlay). Path: make run-wip PIPELEX_REPO=../_bridge
 
 	$(YELLOW)Docker (closest to what's deployed):$(RESET)
 	make docker-build$(RESET):  Build the API image from local source.
@@ -53,6 +54,39 @@ docker-stop:
 
 docker-logs:
 	docker logs -f $(CONTAINER_NAME)
+
+#################################################################################
+###########################   LOCAL PIPELEX (WIP)   #############################
+#################################################################################
+
+# Path to your local pipelex checkout — used by the -wip targets to run the API
+# against UNRELEASED pipelex code (e.g. a worktree such as ../_bridge), overlaid
+# on top of whatever `[tool.uv.sources]` currently resolves. This lets you switch
+# which pipelex the API runs WITHOUT hand-editing pyproject.toml. Override the
+# path per-invocation, e.g.:  make run-wip PIPELEX_REPO=../_bridge
+PIPELEX_REPO ?= ../pipelex
+
+.PHONY: check-pipelex-repo install-wip-pipelex run-wip wip
+
+check-pipelex-repo:
+	@test -d "$(PIPELEX_REPO)/pipelex" || { echo "ERROR: '$(PIPELEX_REPO)/pipelex' not found. Point PIPELEX_REPO at your pipelex checkout, e.g. make run-wip PIPELEX_REPO=../_bridge"; exit 1; }
+
+# Mirrors pipelex-worker's `install-wip-pipelex`: install your LOCAL pipelex
+# working tree (editable, with the API's extras) over the synced version. Depends
+# on `install` so the base deps (fastapi, uvicorn, ...) are present, then overlays
+# editable pipelex. STICKY — the overlay stays active for a plain `make run` too,
+# until you restore the synced version with `make install`. Once editable is in
+# place, pipelex code edits are picked up on the next API restart (no reinstall).
+install-wip-pipelex: check-pipelex-repo install
+	@echo "• Overlaying LOCAL pipelex (editable) from $(PIPELEX_REPO) over the synced version"
+	uv pip install --python $(VENV_PYTHON) -e "$(PIPELEX_REPO)[mistralai,anthropic,google,google-genai,bedrock,fal,temporal]"
+
+# Run the API against your LOCAL pipelex working tree (editable install, then run).
+# Restore the synced pipelex with `make install`.
+run-wip: install-wip-pipelex
+	@$(MAKE) run
+
+wip: run-wip
 
 #################################################################################
 #################################   TEMPORAL   #################################

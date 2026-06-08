@@ -21,6 +21,9 @@ dependencies = [
   "uvicorn>=0.37.0",
 ]
 
+[tool.uv.sources]
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "5fc2cbde9d0fef05c901ad4e94a325d240436b46" }
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
