@@ -13,6 +13,11 @@ Requests are generated per bundle (configurable via ``--endpoint``):
 dry-runs every pipe — no pipe_code, no inputs, no cost). All use the
 collection's ``{{base_url}}`` and inherit its ``{{auth_token}}`` bearer auth.
 
+The async ``Start (async)`` body additionally carries ``callback_urls`` — the
+webhook(s) the runner POSTs the finished result to. It is resolved from
+``--callback-url``, else ``CALLBACK_URL`` in the environment / ``.env``; a start
+request fails fast (asking for one) if none is found.
+
 File/document inputs are NOT uploaded. Any local (non-http) ``url`` in
 inputs.json is copied verbatim and reported so you can swap in a real URL before
 running. Run this against a self-contained bundle (concepts/structures declared
@@ -47,11 +52,12 @@ TOP_FOLDER_NAME = "Run Bundle"
 
 # name -> (request display name, URL path segments, body kind)
 # Body kind selects the request shape: "run" -> {pipe_code, mthds_contents, inputs}
-# for execute/start; "validate" -> {mthds_contents, allow_signatures} for the
+# for the sync execute; "start" -> the same plus {callback_urls} for the async
+# /pipeline/start; "validate" -> {mthds_contents, allow_signatures} for the
 # inference-free /validate dry-run (no pipe_code, no inputs).
 ENDPOINTS: dict[str, tuple[str, list[str], str]] = {
     "execute": ("Execute (sync)", ["api", "v1", "pipeline", "execute"], "run"),
-    "start": ("Start (async)", ["api", "v1", "pipeline", "start"], "run"),
+    "start": ("Start (async)", ["api", "v1", "pipeline", "start"], "start"),
     "validate": ("Validate (dry-run)", ["api", "v1", "validate"], "validate"),
 }
 
@@ -168,17 +174,82 @@ def collect_local_urls(value: Any, acc: list[str] | None = None) -> list[str]:
     return acc
 
 
+# --- callback urls (async /pipeline/start only) ----------------------------
+
+CALLBACK_URL_ENV_VAR = "CALLBACK_URL"
+
+
+def resolve_callback_urls(cli_values: list[str] | None) -> list[str]:
+    """Resolve the async-start callback URL(s): --callback-url, then CALLBACK_URL.
+
+    Order: explicit ``--callback-url`` (repeatable) wins; otherwise fall back to
+    ``CALLBACK_URL`` from the process environment (``make`` exports ``.env``), then
+    from a ``.env`` file found at or above the cwd (covers running the script
+    directly). Returns an empty list when nothing is found — the caller decides
+    whether that is fatal.
+    """
+    if cli_values:
+        return cli_values
+    from_env = os.environ.get(CALLBACK_URL_ENV_VAR)
+    if from_env:
+        return [from_env]
+    from_dotenv = read_dotenv_value(CALLBACK_URL_ENV_VAR)
+    if from_dotenv:
+        return [from_dotenv]
+    return []
+
+
+def read_dotenv_value(key: str) -> str | None:
+    """Read a single ``KEY=VALUE`` from the nearest ``.env`` (cwd upward).
+
+    Minimal parser — enough to pick up ``CALLBACK_URL`` when the script is run
+    directly (without ``make``, which would otherwise export ``.env`` for us).
+    Skips blanks/comments, tolerates an ``export`` prefix, and strips matching
+    surrounding quotes.
+    """
+    cwd = Path.cwd()
+    for directory in [cwd, *cwd.parents]:
+        env_file = directory / ".env"
+        if not env_file.is_file():
+            continue
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if stripped.startswith("export "):
+                stripped = stripped[len("export ") :].lstrip()
+            name, sep, value = stripped.partition("=")
+            if not sep or name.strip() != key:
+                continue
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            return value or None
+    return None
+
+
 # --- Postman request construction -----------------------------------------
 
 
-def build_run_body(pipe_code: str | None, mthds_contents: list[str], inputs: Any) -> str:
-    """Body for /pipeline/execute and /start: pipe_code + mthds_contents + inputs."""
+def build_run_body(
+    pipe_code: str | None,
+    mthds_contents: list[str],
+    inputs: Any,
+    callback_urls: list[str] | None = None,
+) -> str:
+    """Body for /pipeline/execute and /start: pipe_code + mthds_contents + inputs.
+
+    The async /pipeline/start adds ``callback_urls`` — the webhook(s) the runner
+    POSTs the finished result to. It is omitted for the sync /pipeline/execute.
+    """
     body: dict[str, Any] = {}
     if pipe_code:
         body["pipe_code"] = pipe_code
     body["mthds_contents"] = mthds_contents
     if inputs is not None:
         body["inputs"] = inputs
+    if callback_urls:
+        body["callback_urls"] = callback_urls
     return json.dumps(body, indent=2, ensure_ascii=False)
 
 
@@ -313,6 +384,16 @@ def main() -> None:
     parser.add_argument("--inputs", help="Override inputs JSON path (default: auto-detect inputs.json in a directory)")
     parser.add_argument("--pipe", help="Override main_pipe (sets pipe_code). Ignored by --endpoint validate.")
     parser.add_argument(
+        "--callback-url",
+        action="append",
+        metavar="URL",
+        help=(
+            "Webhook URL for the async /pipeline/start callback (repeatable; only used by the start "
+            "endpoint). Falls back to CALLBACK_URL in the environment / .env. Required whenever start "
+            "is the endpoint being built or run."
+        ),
+    )
+    parser.add_argument(
         "--allow-signatures",
         action="store_true",
         help="(validate only) Tolerate unimplemented pipe signatures instead of rejecting the bundle. Default: strict.",
@@ -347,8 +428,18 @@ def main() -> None:
         fail("POSTMAN_API_KEY is not set. Run `source ~/.zshenv` (or add the key there), then retry.")
 
     selected = ["execute", "start"] if args.endpoint == "both" else [args.endpoint]
-    needs_run = any(ENDPOINTS[key][2] == "run" for key in selected)
-    needs_validate = any(ENDPOINTS[key][2] == "validate" for key in selected)
+    # The single endpoint --run fires: 'both' is not meaningful for one run, so use
+    # execute (sync), which waits for and returns the result.
+    run_key = "execute" if args.endpoint == "both" else selected[0]
+    # In --run mode only run_key actually fires, so build/require only its body.
+    # Every other mode (postman/curl/dry) materializes all selected endpoints.
+    active_keys = [run_key] if mode == "run" else selected
+
+    needs_run = any(ENDPOINTS[key][2] == "run" for key in active_keys)
+    needs_start = any(ENDPOINTS[key][2] == "start" for key in active_keys)
+    needs_validate = any(ENDPOINTS[key][2] == "validate" for key in active_keys)
+    # execute and start share the run-style body (pipe_code + mthds_contents + inputs).
+    needs_pipe = needs_run or needs_start
 
     main_file, all_mthds, inputs_path = resolve_bundle(args.bundle, args.inputs)
     main_text = main_file.read_text(encoding="utf-8")
@@ -357,11 +448,24 @@ def main() -> None:
     # `pipe_code` is required only by the run endpoints — /validate derives
     # everything it needs from the bundle text and takes no pipe_code.
     pipe_code = args.pipe or main_pipe
-    if needs_run and not pipe_code:
+    if needs_pipe and not pipe_code:
         fail(
             f"could not determine main_pipe from '{main_file}'. Declare main_pipe in the bundle, "
             "or pass --pipe <pipe_code>."
         )
+
+    # callback_urls belongs to the async /pipeline/start endpoint only. Resolve it
+    # from --callback-url, then CALLBACK_URL (environment or .env). If start is in
+    # play and none is found, stop and ask the user for one.
+    callback_urls: list[str] = []
+    if needs_start:
+        callback_urls = resolve_callback_urls(args.callback_url)
+        if not callback_urls:
+            fail(
+                "the async /pipeline/start endpoint requires callback_urls, but none was found. "
+                "Pass --callback-url <https-url>, or set CALLBACK_URL in your .env. If you don't "
+                "have one, ask the user for a callback URL (e.g. a https://webhook.site/... endpoint)."
+            )
 
     mthds_contents = [path.read_text(encoding="utf-8") for path in all_mthds]
 
@@ -369,23 +473,28 @@ def main() -> None:
     # /validate ignores them, so don't load or warn for a validate-only run.
     inputs: Any = None
     local_url_warnings: list[str] = []
-    if needs_run:
+    if needs_pipe:
         inputs, local_url_warnings = load_inputs(inputs_path)
 
     subfolder_name = args.name or domain or main_file.stem
 
-    # One body per endpoint kind in play (execute + start share the "run" body).
+    # One body per endpoint kind in play: execute -> "run", start -> "run" body plus
+    # callback_urls, validate -> the inference-free /validate body.
     bodies: dict[str, str] = {}
     if needs_run:
         bodies["run"] = build_run_body(pipe_code, mthds_contents, inputs)
+    if needs_start:
+        bodies["start"] = build_run_body(pipe_code, mthds_contents, inputs, callback_urls=callback_urls)
     if needs_validate:
         bodies["validate"] = build_validate_body(mthds_contents, args.allow_signatures)
 
     print(f"Bundle:      {main_file}")
     print(f"mthds files: {', '.join(path.name for path in all_mthds)}")
-    if needs_run:
+    if needs_pipe:
         print(f"pipe_code:   {pipe_code}")
         print(f"inputs:      {inputs_path or 'none'}")
+    if needs_start:
+        print(f"callback:    {', '.join(callback_urls)}")
     if needs_validate:
         print(f"validate:    POST /api/v1/validate (no inference) — allow_signatures={args.allow_signatures}")
     if local_url_warnings:
@@ -411,8 +520,7 @@ def main() -> None:
         return
 
     if mode == "run":
-        # 'both' isn't meaningful for a single run — use execute (sync), which returns the result.
-        run_key = "execute" if args.endpoint == "both" else selected[0]
+        # Only run_key (resolved above) actually fires — for 'both' that's execute (sync).
         name, path_parts, kind = ENDPOINTS[run_key]
         url = args.base_url.rstrip("/") + "/" + "/".join(path_parts)
         print(f"\nRunning {name}: POST {url}")
@@ -438,12 +546,14 @@ def main() -> None:
             "`auth_token` in your Postman environment before running."
         )
     else:
+        callback_note = f"- callback_urls (Start only): {', '.join(callback_urls)}\n" if needs_start else ""
         description = (
             f"Run the `{subfolder_name}` bundle (mirrors `pipelex run bundle`).\n\n"
             f"- Source: `{main_file}`\n"
             f"- main_pipe: `{pipe_code}`\n"
             f"- .mthds files sent: {len(mthds_contents)}\n"
-            f"- inputs: {inputs_path or 'none'}\n\n"
+            f"- inputs: {inputs_path or 'none'}\n"
+            f"{callback_note}\n"
             "Generated by the postman-run-bundle skill. Set `base_url` and `auth_token` in your "
             "Postman environment before running."
         )

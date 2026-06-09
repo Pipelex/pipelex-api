@@ -30,7 +30,8 @@ define HELP_LOCAL
 	make bundle-curl$(RESET) BUNDLE=<dir|.mthds>:     Emit a ready-to-run curl command for the bundle.
 	make bundle-postman$(RESET) BUNDLE=<dir|.mthds>:  Push Execute/Start requests into the live Pipelex FastAPI Postman collection.
 	make bundle-dry$(RESET) BUNDLE=<dir|.mthds>:      Print the request body only — touch nothing.
-	  Optional: ENDPOINT=execute|start|validate|both  PIPE=<code>  INPUTS=<path>  NAME=<folder>  ALLOW_SIGNATURES=1  BASE_URL=<url>  TOKEN=<bearer>  ARGS=<extra>
+	  Optional: ENDPOINT=execute|start|validate|both  PIPE=<code>  INPUTS=<path>  NAME=<folder>  ALLOW_SIGNATURES=1  CALLBACK_URL=<url>  BASE_URL=<url>  TOKEN=<bearer>  ARGS=<extra>
+	  (the async start endpoint needs CALLBACK_URL — set it here, or via CALLBACK_URL in .env)
 
 endef
 export HELP_LOCAL
@@ -182,12 +183,14 @@ tstop: temporal-stop
 # safe, free counterpart to bundle-run. The other modes accept ENDPOINT=validate
 # too (e.g. `make bundle-postman ENDPOINT=validate`).
 #
-# Optional pass-throughs: ENDPOINT, PIPE, INPUTS, NAME, ALLOW_SIGNATURES (all
-# modes); BASE_URL, TOKEN (run/curl); ARGS for anything else. bundle-postman
-# needs POSTMAN_API_KEY in the environment (it lives in ~/.zshenv, so any
-# zsh-launched make has it).
+# Optional pass-throughs: ENDPOINT, PIPE, INPUTS, NAME, ALLOW_SIGNATURES,
+# CALLBACK_URL (all modes); BASE_URL, TOKEN (run/curl); ARGS for anything else.
+# The async start endpoint requires CALLBACK_URL — pass it here, or set
+# CALLBACK_URL in .env (make exports it to the script). bundle-postman needs
+# POSTMAN_API_KEY in the environment (it lives in ~/.zshenv, so any zsh-launched
+# make has it).
 BUNDLE_SCRIPT := .claude/skills/postman-run-bundle/scripts/build_postman_query.py
-BUNDLE_OPTS    = $(if $(ENDPOINT),--endpoint $(ENDPOINT)) $(if $(PIPE),--pipe $(PIPE)) $(if $(INPUTS),--inputs $(INPUTS)) $(if $(NAME),--name $(NAME)) $(if $(ALLOW_SIGNATURES),--allow-signatures) $(ARGS)
+BUNDLE_OPTS    = $(if $(ENDPOINT),--endpoint $(ENDPOINT)) $(if $(PIPE),--pipe $(PIPE)) $(if $(INPUTS),--inputs $(INPUTS)) $(if $(NAME),--name $(NAME)) $(if $(ALLOW_SIGNATURES),--allow-signatures) $(if $(CALLBACK_URL),--callback-url '$(CALLBACK_URL)') $(ARGS)
 BUNDLE_RUN_OPTS = $(if $(BASE_URL),--base-url $(BASE_URL)) $(if $(TOKEN),--token $(TOKEN))
 
 .PHONY: check-bundle-arg bundle-run bundle-validate bundle-curl bundle-postman bundle-dry

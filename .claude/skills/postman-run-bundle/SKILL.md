@@ -34,13 +34,24 @@ Run Bundle/
 
 Which of these appears depends on `--endpoint`: the default `both` is `execute` + `start`; `validate` is its own choice and is never bundled with the run endpoints (different body, see below).
 
-The **execute / start** body is:
+The **execute** (sync) body is:
 
 ```json
 {
   "pipe_code": "<the bundle's main_pipe>",
   "mthds_contents": ["<full text of the .mthds file(s)>"],
   "inputs": { ...inputs.json copied verbatim... }
+}
+```
+
+The **start** (async) body is the same plus a `callback_urls` array — the webhook(s) the runner POSTs the finished result to (single URL supported, see [Callback URLs](#callback-urls-the-async-start-endpoint) below):
+
+```json
+{
+  "pipe_code": "<the bundle's main_pipe>",
+  "mthds_contents": ["<full text of the .mthds file(s)>"],
+  "inputs": { ...inputs.json copied verbatim... },
+  "callback_urls": ["https://webhook.site/<your-endpoint>"]
 }
 ```
 
@@ -66,6 +77,16 @@ Two things to know:
 - **The bundle must declare a `main_pipe`.** `/validate` derives everything from the bundle text and rejects a bundle with no `main_pipe` (clean 422: *"Bundle does not declare a main_pipe, which is required for validation"*). Unlike the run endpoints, you cannot substitute `--pipe` — the endpoint takes no `pipe_code`. If the user's bundle has no `main_pipe`, tell them to declare one.
 - **`allow_signatures`** (`--allow-signatures`) loosens one thing: by default the validation sweep rejects unimplemented pipe signatures; opt in and it tolerates them (each signature dry-runs trivially by minting a mock). Useful for an in-progress bundle whose pipes aren't all fleshed out yet.
 
+## Callback URLs (the async `start` endpoint)
+
+`/api/v1/pipeline/start` is fire-and-forget: it returns a `pipeline_run_id` immediately and POSTs the finished result to a webhook later. So a `start` request **must** carry `callback_urls`. The skill resolves it in this order:
+
+1. **`--callback-url <url>`** if you pass one (repeatable — the field is a JSON list, but a single URL is the common case).
+2. **`CALLBACK_URL`** in the environment or the repo `.env` (e.g. `CALLBACK_URL=https://webhook.site/<id>`). `make` exports `.env`, so the make targets pick it up automatically; the script also reads `.env` directly when invoked outside `make`.
+3. **Ask the user.** If neither is set, the script stops with a clear error — ask the user for a callback URL (a `https://webhook.site/...` endpoint is the easy way to watch the result land) and re-run with `--callback-url`.
+
+This only affects `start`. `execute` (sync) returns the result inline and `validate` is a dry-run — neither takes `callback_urls`, so the default `both`/`execute`/`validate` flows never need one. Note the API's SSRF guard rejects loopback/private/metadata hosts, so a `localhost`/`127.0.0.1` callback won't validate — use a public `https://` URL.
+
 ## How to run it
 
 From the `pipelex-api` repo root, the make targets are the convenient wrapper (they run the script with the project venv):
@@ -76,7 +97,7 @@ make bundle-validate BUNDLE=<dir|.mthds>   # dry-run validate via /api/v1/valida
 make bundle-curl     BUNDLE=<dir|.mthds>   # emit a ready-to-run curl
 make bundle-postman  BUNDLE=<dir|.mthds>   # push Execute/Start into the Postman collection
 make bundle-dry      BUNDLE=<dir|.mthds>   # print the request body only
-# optional: ENDPOINT=execute|start|validate|both  PIPE=<code>  INPUTS=<path>  NAME=<folder>  ALLOW_SIGNATURES=1  BASE_URL=<url>  TOKEN=<bearer>  ARGS=<extra>
+# optional: ENDPOINT=execute|start|validate|both  PIPE=<code>  INPUTS=<path>  NAME=<folder>  ALLOW_SIGNATURES=1  CALLBACK_URL=<url>  BASE_URL=<url>  TOKEN=<bearer>  ARGS=<extra>
 ```
 
 `make bundle-validate` is the convenient way to dry-run validate a bundle live (it hardcodes `--endpoint validate --run`, since validate is free and safe to run). The other modes accept `ENDPOINT=validate` too — e.g. `make bundle-postman ENDPOINT=validate` pushes a Validate request into Postman, `make bundle-curl ENDPOINT=validate` emits the validate curl.
@@ -100,7 +121,7 @@ python3 .claude/skills/postman-run-bundle/scripts/build_postman_query.py <bundle
 #   --base-url https://api.pipelex.com/runner   --token <bearer>
 ```
 
-`--run` uses `Execute (sync)` so it waits for and prints the result; pass `--endpoint start` to fire-and-forget and get a `pipeline_run_id` back. The API must be up — start it locally with `make run` first. Heads-up: `execute`/`start` trigger real inference (cost + latency), so for an image-gen bundle like `fashion_moodboard` confirm the user wants a live run.
+`--run` uses `Execute (sync)` so it waits for and prints the result; pass `--endpoint start` to fire-and-forget and get a `pipeline_run_id` back (a `start` run needs a `--callback-url` or `CALLBACK_URL` — see [Callback URLs](#callback-urls-the-async-start-endpoint)). The API must be up — start it locally with `make run` first. Heads-up: `execute`/`start` trigger real inference (cost + latency), so for an image-gen bundle like `fashion_moodboard` confirm the user wants a live run.
 
 **Dry-run validate it** — `--endpoint validate` hits `/api/v1/validate`, which parses, loads, and dry-runs every pipe with **no inference** (free, no cost, no latency). Safe to run live without confirmation:
 
@@ -131,6 +152,7 @@ Useful options (apply across modes):
 | `--allow-signatures` | (validate only) Tolerate unimplemented pipe signatures instead of rejecting the bundle. Default strict. |
 | `--inputs <path>` | Inputs JSON lives elsewhere, or you point at a `.mthds` file directly (file mode does not auto-detect inputs, matching the CLI). Ignored by `validate`. |
 | `--pipe <pipe_code>` | The bundle has no `main_pipe`, or you want a different entry pipe. Ignored by `validate` (the endpoint takes no `pipe_code`). |
+| `--callback-url <url>` | (start only) Webhook the async result is POSTed to. Repeatable. Falls back to `CALLBACK_URL` in env/`.env`; required when `start` is built or run. Ignored by `execute`/`validate`. |
 | `--base-url` / `--token` | Target server + bearer for `--run`/`--curl`. |
 | `--name <folder>` | Override the per-bundle Postman subfolder name. |
 
@@ -159,6 +181,7 @@ A related limit: the API receives only the inline `mthds_contents`, not the bund
 
 - **No `POSTMAN_API_KEY`** → the script exits asking you to `source ~/.zshenv`. Do that and retry. If it's still unset, the user needs to add it to `~/.zshenv` (Postman → Settings → API keys → Generate).
 - **No `main_pipe` and no `--pipe`** (run endpoints) → the script exits; ask the user which pipe to run and pass `--pipe`.
+- **`start` selected and no callback URL** → the script exits ("the async /pipeline/start endpoint requires callback_urls"). Resolve it from `--callback-url`, `CALLBACK_URL` in `.env`, or ask the user for one (e.g. a `https://webhook.site/...` endpoint), then re-run. `execute`/`validate` never hit this.
 - **No `main_pipe`, validating** → the script proceeds (validate needs no `pipe_code`), but the API returns a `422` *"Bundle does not declare a main_pipe"*. `--pipe` can't help here — `/validate` takes no `pipe_code`; the bundle itself must declare a `main_pipe`.
 
 ## Constants
