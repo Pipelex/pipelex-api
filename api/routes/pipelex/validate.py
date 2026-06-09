@@ -80,7 +80,7 @@ async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
     Two backends, one contract:
 
     - **Direct (Temporal disabled):** runs `validate_bundle` (sweep) + `dry_run_pipeline`
-      (graph) in-process — unchanged.
+      (graph) in-process.
     - **Temporal enabled:** dispatches the whole job — sweep **+** graph dry-run — to a worker
       as ONE in-process activity (`wf_dry_validate` → `act_dry_validate`) and awaits
       `{status map, graph_spec}` in a single round-trip. The activity runs `validate_bundle`
@@ -105,7 +105,8 @@ async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
     """
     if get_config().temporal.is_enabled:
         return await _validate_via_temporal(request_data)
-    return await _validate_direct(request_data)
+    else:
+        return await _validate_direct(request_data)
 
 
 async def _validate_via_temporal(request_data: ValidateRequest) -> JSONResponse:
