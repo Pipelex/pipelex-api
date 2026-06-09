@@ -4,13 +4,19 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pipelex import log
 from pipelex.base_exceptions import PipelexError
+from pipelex.config import get_config
 from pipelex.core.bundles.pipelex_bundle_blueprint import PipelexBundleBlueprint
 from pipelex.core.concepts.concept_representation_generator import ConceptRepresentationFormat
+from pipelex.core.interpreter.interpreter import PipelexInterpreter
 from pipelex.core.pipes.pipe_abstract import PipeAbstract
+from pipelex.core.pipes.pipe_factory import PipeFactory
 from pipelex.graph.graphspec import GraphSpec
-from pipelex.hub import clear_current_library, get_current_library_id_or_none, get_library_manager
+from pipelex.hub import clear_current_library, get_current_library_id_or_none, get_library_manager, get_required_pipe
 from pipelex.pipe_run.dry_run_pipeline import dry_run_pipeline
+from pipelex.pipeline.execution_seams import acquire_library
 from pipelex.pipeline.validate_bundle import validate_bundle
+from pipelex.temporal.tprl_pipe.act_dry_validate import DryValidateArg
+from pipelex.temporal.tprl_pipe.dry_validate_dispatch import dispatch_dry_validate
 from pydantic import BaseModel, Field
 
 from api.errors import raise_validation_error
@@ -71,22 +77,85 @@ def _find_main_blueprint(blueprints: list[PipelexBundleBlueprint]) -> PipelexBun
 async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
     """Validate MTHDS content by parsing, loading, and dry-running pipes.
 
+    Two backends, one contract:
+
+    - **Direct (Temporal disabled):** runs `validate_bundle` (sweep) + `dry_run_pipeline`
+      (graph) in-process — unchanged.
+    - **Temporal enabled:** dispatches the whole job — sweep **+** graph dry-run — to a worker
+      as ONE in-process activity (`wf_dry_validate` → `act_dry_validate`) and awaits
+      `{status map, graph_spec}` in a single round-trip. The activity runs `validate_bundle`
+      itself and traces the graph in memory, so the error contract and the best-effort-graph
+      semantics are identical to the direct path.
+
     Response contract:
     - **Success (200):** the `ValidateResponse` envelope — the validated
       `pipelex_bundle_blueprint`, the best-effort `graph_spec`, per-pipe
       `pipe_structures`, plus the `success` / `message` flags clients use to
       gate UI on a known-good bundle.
     - **Failure (422):** RFC 7807 `application/problem+json` — same shape as
-      every other API endpoint. `ValidateBundleError` is a `PipelexError`
-      (`error_domain = INPUT`) so it propagates to the global handler in
-      `api.exception_handlers` unchanged; "bundle has no `main_pipe`" is an API-side
-      semantic precondition for this endpoint and is raised via
-      `raise_validation_error`. The legacy
-      `{success: false, mthds_contents, message}` envelope is gone — its 422
-      half lost the structured per-pipe error data carried on
-      `ValidateBundleError`, and its 400 half made `/validate` the only
-      endpoint that did not emit RFC 7807. Both are now the uniform shape.
+      every other API endpoint. Direct mode: `ValidateBundleError` is a `PipelexError`
+      (`error_domain = INPUT`) and propagates to the global handler in
+      `api.exception_handlers` unchanged. Temporal mode: the same failure crosses the
+      activity boundary as a structured `ErrorReport` and surfaces as
+      `WorkflowExecutionError` — also a `PipelexError` — whose `to_error_report()`
+      returns the recovered original report (`error_type=ValidateBundleError`,
+      `error_domain=input`, caller-facing message), so the handler renders the SAME
+      problem document. "Bundle has no `main_pipe`" is an API-side semantic
+      precondition for this endpoint and is raised via `raise_validation_error`.
     """
+    if get_config().temporal.is_enabled:
+        return await _validate_via_temporal(request_data)
+    return await _validate_direct(request_data)
+
+
+async def _validate_via_temporal(request_data: ValidateRequest) -> JSONResponse:
+    """Temporal backend: ONE worker round-trip for the whole sweep + graph dry-run."""
+    mthds_contents = request_data.mthds_contents
+
+    # Dispatch FIRST — before any API-side parsing — so every validation failure (malformed
+    # TOML, factory/wiring errors, unexpected dry-run failures, strict-mode signature refusals)
+    # surfaces through the worker's `validate_bundle` cascade with the exact same categorized
+    # `ValidateBundleError` identity the direct path raises. No route-side catch: the
+    # `WorkflowExecutionError` carrying the recovered report propagates to the global handler.
+    dry_validate_result = await dispatch_dry_validate(DryValidateArg(mthds_contents=mthds_contents, allow_signatures=request_data.allow_signatures))
+
+    # The bundle is known-valid now — parse the blueprints for the response envelope.
+    blueprints = [PipelexInterpreter.make_pipelex_bundle_blueprint(mthds_content=content) for content in mthds_contents]
+    primary_blueprint = _find_main_blueprint(blueprints) or blueprints[0]
+
+    if not primary_blueprint.main_pipe:
+        # Same API-side semantic precondition as the direct path; checked after the dispatch so
+        # validation errors keep precedence over the missing-main_pipe error.
+        raise_validation_error("Bundle does not declare a main_pipe, which is required for validation")
+
+    # `pipe_structures` need resolved pipes (concept refs resolve against a loaded library), so
+    # load the validated bundle locally — load only: the sweep and the graph already ran on the
+    # worker, nothing here dry-runs or traces.
+    library_id, _ = acquire_library(library_id="", mthds_contents=mthds_contents)
+    try:
+        pipes: list[PipeAbstract] = []
+        for blueprint in blueprints:
+            for pipe_code in blueprint.pipe or {}:
+                pipe_ref = PipeFactory.make_pipe_ref_with_domain(domain_code=blueprint.domain, pipe_code=pipe_code)
+                pipes.append(get_required_pipe(pipe_code=pipe_ref))
+        pipe_structures = _build_pipe_structures(pipes)
+    finally:
+        clear_current_library()
+        get_library_manager().teardown(library_id=library_id)
+
+    response_data = ValidateResponse(
+        mthds_contents=mthds_contents,
+        pipelex_bundle_blueprint=primary_blueprint,
+        graph_spec=dry_validate_result.graph_spec,
+        pipe_structures=pipe_structures,
+        success=True,
+        message="MTHDS content validated successfully",
+    )
+    return JSONResponse(content=response_data.model_dump(mode="json", serialize_as_any=True, by_alias=True))
+
+
+async def _validate_direct(request_data: ValidateRequest) -> JSONResponse:
+    """Direct backend: in-process `validate_bundle` + best-effort `dry_run_pipeline` (unchanged)."""
     mthds_contents = request_data.mthds_contents
 
     # `ValidateBundleError` (and any other `PipelexError`) propagates: the

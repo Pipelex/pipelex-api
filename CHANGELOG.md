@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Temporal-enabled `/validate` now runs as ONE worker round-trip.** When `temporal.is_enabled` is true, the route dispatches the whole job — validation sweep **+** graph dry-run — as the one-step wrapper workflow `wf_dry_validate` (→ the single in-process `act_dry_validate` activity) via pipelex's `dispatch_dry_validate`, instead of running `validate_bundle` API-side and `dry_run_pipeline` as a top-level worker workflow with a tracing-backend round-trip. The worker traces the graph in memory and returns `{status map, graph_spec}` on the activity result; the route re-parses the blueprints and builds `pipe_structures` from a local load-only library acquisition. The wire contract is unchanged on both backends: same 200 `ValidateResponse` envelope, same best-effort `graph_spec` (null when the graph dry-run fails), same RFC 7807 422 carrying `error_type=ValidateBundleError` / `error_domain=input` (the structured report crosses the activity boundary and the global handler renders it identically). Direct mode (Temporal disabled) is untouched. Requires a pipelex version that ships `act_dry_validate` (newer than v0.32.1).
+
 ### Breaking Changes
 
 - **Every error response is now [RFC 7807 `application/problem+json`](https://github.com/Pipelex/pipelex-api/blob/main/docs/error-responses.md).** Replaces the legacy `{"detail": {"error_type", "message"}}` envelope across pipelex domain errors, validation (422), auth (401/403), payload limits (413), and the catch-all 500. Standard members on the wire: `type` / `title` / `status` / `detail` / `instance`. Extension members: `error_type`, `error_domain`, `retryable`, `request_id`, and — when populated by pipelex — `error_category`, `user_action`, `provider_metadata`, `model`, `provider`. Content-Type is `application/problem+json`. Clients reading the legacy `data.detail.message` must read RFC 7807 `detail` (top-level string) instead.
