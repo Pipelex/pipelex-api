@@ -15,14 +15,14 @@ classifiers = [
 ]
 
 dependencies = [
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal,temporal]==0.31.0",
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal,temporal]==0.32.0",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",
 ]
 
 [tool.uv.sources]
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "10f6ffdcc449efe4c2ccc701b2ad8c3efb130316" }
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "285a9728ab26f44ddda6c9f8ace086ea8b3a7587" }
 
 [build-system]
 requires = ["hatchling"]
