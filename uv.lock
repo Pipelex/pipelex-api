@@ -2244,8 +2244,8 @@ wheels = [
 
 [[package]]
 name = "pipelex"
-version = "0.32.0"
-source = { git = "https://github.com/Pipelex/pipelex.git?rev=285a9728ab26f44ddda6c9f8ace086ea8b3a7587#285a9728ab26f44ddda6c9f8ace086ea8b3a7587" }
+version = "0.32.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
     { name = "datamodel-code-generator" },
@@ -2284,6 +2284,10 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "urllib3" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/91/e6/c3493f58164e18f33938f0d5e2b785b86df2fbaadb9409ae7003e6720891/pipelex-0.32.1.tar.gz", hash = "sha256:044e54e72a0d0d3dca6a3bcb86263463ce0fc7d7b7c754f8413157721e2e8b9d", size = 976393, upload-time = "2026-06-09T14:33:04.418Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/98/74/00e1d378e4d085907d39204fcada30916ec695933876221cd76929eba1b1/pipelex-0.32.1-py3-none-any.whl", hash = "sha256:2e2647ee31de51a580b420c18c622f759d2594810f45496d5b25199962937e24", size = 1397818, upload-time = "2026-06-09T14:33:02.185Z" },
+]
 
 [package.optional-dependencies]
 anthropic = [
@@ -2315,7 +2319,7 @@ temporal = [
 
 [[package]]
 name = "pipelex-api"
-version = "0.1.2"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -2365,7 +2369,7 @@ requires-dist = [
     { name = "mkdocs-meta-manager", marker = "extra == 'docs'", specifier = "==1.1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.2" },
     { name = "pandas-stubs", marker = "extra == 'dev'", specifier = ">=2.2.3.241126" },
-    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal", "temporal"], git = "https://github.com/Pipelex/pipelex.git?rev=285a9728ab26f44ddda6c9f8ace086ea8b3a7587" },
+    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal", "temporal"], specifier = "==0.32.1" },
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.3.8" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.405" },

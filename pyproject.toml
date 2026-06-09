@@ -1,6 +1,6 @@
 [project]
 name = "pipelex-api"
-version = "0.1.2"
+version = "0.2.0"
 description = "Pipelex API"
 authors = [{ name = "Evotis S.A.S.", email = "oss@pipelex.com" }]
 maintainers = [{ name = "Pipelex staff", email = "oss@pipelex.com" }]
@@ -15,14 +15,11 @@ classifiers = [
 ]
 
 dependencies = [
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal,temporal]==0.32.0",
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal,temporal]==0.32.1",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",
 ]
-
-[tool.uv.sources]
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "285a9728ab26f44ddda6c9f8ace086ea8b3a7587" }
 
 [build-system]
 requires = ["hatchling"]
