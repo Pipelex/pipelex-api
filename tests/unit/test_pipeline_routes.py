@@ -17,18 +17,7 @@ from pytest_mock import MockerFixture
 from api.exception_handlers import register_exception_handlers
 from api.middleware import REQUEST_ID_HEADER, RequestIdMiddleware
 from api.routes.pipelex.pipeline import router as pipeline_router
-
-VALID_MTHDS = (
-    'domain = "smoke"\n'
-    'main_pipe = "echo"\n'
-    "\n"
-    "[pipe.echo]\n"
-    'type = "PipeLLM"\n'
-    'description = "Echo the input"\n'
-    'inputs = { text = "Text" }\n'
-    'output = "Text"\n'
-    'prompt = "Echo: @text"\n'
-)
+from tests.unit._constants import VALID_MTHDS
 
 
 def _build_client(mocker: MockerFixture, *, with_request_id_middleware: bool = False) -> tuple[TestClient, Any, Any]:

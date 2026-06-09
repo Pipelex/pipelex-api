@@ -15,16 +15,14 @@ classifiers = [
 ]
 
 dependencies = [
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal,temporal]==0.31.0",
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal,temporal]==0.32.0",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",
 ]
 
 [tool.uv.sources]
-# Pinned to a specific commit on pipelex's `feature/Adapt-to-api` branch so
-# CI / Docker can resolve the dependency from GitHub
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "8244be5999ccda4aaebb65b199b1d4832fedbee5" }
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "285a9728ab26f44ddda6c9f8ace086ea8b3a7587" }
 
 [build-system]
 requires = ["hatchling"]
@@ -91,9 +89,19 @@ ignore_missing_imports = true
 module = ["api", "tests"]
 
 [tool.pyright]
+venvPath = "."
+venv = ".venv"
 pythonVersion = "3.11"
 include = ["api", "tests"]
-exclude = ["**/__pycache__", ".venv", ".git", "build", "dist"]
+exclude = [
+  "**/__pycache__",
+  ".venv",
+  ".git",
+  "build",
+  "dist",
+  "**/node_modules",
+  "**/.*",
+]
 analyzeUnannotatedFunctions = true
 deprecateTypingAliases = false
 disableBytesTypePromotions = true
@@ -208,6 +216,7 @@ exclude_lines = [
 
 [tool.ruff]
 exclude = [
+  ".claude",
   ".cursor",
   ".git",
   ".github",

@@ -11,6 +11,7 @@ define HELP_LOCAL
 
 	$(YELLOW)Native (uvicorn, hot reload — fastest dev loop):$(RESET)
 	make run$(RESET):           Run the API with uvicorn (requires `make install` first).
+	make run-wip$(RESET) ($(GREEN)wip$(RESET)):     Run against a LOCAL pipelex checkout (editable overlay). Path: make run-wip PIPELEX_REPO=../_bridge
 
 	$(YELLOW)Docker (closest to what's deployed):$(RESET)
 	make docker-build$(RESET):  Build the API image from local source.
@@ -22,6 +23,15 @@ define HELP_LOCAL
 	make temporal-server$(RESET) ($(GREEN)ts$(RESET)):           Start a local Temporal dev server (:7233, UI :8233) WITH search attributes registered.
 	make temporal-server-bare$(RESET) ($(GREEN)ts-bare$(RESET)): Start it WITHOUT search attributes (reproduce the missing-attribute error).
 	make temporal-stop$(RESET) ($(GREEN)tstop$(RESET)):          Stop the local Temporal dev server.
+
+	$(YELLOW)Run an MTHDS bundle through the API (resolves like `pipelex run bundle`):$(RESET)
+	make bundle-run$(RESET) BUNDLE=<dir|.mthds>:      POST the bundle to a running API and print the response (start `make run` first).
+	make bundle-validate$(RESET) BUNDLE=<dir|.mthds>: Dry-run validate the bundle via /api/v1/validate — no pipe_code/inputs, no inference, no cost.
+	make bundle-curl$(RESET) BUNDLE=<dir|.mthds>:     Emit a ready-to-run curl command for the bundle.
+	make bundle-postman$(RESET) BUNDLE=<dir|.mthds>:  Push Execute/Start requests into the live Pipelex FastAPI Postman collection.
+	make bundle-dry$(RESET) BUNDLE=<dir|.mthds>:      Print the request body only — touch nothing.
+	  Optional: ENDPOINT=execute|start|validate|both  PIPE=<code>  INPUTS=<path>  NAME=<folder>  ALLOW_SIGNATURES=1  CALLBACK_URL=<url>  BASE_URL=<url>  TOKEN=<bearer>  ARGS=<extra>
+	  (the async start endpoint needs CALLBACK_URL — set it here, or via CALLBACK_URL in .env)
 
 endef
 export HELP_LOCAL
@@ -53,6 +63,39 @@ docker-stop:
 
 docker-logs:
 	docker logs -f $(CONTAINER_NAME)
+
+#################################################################################
+###########################   LOCAL PIPELEX (WIP)   #############################
+#################################################################################
+
+# Path to your local pipelex checkout — used by the -wip targets to run the API
+# against UNRELEASED pipelex code (e.g. a worktree such as ../_bridge), overlaid
+# on top of whatever `[tool.uv.sources]` currently resolves. This lets you switch
+# which pipelex the API runs WITHOUT hand-editing pyproject.toml. Override the
+# path per-invocation, e.g.:  make run-wip PIPELEX_REPO=../_bridge
+PIPELEX_REPO ?= ../pipelex
+
+.PHONY: check-pipelex-repo install-wip-pipelex run-wip wip
+
+check-pipelex-repo:
+	@test -d "$(PIPELEX_REPO)/pipelex" || { echo "ERROR: '$(PIPELEX_REPO)/pipelex' not found. Point PIPELEX_REPO at your pipelex checkout, e.g. make run-wip PIPELEX_REPO=../_bridge"; exit 1; }
+
+# Mirrors pipelex-worker's `install-wip-pipelex`: install your LOCAL pipelex
+# working tree (editable, with the API's extras) over the synced version. Depends
+# on `install` so the base deps (fastapi, uvicorn, ...) are present, then overlays
+# editable pipelex. STICKY — the overlay stays active for a plain `make run` too,
+# until you restore the synced version with `make install`. Once editable is in
+# place, pipelex code edits are picked up on the next API restart (no reinstall).
+install-wip-pipelex: check-pipelex-repo install
+	@echo "• Overlaying LOCAL pipelex (editable) from $(PIPELEX_REPO) over the synced version"
+	uv pip install --python $(VENV_PYTHON) -e "$(PIPELEX_REPO)[mistralai,anthropic,google,google-genai,bedrock,fal,temporal]"
+
+# Run the API against your LOCAL pipelex working tree (editable install, then run).
+# Restore the synced pipelex with `make install`.
+run-wip: install-wip-pipelex
+	@$(MAKE) run
+
+wip: run-wip
 
 #################################################################################
 #################################   TEMPORAL   #################################
@@ -119,3 +162,61 @@ temporal-stop:
 	fi
 
 tstop: temporal-stop
+
+#################################################################################
+##########################   RUN A BUNDLE VIA THE API   #########################
+#################################################################################
+
+# Resolve an MTHDS bundle the same way `pipelex run bundle <path>` does and send
+# it to the API as a request — run it directly, dry-run validate it, emit curl,
+# push a Postman query, or just print the body. Runs the skill's helper script
+# with OUR venv python.
+#
+#   make bundle-run      BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
+#   make bundle-validate BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
+#   make bundle-curl     BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
+#   make bundle-postman  BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
+#   make bundle-dry      BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
+#
+# bundle-validate hits /api/v1/validate — an inference-free dry-run that parses,
+# loads, and dry-runs every pipe (no pipe_code, no inputs, no cost). It is the
+# safe, free counterpart to bundle-run. The other modes accept ENDPOINT=validate
+# too (e.g. `make bundle-postman ENDPOINT=validate`).
+#
+# Optional pass-throughs: ENDPOINT, PIPE, INPUTS, NAME, ALLOW_SIGNATURES,
+# CALLBACK_URL (all modes); BASE_URL, TOKEN (run/curl); ARGS for anything else.
+# The async start endpoint requires CALLBACK_URL — pass it here, or set
+# CALLBACK_URL in .env (make exports it to the script). bundle-postman needs
+# POSTMAN_API_KEY in the environment (it lives in ~/.zshenv, so any zsh-launched
+# make has it).
+BUNDLE_SCRIPT := .claude/skills/postman-run-bundle/scripts/build_postman_query.py
+BUNDLE_OPTS    = $(if $(ENDPOINT),--endpoint $(ENDPOINT)) $(if $(PIPE),--pipe $(PIPE)) $(if $(INPUTS),--inputs $(INPUTS)) $(if $(NAME),--name $(NAME)) $(if $(ALLOW_SIGNATURES),--allow-signatures) $(if $(CALLBACK_URL),--callback-url '$(CALLBACK_URL)') $(ARGS)
+BUNDLE_RUN_OPTS = $(if $(BASE_URL),--base-url $(BASE_URL)) $(if $(TOKEN),--token $(TOKEN))
+
+.PHONY: check-bundle-arg bundle-run bundle-validate bundle-curl bundle-postman bundle-dry
+
+check-bundle-arg:
+	@test -n "$(BUNDLE)" || { echo "ERROR: set BUNDLE=<bundle dir or .mthds file>, e.g. make bundle-run BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard"; exit 1; }
+
+bundle-run: env check-bundle-arg
+	$(call PRINT_TITLE,"Running bundle against the API")
+	$(VENV_PYTHON) $(BUNDLE_SCRIPT) $(BUNDLE) --run $(BUNDLE_RUN_OPTS) $(BUNDLE_OPTS)
+
+# Dry-run validate via /api/v1/validate — hardcodes --endpoint validate (so don't
+# pass ENDPOINT here). NAME/ALLOW_SIGNATURES/BASE_URL/TOKEN/ARGS still apply;
+# PIPE/INPUTS are intentionally omitted — the validate endpoint ignores them.
+bundle-validate: env check-bundle-arg
+	$(call PRINT_TITLE,"Validating bundle via the API - dry-run with no inference")
+	$(VENV_PYTHON) $(BUNDLE_SCRIPT) $(BUNDLE) --run --endpoint validate $(if $(ALLOW_SIGNATURES),--allow-signatures) $(if $(NAME),--name $(NAME)) $(BUNDLE_RUN_OPTS) $(ARGS)
+
+bundle-curl: env check-bundle-arg
+	$(call PRINT_TITLE,"Emitting curl for bundle")
+	$(VENV_PYTHON) $(BUNDLE_SCRIPT) $(BUNDLE) --curl $(BUNDLE_RUN_OPTS) $(BUNDLE_OPTS)
+
+bundle-postman: env check-bundle-arg
+	$(call PRINT_TITLE,"Pushing Postman query for bundle")
+	$(VENV_PYTHON) $(BUNDLE_SCRIPT) $(BUNDLE) $(BUNDLE_OPTS)
+
+bundle-dry: env check-bundle-arg
+	$(call PRINT_TITLE,"Bundle request body - dry run only")
+	$(VENV_PYTHON) $(BUNDLE_SCRIPT) $(BUNDLE) --dry-run $(BUNDLE_OPTS)

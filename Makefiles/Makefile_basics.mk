@@ -116,7 +116,11 @@ export HELP
 	config-template cft \
 	test-count check-test-badge
 
-all help:
+# `help` is owned by the root Makefile, which composes this $$HELP block with
+# $$HELP_LOCAL and $$HELP_DEPLOY_API. Defining `help` here too (this file is
+# `-include`d after the root target) would override it and hide those sections —
+# so this rule binds only `all`.
+all:
 	@echo "$$HELP"
 
 

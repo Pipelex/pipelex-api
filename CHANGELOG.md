@@ -12,6 +12,10 @@
 
 - **`ERROR_DISCLOSURE` env var.** `verbose` (default) renders the full `ErrorReport`; `strict` redacts `detail` for non-caller-facing errors and always strips `model` / `provider` / `provider_metadata`. Provenance-gated via pipelex's `_authors_caller_facing_message` ClassVar — `error_domain` no longer drives redaction. Server logs stay verbose regardless of disclosure mode.
 - **[`docs/error-responses.md`](https://github.com/Pipelex/pipelex-api/blob/main/docs/error-responses.md)** — public API error-contract page describing the envelope, status-code mapping (`input`→422, `config`/`runtime`→500), the `type` URI namespace, disclosure modes, request correlation, and worked examples. Linked from `docs/pipe-run.md` and `docs/pipe-validate.md`.
+- **`allow_signatures` API flag.** Opt-in boolean on `/validate`, `/build/inputs`, `/build/output`, and `/build/runner`. When `true`, the validation sweep tolerates unimplemented `PipeSignature` placeholders (dry-running them by minting a mock) instead of rejecting the bundle. Defaults to `false` (strict).
+- **Postman & `curl` bundle runner.** New `postman-run-bundle` Claude skill and `build_postman_query.py` script that turn a local MTHDS bundle into a Postman request, a `curl` command, or a direct API execution. Resolves the bundle exactly like `pipelex run bundle <path>` and targets `/api/v1/pipeline/execute`, `/start`, and `/api/v1/validate`.
+- **Bundle testing Make targets.** `make bundle-run`, `bundle-validate`, `bundle-curl`, `bundle-postman`, and `bundle-dry` exercise a bundle against the API from the CLI.
+- **Local Pipelex WIP support.** `make run-wip` / `install-wip-pipelex` run the API against a local, editable `pipelex` working tree without hand-editing `pyproject.toml`.
 
 ### Changed
 
@@ -21,6 +25,17 @@
   - **Native `request_id` wiring at dispatch.** `POST /pipeline/start` now reads the request-scoped `request_id` contextvar and passes it as `request_id=` to `pipeline_run_setup(...)`, so it lands on `JobMetadata.request_id` and rides every worker-side `WorkflowLog` record. No more `webhook.payload["request_id"]` piggyback needed (and `WebhookTarget.payload` would now reject it as a reserved key anyway).
   - **Cross-path consistency regression (T6).** New `tests/unit/test_webhook_recovery.py` pins the invariant: given the same source `ErrorReport`, the classification fields surface identically via the sync HTTP RFC 7807 response and via the webhook `error` payload (composed upstream by `DeliveryExecutor._notify_webhook`).
   - **STRICT-disclosure audit (no code change).** Confirmed `api/problem_document.py` delegates wholesale to `report.to_problem_document(disclosure_mode=...)`, so pipelex's provenance-gated keying flip (Decision D1) flows through untouched. The two `error_domain == INPUT` sites in `api/exception_handlers.py` are log-level switches, not wire-disclosure switches, and remain correct.
+- **Shared request validation.** Consolidated the MTHDS payload validation (the `mthds_contents` bound + per-file size guard) and the new `allow_signatures` flag into a shared `MthdsContentsRequest` Pydantic base model that `/validate` and the build routes subclass, so the validation routes can't drift.
+- **`/build/inputs` and `/build/output` reuse the validated library.** Both now read the requested pipe from the library `validate_bundle` already opened and left current, instead of opening and loading a second one — less work and memory per request — and scope the dry-run sweep to the requested pipe.
+- **Unit tests run with Temporal disabled.** `tests/unit/conftest.py` forces `temporal_enabled=False`, so the suite executes pipelines (including dry-run validation) in-process and hermetically.
+- **`pyproject.toml` tooling config.** Set pyright `venvPath` / `venv` and expanded the `exclude` lists to ignore `node_modules`, hidden files, and `.claude/`.
+
+### Fixed
+
+- **Library resource leak in `/validate`, `/build/inputs`, and `/build/output`.** The library `validate_bundle` opens and leaves current on success was never torn down, orphaning a library in the `LibraryManager` on every successful call. Each route now owns that teardown in a `finally`.
+- **`/build/runner` returned 500 on a failed dry-run.** A failed dry-run of a caller-submitted bundle now becomes a 422 `ValidateBundleError` (RFC 7807 problem response), matching `/validate`, `/build/inputs`, and `/build/output`. (The bare `DryRunError` carried no `error_domain`, so the global handler had been rendering it as a server fault.)
+- **`/build/runner` generated code for a `SKIPPED` pipe.** When the requested pipe was `SKIPPED` during validation (an unresolved cross-package dependency), the endpoint used to emit runner code for a pipeline that can't actually run; it now rejects the request with 422.
+- **Makefile `help` output.** `Makefile_basics.mk` no longer overrides the root `help` target, so the local and deployment help sections all compose.
 
 ### Known follow-ups (deferred, not in this set of changes)
 
