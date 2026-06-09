@@ -1,3 +1,11 @@
+"""FastAPI app init, middleware, and router registration.
+
+App construction lives here; the failure → HTTP response mapping lives in
+`api.exception_handlers` (registered against this app below). Routes
+therefore no longer need to catch and shape errors themselves — anything
+they raise lands in the right handler by exception class.
+"""
+
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version
@@ -11,7 +19,9 @@ from pipelex.system.environment import get_optional_env
 from pipelex.system.runtime import IntegrationMode
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from api.middleware import request_body_size_middleware
+from api.disclosure import resolve_disclosure_mode
+from api.exception_handlers import register_exception_handlers
+from api.middleware import RequestIdMiddleware, request_body_size_middleware
 from api.routes import router as api_router
 from api.routes.health import router as health_router
 from api.security import get_auth_dependency
@@ -92,7 +102,16 @@ def _resolve_cors_origins() -> tuple[list[str], bool]:
     return origins, True
 
 
-app = FastAPI(
+# Resolve and validate ERROR_DISCLOSURE once, at module/startup: an unrecognized
+# value raises here and the production app fails to boot rather than silently
+# defaulting. Passed into `register_exception_handlers` below; the resolved
+# mode drives how much of an error report reaches a client. Kept module-level
+# so the production fail-fast lives on this single import path — only this
+# module triggers it, not `api.exception_handlers` (which lets tests register
+# the handlers without inheriting the env-validation crash).
+ERROR_DISCLOSURE_MODE = resolve_disclosure_mode()
+
+fastapi_app = FastAPI(
     redirect_slashes=False,
     lifespan=lifespan,
     title=API_TITLE,
@@ -116,13 +135,13 @@ def _custom_openapi() -> dict[str, Any]:
     the `api_key`/`jwt` modes without falsely implying auth is mandatory (the default
     `none` mode needs no credential). One committed spec stays truthful for all modes.
     """
-    if app.openapi_schema:
-        return app.openapi_schema
+    if fastapi_app.openapi_schema:
+        return fastapi_app.openapi_schema
     openapi_schema = get_openapi(
         title=API_TITLE,
         version=_resolve_api_version(),
         description=API_DESCRIPTION,
-        routes=app.routes,
+        routes=fastapi_app.routes,
         tags=API_TAGS_METADATA,
         contact={"name": "Pipelex", "url": "https://docs.pipelex.com/"},
         license_info={"name": "MIT", "url": "https://opensource.org/license/mit"},
@@ -140,14 +159,24 @@ def _custom_openapi() -> dict[str, Any]:
     # Optional requirement: `{}` allows unauthenticated calls (AUTH_MODE=none),
     # `BearerAuth` documents the credential for api_key/jwt modes.
     openapi_schema["security"] = [{}, {"BearerAuth": []}]
-    app.openapi_schema = openapi_schema
+    fastapi_app.openapi_schema = openapi_schema
     return openapi_schema
 
 
-app.openapi = _custom_openapi  # type: ignore[method-assign]
+fastapi_app.openapi = _custom_openapi  # type: ignore[method-assign]
+
+# Order matters: Starlette's `add_middleware` PREPENDS (see
+# `user_middleware.insert(0, ...)` in `starlette.applications`), so the LAST
+# `add_middleware` call becomes the OUTERMOST wrapper. Body-size is registered
+# first so CORS ends up wrapping it: a 413 short-circuit from the body-size
+# middleware still passes back through CORSMiddleware on the way out, so a
+# cross-origin browser POST sees the RFC 7807 413 with the
+# `Access-Control-Allow-Origin` header it needs — not a generic CORS error
+# that swallows the response.
+fastapi_app.add_middleware(BaseHTTPMiddleware, dispatch=request_body_size_middleware)
 
 cors_origins, cors_allow_credentials = _resolve_cors_origins()
-app.add_middleware(
+fastapi_app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=cors_allow_credentials,
@@ -155,15 +184,25 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
-app.add_middleware(BaseHTTPMiddleware, dispatch=request_body_size_middleware)
 
-app.include_router(health_router)
+fastapi_app.include_router(health_router)
 
 # Register all other routes WITH authentication (auto-selects based on AUTH_MODE env var: none/jwt/api_key)
 auth_dependency = get_auth_dependency()
-app.include_router(api_router, prefix="/api/v1", dependencies=[Depends(auth_dependency)])
+fastapi_app.include_router(api_router, prefix="/api/v1", dependencies=[Depends(auth_dependency)])
 
 
-@app.get("/")
+@fastapi_app.get("/")
 async def root() -> dict[str, str]:
     return {"message": "Pipelex API"}
+
+
+register_exception_handlers(fastapi_app, disclosure_mode=ERROR_DISCLOSURE_MODE)
+
+
+# RequestIdMiddleware wraps the *entire* FastAPI app — including Starlette's
+# ServerErrorMiddleware, which `add_middleware` could only ever nest inside.
+# This is what makes it genuinely outermost: the request-id contextvars are
+# bound, and `X-Request-ID` is echoed, on every response — the catch-all 500
+# included. `app` is the ASGI entrypoint (uvicorn loads `api.main:app`).
+app = RequestIdMiddleware(fastapi_app)

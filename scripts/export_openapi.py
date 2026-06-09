@@ -8,14 +8,14 @@ route/schema change that isn't re-exported fails CI. Run `make openapi` to refre
 import json
 from pathlib import Path
 
-from api.main import app
+from api.main import fastapi_app
 
 OPENAPI_PATH = Path(__file__).resolve().parent.parent / "docs" / "openapi.json"
 
 
 def export_openapi() -> Path:
-    """Write the current app.openapi() to docs/openapi.json (pretty, trailing newline)."""
-    schema = app.openapi()
+    """Write the current fastapi_app.openapi() to docs/openapi.json (pretty, trailing newline)."""
+    schema = fastapi_app.openapi()
     OPENAPI_PATH.write_text(json.dumps(schema, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return OPENAPI_PATH
 

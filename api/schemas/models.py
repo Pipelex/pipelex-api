@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from api.limits import MAX_CALLBACK_URL_LEN, MAX_CALLBACK_URLS
+from api.limits import MAX_CALLBACK_URL_LEN, MAX_CALLBACK_URLS, MAX_MTHDS_FILE_BYTES, MAX_MTHDS_FILES_PER_REQUEST
 
 _ALLOWED_CALLBACK_SCHEMES = frozenset({"http", "https"})
 
@@ -62,5 +62,37 @@ class PipelineApiExtras(BaseModel):
                 raise ValueError(msg)
             if _is_disallowed_host(parsed.hostname or ""):
                 msg = f"callback URL host {parsed.hostname!r} is not allowed (private/loopback/metadata addresses are blocked)"
+                raise ValueError(msg)
+        return value
+
+
+class MthdsContentsRequest(BaseModel):
+    """Shared base for the build/validate routes.
+
+    Carries the bounded `mthds_contents` payload, the `allow_signatures` opt-in, and the single
+    per-file size guard that every validation-performing route needs. `/validate` uses it as-is;
+    the build routes subclass it to add `pipe_code` (and `/build/output` a `format`). Keeping the
+    field, its public OpenAPI description, and the validator in one place stops them drifting across
+    the four endpoints.
+    """
+
+    mthds_contents: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_MTHDS_FILES_PER_REQUEST,
+        description="MTHDS contents to load (always an array, even for a single file).",
+    )
+    allow_signatures: bool = Field(
+        default=False,
+        description="When true, the validation sweep tolerates unimplemented pipe signatures instead of rejecting the "
+        "bundle (signatures dry-run trivially by minting a mock). Defaults to false (strict).",
+    )
+
+    @field_validator("mthds_contents")
+    @classmethod
+    def _bound_each_file(cls, value: list[str]) -> list[str]:
+        for content in value:
+            if len(content.encode("utf-8")) > MAX_MTHDS_FILE_BYTES:
+                msg = f"MTHDS file exceeds {MAX_MTHDS_FILE_BYTES // 1024} KiB limit"
                 raise ValueError(msg)
         return value

@@ -12,14 +12,15 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from urllib.parse import parse_qs, urlparse
 
-from fastapi import APIRouter, Depends, HTTPException
+from botocore.exceptions import BotoCoreError, ClientError
+from fastapi import APIRouter, Depends
 from pipelex import log
 from pipelex.hub import get_storage_provider
 from pipelex.tools.storage.storage_provider_abstract import PIPELEX_STORAGE_SCHEME
 from pydantic import BaseModel, ConfigDict, Field
 
 from api.error_types import ErrorType
-from api.errors import STORAGE_HANDLED_EXCEPTIONS, raise_internal_error
+from api.errors import raise_bad_request, raise_forbidden, raise_internal_server_error, raise_unauthenticated
 from api.security import USER_ID_UUID_REGEX, RequestUser, get_request_user
 
 router = APIRouter(tags=["storage"])
@@ -144,50 +145,39 @@ async def resolve_storage_url(
     """
     if not user or not user.user_id or user.user_id == "anonymous":
         log.warning("resolve-storage-url: unauthenticated request")
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "error_type": ErrorType.UNAUTHENTICATED,
-                "message": "Authentication required",
-            },
-        )
+        raise_unauthenticated("Authentication required")
 
     try:
         owner_user_id, extension = parse_storage_uri(body.uri)
     except ValueError as validation_error:
         log.warning(f"resolve-storage-url: invalid URI from user={user.user_id} reason={validation_error}")
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error_type": ErrorType.INVALID_URI,
-                "message": str(validation_error),
-            },
-        ) from validation_error
+        raise_bad_request(str(validation_error), error_type=ErrorType.INVALID_URI)
 
     if owner_user_id != user.user_id:
         log.warning(f"resolve-storage-url: ownership mismatch jwt_user={user.user_id} uri_user={owner_user_id}")
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "error_type": ErrorType.FORBIDDEN,
-                "message": "You do not own this file",
-            },
-        )
+        raise_forbidden("You do not own this file")
 
+    # Most backend failures surface as a pipelex `StorageError` (a `PipelexError`)
+    # and propagate to the global handler. The narrow catch below covers the
+    # documented upstream wrapping gaps (pipelex-changes.md Stage 7 #12/#13):
+    # `LocalStorageProvider.public_url` can leak raw `OSError` on permission
+    # errors, and S3's presign path has historically leaked `BotoCoreError` /
+    # `ClientError` on credential-retrieval or endpoint-resolution failures.
+    # Without this catch those escape to the generic 500 handler and the response
+    # loses its presign classification (`PresignFailed` → `InternalServerError`).
+    # The non-presigned fallback below is an API-layer configuration check, not
+    # a backend error, so the API authors that 500 itself.
     storage = get_storage_provider()
     try:
         url = await storage.public_url(body.uri)
-    except STORAGE_HANDLED_EXCEPTIONS as exc:
-        raise_internal_error(exc, context=f"resolve-storage-url: provider failed for user={user.user_id}")
+    except (OSError, BotoCoreError, ClientError):
+        raise_internal_server_error("Storage backend failure while resolving URL", error_type=ErrorType.PRESIGN_FAILED)
 
     if not url or not is_presigned(url):
         log.error(f"resolve-storage-url: storage returned non-presigned URL (signed_urls_lifespan_seconds disabled or fallback). user={user.user_id}")
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error_type": ErrorType.PRESIGN_FAILED,
-                "message": "Storage provider is not configured for presigned URLs",
-            },
+        raise_internal_server_error(
+            "Storage provider is not configured for presigned URLs",
+            error_type=ErrorType.PRESIGN_FAILED,
         )
 
     expires_at = expires_at_from_presigned(url)

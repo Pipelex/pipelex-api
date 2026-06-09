@@ -8,19 +8,19 @@ without running `make openapi` and CI fails here.
 import json
 from pathlib import Path
 
-from api.main import app
+from api.main import fastapi_app
 from scripts.export_openapi import OPENAPI_PATH
 
 
 class TestOpenApiContract:
     def test_title_is_not_fastapi_default(self):
-        schema = app.openapi()
+        schema = fastapi_app.openapi()
         assert schema["info"]["title"] == "Pipelex Runner API"
         assert schema["info"]["title"] != "FastAPI"
         assert schema["info"]["description"]
 
     def test_bearer_security_scheme_is_documented_and_optional(self):
-        schema = app.openapi()
+        schema = fastapi_app.openapi()
         schemes = schema["components"]["securitySchemes"]
         assert schemes["BearerAuth"]["type"] == "http"
         assert schemes["BearerAuth"]["scheme"] == "bearer"
@@ -29,7 +29,7 @@ class TestOpenApiContract:
         assert {"BearerAuth": []} in schema["security"]
 
     def test_execute_and_start_request_bodies_are_documented(self):
-        schema = app.openapi()
+        schema = fastapi_app.openapi()
         for path in ("/api/v1/pipeline/execute", "/api/v1/pipeline/start"):
             post = schema["paths"][path]["post"]
             assert post["summary"]
@@ -46,5 +46,5 @@ class TestOpenApiContract:
         snapshot_path = Path(OPENAPI_PATH)
         assert snapshot_path.exists(), "docs/openapi.json missing — run `make openapi`"
         committed = json.loads(snapshot_path.read_text(encoding="utf-8"))
-        live = json.loads(json.dumps(app.openapi(), sort_keys=True))
+        live = json.loads(json.dumps(fastapi_app.openapi(), sort_keys=True))
         assert committed == live, "OpenAPI drift: routes/schemas changed without re-export. Run `make openapi` and commit docs/openapi.json."

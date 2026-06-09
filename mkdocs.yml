@@ -107,6 +107,7 @@ nav:
     - Pipe Run: pipe-run.md
     - Pipe Validate: pipe-validate.md
     - Run Management & Polling: run-management.md
+    - Error Responses: error-responses.md
     - Contribute:
       - Contributing: contributing.md
       - Code of Conduct: CODE_OF_CONDUCT.md

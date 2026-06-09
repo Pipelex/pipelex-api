@@ -2,10 +2,12 @@ import base64
 from typing import Any
 
 import pytest
+from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 
+from api.exception_handlers import register_exception_handlers
 from api.routes.uploader import MAX_UPLOAD_BASE64_CHARS
 from api.routes.uploader import router as uploader_router
 from api.security import RequestUser, get_request_user
@@ -24,6 +26,7 @@ def _build_client(
     """Build a FastAPI TestClient with auth and storage provider mocked. Returns (client, store_mock)."""
     app = FastAPI()
     app.include_router(uploader_router)
+    register_exception_handlers(app)
 
     async def _override_user() -> RequestUser | None:
         return user
@@ -42,21 +45,26 @@ class TestUploadEndpoint:
         client, _ = _build_client(None, mocker)
         response = client.post("/upload", json={"filename": "a.txt", "data": VALID_B64})
         assert response.status_code == 401
-        assert response.json()["detail"]["error_type"] == "Unauthenticated"
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.headers["WWW-Authenticate"] == "Bearer"
+        assert response.json()["error_type"] == "Unauthenticated"
 
     def test_anonymous_user_returns_401(self, mocker: MockerFixture):
         user = RequestUser(user_id="anonymous")
         client, _ = _build_client(user, mocker)
         response = client.post("/upload", json={"filename": "a.txt", "data": VALID_B64})
         assert response.status_code == 401
-        assert response.json()["detail"]["error_type"] == "Unauthenticated"
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.headers["WWW-Authenticate"] == "Bearer"
+        assert response.json()["error_type"] == "Unauthenticated"
 
     def test_invalid_base64_returns_400(self, mocker: MockerFixture):
         user = RequestUser(user_id=USER_A)
         client, _ = _build_client(user, mocker)
         response = client.post("/upload", json={"filename": "a.txt", "data": INVALID_B64})
         assert response.status_code == 400
-        assert response.json()["detail"]["error_type"] == "InvalidBase64"
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "InvalidBase64"
 
     def test_oversized_payload_rejected_at_validation(self, mocker: MockerFixture):
         user = RequestUser(user_id=USER_A)
@@ -64,6 +72,8 @@ class TestUploadEndpoint:
         oversized = "A" * (MAX_UPLOAD_BASE64_CHARS + 1)
         response = client.post("/upload", json={"filename": "big.bin", "data": oversized})
         assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "ValidationError"
         store_mock.assert_not_awaited()
 
     def test_extra_fields_rejected(self, mocker: MockerFixture):
@@ -71,6 +81,8 @@ class TestUploadEndpoint:
         client, _ = _build_client(user, mocker)
         response = client.post("/upload", json={"filename": "a.txt", "data": VALID_B64, "extra": "nope"})
         assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "ValidationError"
 
     def test_happy_path(self, mocker: MockerFixture):
         user = RequestUser(user_id=USER_A)
@@ -103,3 +115,28 @@ class TestUploadEndpoint:
         key = store_mock.await_args.kwargs["key"]
         assert key.startswith(f"{USER_A}/assets/")
         assert key.endswith(f".{expected_ext}")
+
+    @pytest.mark.parametrize(
+        "backend_error",
+        [
+            OSError("disk full"),
+            BotoCoreError(),
+            ClientError({"Error": {"Code": "InternalError", "Message": "boom"}}, "PutObject"),
+        ],
+    )
+    def test_backend_storage_failure_returns_upload_failed(self, mocker: MockerFixture, backend_error: Exception):
+        """Pipelex storage providers have documented wrapping gaps (pipelex-changes.md Stage 7 #12/#13):
+        `LocalStorageProvider` leaks raw `OSError`, S3 leaks `BotoCoreError` / `ClientError`.
+        The narrow catch in `upload_file` must classify these as `UploadFailed` (500) instead
+        of letting them escape to the catch-all `handle_unexpected_error` (which renders an
+        opaque `InternalServerError` with no storage context).
+        """
+        user = RequestUser(user_id=USER_A)
+        client, store_mock = _build_client(user, mocker)
+        store_mock.side_effect = backend_error
+
+        response = client.post("/upload", json={"filename": "a.txt", "data": VALID_B64})
+
+        assert response.status_code == 500
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "UploadFailed"

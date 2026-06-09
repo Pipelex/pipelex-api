@@ -91,6 +91,9 @@ make docs                     - Serve documentation locally with mkdocs
 make docs-check               - Check documentation build with mkdocs
 make docs-deploy              - Deploy documentation with mkdocs
 
+make agent-check              - Run check pipeline, silent on success (for AI agents)
+make agent-test               - Run unit tests, silent on success, output on failure (for AI agents)
+
 make check                    - Shorthand -> format lint mypy
 make c                        - Shorthand -> check
 make cc                       - Shorthand -> cleanderived check
@@ -103,6 +106,7 @@ export HELP
 	all help env lock install update build \
 	format lint pyright mypy pylint \
 	cleanderived cleanenv cleanall \
+	agent-check agent-test \
 	test test-xdist t test-quiet tq test-with-prints tp test-inference ti \
 	test-img-gen tg test-ocr to codex-tests gha-tests \
 	run-all-tests run-manual-trigger-gha-tests run-gha_disabled-tests \
@@ -112,7 +116,11 @@ export HELP
 	config-template cft \
 	test-count check-test-badge
 
-all help:
+# `help` is owned by the root Makefile, which composes this $$HELP block with
+# $$HELP_LOCAL and $$HELP_DEPLOY_API. Defining `help` here too (this file is
+# `-include`d after the root target) would override it and hide those sections —
+# so this rule binds only `all`.
+all:
 	@echo "$$HELP"
 
 
@@ -408,6 +416,19 @@ check-TODOs: env
 ##########################################################################################
 ### SHORTHANDS
 ##########################################################################################
+
+agent-check: fix-unused-imports format lint pyright mypy
+	@echo "> done: agent-check"
+
+agent-test: env
+	@echo "• Running unit tests..."
+	@tmpfile=$$(mktemp); \
+	$(VENV_PYTEST) -n auto -m $(USUAL_PYTEST_MARKERS) -o log_level=WARNING --tb=short -q > "$$tmpfile" 2>&1; \
+	exit_code=$$?; \
+	if [ $$exit_code -ne 0 ]; then grep -vE '\[\s*[0-9]+%\]\s*$$' "$$tmpfile"; fi; \
+	rm -f "$$tmpfile"; \
+	if [ $$exit_code -eq 0 ]; then echo "• All tests passed."; fi; \
+	exit $$exit_code
 
 c: format lint pyright mypy
 	@echo "> done: c = check"

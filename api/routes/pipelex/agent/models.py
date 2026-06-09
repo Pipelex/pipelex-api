@@ -6,7 +6,7 @@ from fastapi import APIRouter, Query
 from pipelex.builder.operations.models_ops import ModelCategory, list_models
 
 from api.error_types import ErrorType
-from api.errors import ENDPOINT_HANDLED_EXCEPTIONS, raise_internal_error, raise_validation_error
+from api.errors import raise_validation_error
 
 router = APIRouter(tags=["agent"])
 
@@ -27,9 +27,6 @@ async def get_models(
                 error_type=ErrorType.INVALID_MODEL_CATEGORY,
             )
 
-    try:
-        result = list_models(categories=categories)
-        result["success"] = True
-        return result
-    except ENDPOINT_HANDLED_EXCEPTIONS as exc:
-        raise_internal_error(exc, context="get_models failed")
+    result = list_models(categories=categories)
+    result["success"] = True
+    return result
