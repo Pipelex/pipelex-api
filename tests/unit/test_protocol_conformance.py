@@ -9,8 +9,8 @@ mechanism that prevents first-party spec drift (master plan, eng review):
 - `RunRequest` anyOf rule: a body with neither `pipe_code` nor `mthds_contents`
   is rejected with 422.
 - `GET /version` is public (no auth) and returns the `VersionInfo` shape.
-- A client-supplied `run_id` on `/start` is honored (master D11 — this
-  open-source runner accepts it; `StartAck.run_id` echoes it back).
+- A client-supplied `pipeline_run_id` on `/start` is honored (master D11 — this
+  open-source runner accepts it; `StartAck.pipeline_run_id` echoes it back).
 - The completion-callback E2E (eng-review 5A): `/start` with `callback_urls`
   delivers a signed POST to a local in-test receiver. Temporal is replaced by a
   fake whose `start` runs the real `DeliveryExecutor` delivery in-process, so
@@ -81,7 +81,7 @@ def _build_protocol_client(mocker: MockerFixture) -> TestClient:
 
     fake_execute_response = mocker.MagicMock()
     fake_execute_response.model_dump.return_value = {
-        "run_id": "conformance-run-1",
+        "pipeline_run_id": "conformance-run-1",
         "created_at": "2026-01-15T12:00:00Z",
         "state": "COMPLETED",
         "finished_at": "2026-01-15T12:00:01Z",
@@ -149,10 +149,10 @@ class TestProtocolConformance:
         assert response.status_code == 422
         assert response.headers["content-type"] == "application/problem+json"
 
-    def test_start_accepts_client_run_id_and_delivers_signed_callback(self, mocker: MockerFixture):
-        """D11 + eng-review 5A: `/start` honors the client `run_id`, answers 202,
+    def test_start_accepts_client_pipeline_run_id_and_delivers_signed_callback(self, mocker: MockerFixture):
+        """D11 + eng-review 5A: `/start` honors the client `pipeline_run_id`, answers 202,
         and the completion callback reaches the receiver with a valid
-        `X-Completion-Signature` and a payload carrying the protocol `run_id`.
+        `X-Completion-Signature` and a payload carrying the protocol `pipeline_run_id`.
 
         Temporal is replaced by a fake whose `start` immediately runs the REAL
         `DeliveryExecutor` delivery against the captured `DeliveryAssignment`
@@ -201,7 +201,7 @@ class TestProtocolConformance:
         register_exception_handlers(app)
         client = TestClient(app)
 
-        client_run_id = "conformance-client-run-0001"
+        client_pipeline_run_id = "conformance-client-run-0001"
         try:
             response = client.post(
                 "/v1/start",
@@ -209,7 +209,7 @@ class TestProtocolConformance:
                     "pipe_code": "echo",
                     "mthds_contents": [VALID_MTHDS],
                     "inputs": {"text": "hello"},
-                    "run_id": client_run_id,
+                    "pipeline_run_id": client_pipeline_run_id,
                     "callback_urls": [callback_url],
                 },
             )
@@ -218,25 +218,25 @@ class TestProtocolConformance:
             server_thread.join(timeout=5)
             server.server_close()
 
-        # Protocol: 202 + StartAck; D11: the client-supplied run_id is authoritative.
+        # Protocol: 202 + StartAck; D11: the client-supplied pipeline_run_id is authoritative.
         assert response.status_code == 202, response.text
         ack = response.json()
-        assert ack["run_id"] == client_run_id
+        assert ack["pipeline_run_id"] == client_pipeline_run_id
         assert ack["state"] == RunState.STARTED
 
         # Exactly one delivery reached the receiver.
         assert len(_CallbackReceiver.captured) == 1
         delivery = _CallbackReceiver.captured[0]
 
-        # Signature: HMAC-SHA256(secret, run_id) hex digest — the signing scheme
+        # Signature: HMAC-SHA256(secret, pipeline_run_id) hex digest — the signing scheme
         # `_completion_signature` implements with the shared
         # COMPLETION_CALLBACK_SECRET.
-        expected_signature = hmac.new(test_secret.encode("utf-8"), client_run_id.encode("utf-8"), hashlib.sha256).hexdigest()
+        expected_signature = hmac.new(test_secret.encode("utf-8"), client_pipeline_run_id.encode("utf-8"), hashlib.sha256).hexdigest()
         assert delivery["headers"].get("X-Completion-Signature") == expected_signature
 
-        # Payload: carries the protocol `run_id` (static injection by ApiRunner)
+        # Payload: carries the protocol `pipeline_run_id` (static injection by ApiRunner)
         # plus the runtime's own delivery fields; `status` is a RunState value.
         payload = json.loads(delivery["body"])
-        assert payload["run_id"] == client_run_id
-        assert payload["pipeline_run_id"] == client_run_id
+        assert payload["pipeline_run_id"] == client_pipeline_run_id
+        assert payload["pipeline_run_id"] == client_pipeline_run_id
         assert payload["status"] == RunState.COMPLETED

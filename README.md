@@ -104,7 +104,7 @@ A single Pipelex API container is great for development, prototyping, and low-co
 For production-scale workloads (high concurrency, long-running pipelines, retries, durable execution, horizontal scaling), the recommended path is to run Pipelex on top of [**Temporal**](https://temporal.io/). With Temporal enabled:
 
 - Pipeline runs become durable workflows — survive worker crashes, support retries and timeouts out of the box.
-- The API container becomes a thin orchestrator: it submits workflows to a Temporal cluster and returns a `run_id` immediately (this is what `POST /v1/start` already does).
+- The API container becomes a thin orchestrator: it submits workflows to a Temporal cluster and returns a `pipeline_run_id` immediately (this is what `POST /v1/start` already does).
 - Pipeline execution itself runs on a separate pool of **Pipelex workers** that you scale independently from the HTTP layer.
 - Async completion callbacks (`callback_urls` + `X-Completion-Signature`, see [pipe-run.md](docs/pipe-run.md)) let your application be notified when each run finishes, without polling.
 

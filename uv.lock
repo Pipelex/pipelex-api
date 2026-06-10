@@ -1708,7 +1708,7 @@ wheels = [
 [[package]]
 name = "mthds"
 version = "0.4.0"
-source = { git = "https://github.com/mthds-ai/mthds-python.git?branch=refactor%2Fprotocol#7a45f915c69debf0d3b94e291a0d32bfa76c6d4f" }
+source = { git = "https://github.com/mthds-ai/mthds-python.git?branch=refactor%2Fprotocol#dadb8130184664d24a1a9724ec40b3646f41d3b9" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
@@ -2241,7 +2241,7 @@ wheels = [
 [[package]]
 name = "pipelex"
 version = "0.33.0"
-source = { git = "https://github.com/Pipelex/pipelex.git?branch=refactor%2Fprotocol#d26de29066d2ef52e10050abfac76471ad8e70c8" }
+source = { git = "https://github.com/Pipelex/pipelex.git?branch=refactor%2Fprotocol#41b9eada5ba78acb59d06adb35130980ff7399c3" }
 dependencies = [
     { name = "aiofiles" },
     { name = "datamodel-code-generator" },

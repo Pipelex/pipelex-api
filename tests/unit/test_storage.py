@@ -121,7 +121,7 @@ class TestStorageEndpoint:
         assert body["expires_at"].startswith("2026-04-16T12:15:00")
 
     def test_happy_path_pipeline_output_uri(self, mocker: MockerFixture):
-        """Pipeline-generated URIs (with /results/{run_id}/assets/...) must resolve too."""
+        """Pipeline-generated URIs (with /results/{pipeline_run_id}/assets/...) must resolve too."""
         user = RequestUser(user_id=USER_A)
         client = _build_client(user, mocker, PRESIGNED_URL)
 

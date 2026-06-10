@@ -305,14 +305,14 @@ _TEST_RUN_ID = "run-00000000-0000-0000-0000-000000000099"
 
 
 def _bind_test_run_state(request: Request) -> None:
-    """Set `request.state.pipe_code` / `run_id` the same shape `_parse_request` would.
+    """Set `request.state.pipe_code` / `pipeline_run_id` the same shape `_parse_request` would.
 
     Stand-in for "the body was parsed and the two identifiers were bound" so
     the error-log enrichment can be exercised against the handler functions
     without driving a real `/execute` body through `_parse_request`.
     """
     request.state.pipe_code = _TEST_PIPE_CODE
-    request.state.run_id = _TEST_RUN_ID
+    request.state.pipeline_run_id = _TEST_RUN_ID
 
 
 @_router.get("/authenticated-config-error")
@@ -627,7 +627,7 @@ class TestExceptionHandlers:
         assert "user_id=" not in rendered
 
     def test_run_state_rides_pipelex_error_log(self, mocker: MockerFixture):
-        # `_parse_request` binds `pipe_code` / `run_id` on
+        # `_parse_request` binds `pipe_code` / `pipeline_run_id` on
         # `request.state` so a downstream pipelex failure is tied to the
         # specific pipe and run id without each backend frame having to forward
         # them. Same mechanism as `user_id` (request.state + a `_*_of` getter
@@ -639,7 +639,7 @@ class TestExceptionHandlers:
         log_spy.error.assert_called_once()
         rendered = log_spy.error.call_args.args[0]
         assert f"pipe_code={_TEST_PIPE_CODE}" in rendered
-        assert f"run_id={_TEST_RUN_ID}" in rendered
+        assert f"pipeline_run_id={_TEST_RUN_ID}" in rendered
         assert "error_type=PipelexConfigError" in rendered
 
     def test_run_state_rides_api_authored_log(self, mocker: MockerFixture):
@@ -653,7 +653,7 @@ class TestExceptionHandlers:
         log_spy.warning.assert_called_once()
         rendered = log_spy.warning.call_args.args[0]
         assert f"pipe_code={_TEST_PIPE_CODE}" in rendered
-        assert f"run_id={_TEST_RUN_ID}" in rendered
+        assert f"pipeline_run_id={_TEST_RUN_ID}" in rendered
         assert "error_type=ValidationError" in rendered
 
     def test_run_state_rides_unexpected_error_log(self, mocker: MockerFixture):
@@ -668,15 +668,15 @@ class TestExceptionHandlers:
         log_spy.error.assert_called_once()
         rendered = log_spy.error.call_args.args[0]
         assert f"pipe_code={_TEST_PIPE_CODE}" in rendered
-        assert f"run_id={_TEST_RUN_ID}" in rendered
+        assert f"pipeline_run_id={_TEST_RUN_ID}" in rendered
         assert "error_type=RuntimeError" in rendered
 
     def test_run_state_absent_when_parse_request_did_not_bind(self, mocker: MockerFixture):
         # A route that didn't go through `_parse_request` (here: `/config-error`,
         # a GET that never touches the body) has no `pipe_code` /
-        # `run_id` on `request.state`. The getters return `None` and
+        # `pipeline_run_id` on `request.state`. The getters return `None` and
         # `emit_error_log` drops `None`-valued fields, so the rendered line
-        # carries no `pipe_code=` or `run_id=` token — never
+        # carries no `pipe_code=` or `pipeline_run_id=` token — never
         # `pipe_code=None`, which would be misleading noise. Same defensive
         # posture as `test_user_id_absent_from_unauthenticated_error_log`.
         log_spy = mocker.patch("api.exception_handlers.log")
@@ -685,7 +685,7 @@ class TestExceptionHandlers:
         log_spy.error.assert_called_once()
         rendered = log_spy.error.call_args.args[0]
         assert "pipe_code=" not in rendered
-        assert "run_id=" not in rendered
+        assert "pipeline_run_id=" not in rendered
 
     def test_request_validation_error_emits_structured_warning_log(self, mocker: MockerFixture):
         # FastAPI's automatic-validation 422 goes through

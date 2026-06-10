@@ -33,7 +33,7 @@ def _build_client(mocker: MockerFixture, *, with_request_id_middleware: bool = F
 
     fake_execute_response = mocker.MagicMock()
     fake_execute_response.model_dump.return_value = {
-        "run_id": "test-run-1",
+        "pipeline_run_id": "test-run-1",
         "created_at": "2026-01-15T12:00:00Z",
         "state": "COMPLETED",
         "finished_at": "2026-01-15T12:00:01Z",
@@ -42,7 +42,7 @@ def _build_client(mocker: MockerFixture, *, with_request_id_middleware: bool = F
     }
 
     fake_start_response = PipelexStartAck(
-        run_id="test-run-1",
+        pipeline_run_id="test-run-1",
         created_at="2026-01-15T12:00:00Z",
         state=RunState.STARTED,
         workflow_id="wf-1",
@@ -170,15 +170,15 @@ class TestPipelineRoutes:
         # Protocol: `POST /start` answers 202 Accepted with a StartAck.
         assert response.status_code == 202
         body = response.json()
-        assert body["run_id"] == "test-run-1"
+        assert body["pipeline_run_id"] == "test-run-1"
         assert body["state"] == "STARTED"
         start_mock.assert_awaited_once()
         kwargs = start_mock.await_args.kwargs
         assert kwargs["callback_urls"] == ["https://example.com/done"]
 
-    def test_start_forwards_client_run_id(self, mocker: MockerFixture):
-        # D11: the open-source runner ACCEPTS a client-supplied run_id and
-        # forwards it to the runner's `start` as the `run_id` kwarg.
+    def test_start_forwards_client_pipeline_run_id(self, mocker: MockerFixture):
+        # D11: the open-source runner ACCEPTS a client-supplied pipeline_run_id and
+        # forwards it to the runner's `start` as the `pipeline_run_id` kwarg.
         client, _, start_mock = _build_client(mocker)
         response = client.post(
             "/v1/start",
@@ -186,16 +186,16 @@ class TestPipelineRoutes:
                 "pipe_code": "echo",
                 "mthds_contents": [VALID_MTHDS],
                 "inputs": {"text": "hello"},
-                "run_id": "client-chosen-run-42",
+                "pipeline_run_id": "client-chosen-run-42",
             },
         )
         assert response.status_code == 202
         start_mock.assert_awaited_once()
-        assert start_mock.await_args.kwargs["run_id"] == "client-chosen-run-42"
+        assert start_mock.await_args.kwargs["pipeline_run_id"] == "client-chosen-run-42"
 
-    def test_parse_request_binds_pipe_code_and_run_id_to_state(self, mocker: MockerFixture):
+    def test_parse_request_binds_pipe_code_and_pipeline_run_id_to_state(self, mocker: MockerFixture):
         # End-to-end: a real POST that goes through `_parse_request` must bind
-        # `pipe_code` / `run_id` on `request.state` so that a
+        # `pipe_code` / `pipeline_run_id` on `request.state` so that a
         # downstream failure (here: `start` raising `PipelexConfigError`)
         # is logged with both fields. The unit-level tests pin the
         # handler->getter->log path; this one pins that `_parse_request` itself
@@ -207,7 +207,7 @@ class TestPipelineRoutes:
         # `test_exception_handlers.py` instead of substring matching.
         client, _, start_mock = _build_client(mocker)
         body_pipe_code = "echo"
-        body_run_id = "run-end-to-end-0001"
+        body_pipeline_run_id = "run-end-to-end-0001"
         start_mock.side_effect = PipelexConfigError("simulated config fault inside the runner")
         log_spy = mocker.patch("api.exception_handlers.log")
         response = client.post(
@@ -216,17 +216,17 @@ class TestPipelineRoutes:
                 "pipe_code": body_pipe_code,
                 "mthds_contents": [VALID_MTHDS],
                 "inputs": {"text": "hello"},
-                "run_id": body_run_id,
+                "pipeline_run_id": body_pipeline_run_id,
             },
         )
         assert response.status_code == 500
         log_spy.error.assert_called_once()
         rendered = log_spy.error.call_args.args[0]
         assert f"pipe_code={body_pipe_code}" in rendered
-        assert f"run_id={body_run_id}" in rendered
+        assert f"pipeline_run_id={body_pipeline_run_id}" in rendered
 
     def test_parse_request_drops_empty_correlation_fields(self, mocker: MockerFixture):
-        # An empty-string `pipe_code` / `run_id` in the body must NOT
+        # An empty-string `pipe_code` / `pipeline_run_id` in the body must NOT
         # render as a bare `pipe_code=` token in the operator log — the bare
         # token reads as a logfmt parse error to downstream sinks and defeats
         # grep-by-value. `_coerce_correlation_field` normalizes empty strings
@@ -240,7 +240,7 @@ class TestPipelineRoutes:
                 "pipe_code": "",
                 "mthds_contents": [VALID_MTHDS],
                 "inputs": {"text": "hello"},
-                "run_id": "",
+                "pipeline_run_id": "",
             },
         )
         assert response.status_code == 500
@@ -248,7 +248,7 @@ class TestPipelineRoutes:
         rendered = log_spy.error.call_args.args[0]
         # No bare token of either kind — neither `pipe_code= ` nor at end-of-line.
         assert "pipe_code=" not in rendered
-        assert "run_id=" not in rendered
+        assert "pipeline_run_id=" not in rendered
 
     def test_parse_request_caps_oversized_pipe_code(self, mocker: MockerFixture):
         # `RunRequest.pipe_code` carries no Pydantic max_length, so a

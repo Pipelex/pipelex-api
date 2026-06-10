@@ -198,12 +198,12 @@ paths:
       tags:
       - run
       summary: Start
-      description: 'Start a method asynchronously; returns its run_id immediately (MTHDS Protocol `POST /start`).
+      description: 'Start a method asynchronously; returns its pipeline_run_id immediately (MTHDS Protocol `POST /start`).
 
 
-        Answers `202 Accepted` with a `StartAck`. A client-supplied `run_id` is
+        Answers `202 Accepted` with a `StartAck`. A client-supplied `pipeline_run_id` is
 
-        honored (protocol D11: this runner accepts it; `StartAck.run_id` is always
+        honored (protocol D11: this runner accepts it; `StartAck.pipeline_run_id` is always
 
         authoritative). Pipelex domain failures propagate untouched: the global
 
@@ -2392,9 +2392,9 @@ components:
       title: PipelexBundleBlueprint
     PipelexRunResult:
       properties:
-        run_id:
+        pipeline_run_id:
           type: string
-          title: Run Id
+          title: Pipeline Run Id
         created_at:
           type: string
           title: Created At
@@ -2414,16 +2414,16 @@ components:
           $ref: '#/components/schemas/PipeOutput'
       type: object
       required:
-      - run_id
+      - pipeline_run_id
       - created_at
       - state
       - pipe_output
       title: PipelexRunResult
     PipelexStartAck:
       properties:
-        run_id:
+        pipeline_run_id:
           type: string
-          title: Run Id
+          title: Pipeline Run Id
         created_at:
           type: string
           title: Created At
@@ -2450,7 +2450,7 @@ components:
           title: Workflow Id
       type: object
       required:
-      - run_id
+      - pipeline_run_id
       - created_at
       - state
       title: PipelexStartAck

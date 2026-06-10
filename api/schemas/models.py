@@ -36,13 +36,13 @@ def _is_disallowed_host(host: str) -> bool:
 class PipelineApiExtras(BaseModel):
     """Validates the API-server-only fields on `/start` requests.
 
-    Mirrors the protocol's `StartRequest` extras (`run_id`, `callback_urls`).
+    Mirrors the protocol's `StartRequest` extras (`pipeline_run_id`, `callback_urls`).
     The upstream `RunRequest` model doesn't know about these fields.
     """
 
     model_config = ConfigDict(extra="ignore")
 
-    run_id: str | None = Field(default=None, max_length=128)
+    pipeline_run_id: str | None = Field(default=None, max_length=128)
     callback_urls: list[str] | None = Field(default=None, max_length=MAX_CALLBACK_URLS)
 
     @field_validator("callback_urls")

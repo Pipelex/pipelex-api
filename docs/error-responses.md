@@ -156,6 +156,6 @@ X-Request-ID: 9f2c1ab3-…
 
 ## Async callbacks (webhook payload)
 
-For [async pipeline runs](pipe-run.md) registering a `callback_url`, the failure payload delivered to the caller's webhook **does not** use this envelope. The webhook body carries the raw `ErrorReport` dict under an `error` key, alongside `run_id` (the protocol field) plus the runtime's legacy `pipeline_run_id` / `status` keys — a non-HTTP receiver (queue, log shipper) does not necessarily want an RFC 7807 wrapper.
+For [async pipeline runs](pipe-run.md) registering a `callback_url`, the failure payload delivered to the caller's webhook **does not** use this envelope. The webhook body carries the raw `ErrorReport` dict under an `error` key, alongside `pipeline_run_id` (the protocol field) plus the runtime's legacy `pipeline_run_id` / `status` keys — a non-HTTP receiver (queue, log shipper) does not necessarily want an RFC 7807 wrapper.
 
 The classification fields (`error_type`, `error_domain`, `retryable`, etc.) surface identically on both paths; only the envelope members (`type`, `status`, `detail`, `instance`, `request_id`) are sync-only. See [Pipe Run → Async Completion Callbacks](pipe-run.md) for the full webhook contract.

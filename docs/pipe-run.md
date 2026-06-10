@@ -45,7 +45,7 @@ Execute a Pipelex pipeline with flexible inputs and wait for completion.
 
 ```json
 {
-  "run_id": "abc123...",
+  "pipeline_run_id": "abc123...",
   "created_at": "2026-01-15T12:00:00Z",
   "state": "COMPLETED",
   "finished_at": "2026-01-15T12:00:05Z",
@@ -61,7 +61,7 @@ Execute a Pipelex pipeline with flexible inputs and wait for completion.
 
 **Response Fields:**
 
-- `run_id` (string): Unique identifier for the run.
+- `pipeline_run_id` (string): Unique identifier for the run.
 - `created_at` (string): ISO timestamp when the pipeline was created.
 - `state` (string): One of `"RUNNING"`, `"COMPLETED"`, `"FAILED"`, `"CANCELLED"`, `"ERROR"`, `"STARTED"`.
 - `finished_at` (string | null): ISO timestamp when the pipeline finished, or `null` if still running.
@@ -111,16 +111,16 @@ Start a pipeline execution without waiting for completion (non-blocking).
 
 **Important Notes:**
 
-- This endpoint answers `202 Accepted` immediately with a `StartAck` carrying the `run_id`
+- This endpoint answers `202 Accepted` immediately with a `StartAck` carrying the `pipeline_run_id`
 - The pipeline continues executing in the background
 - `pipe_output` will be `null` in the response (pipeline hasn't completed yet)
-- The request body MAY carry a client-supplied **`run_id`** (max 128 chars): this server honors it, and the `StartAck.run_id` echoes it back. When absent, the server generates one. (`StartAck.run_id` is always authoritative — protocol rule.)
+- The request body MAY carry a client-supplied **`pipeline_run_id`** (max 128 chars): this server honors it, and the `StartAck.pipeline_run_id` echoes it back. When absent, the server generates one. (`StartAck.pipeline_run_id` is always authoritative — protocol rule.)
 
 **Response (202):**
 
 ```json
 {
-  "run_id": "abc123...",
+  "pipeline_run_id": "abc123...",
   "created_at": "2026-01-15T12:00:00Z",
   "state": "STARTED",
   "finished_at": null,
@@ -132,7 +132,7 @@ Start a pipeline execution without waiting for completion (non-blocking).
 
 **Response Fields:**
 
-- `run_id` (string): Unique identifier for the run. Use this to correlate callbacks (see below).
+- `pipeline_run_id` (string): Unique identifier for the run. Use this to correlate callbacks (see below).
 - `created_at` (string): ISO timestamp when the pipeline was started.
 - `state` (string): Always `"STARTED"` from this endpoint — the pipeline is queued, not finished.
 - `finished_at` (null): Always `null`; the pipeline hasn't completed.
@@ -156,8 +156,8 @@ Start a pipeline execution without waiting for completion (non-blocking).
 
 When the pipeline completes, each URL in the list receives a POST carrying:
 
-- The completion payload in the body: `run_id` (the protocol field), the delivery `status` (`"COMPLETED"` or `"FAILED"`), `result_url` (when results were stored), `error` (the raw `ErrorReport` dict on failure), plus the runtime's legacy `pipeline_run_id` key
-- An **`X-Completion-Signature`** header — `HMAC-SHA256(secret, run_id)` rendered as a hex digest
+- The completion payload in the body: `pipeline_run_id` (the protocol field), the delivery `status` (`"COMPLETED"` or `"FAILED"`), `result_url` (when results were stored), `error` (the raw `ErrorReport` dict on failure), plus the runtime's legacy `pipeline_run_id` key
+- An **`X-Completion-Signature`** header — `HMAC-SHA256(secret, pipeline_run_id)` rendered as a hex digest
 
 **Verifying the signature on the receiver side**
 
@@ -168,7 +168,7 @@ import hmac, hashlib
 
 expected = hmac.new(
     SHARED_SECRET.encode("utf-8"),
-    run_id.encode("utf-8"),
+    pipeline_run_id.encode("utf-8"),
     hashlib.sha256,
 ).hexdigest()
 
