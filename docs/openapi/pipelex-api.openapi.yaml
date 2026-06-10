@@ -185,6 +185,100 @@ paths:
 
         handler in `api.exception_handlers` turns them into an RFC 7807 problem response.'
       operationId: execute_v1_execute_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $defs:
+                DictStuffAbstract:
+                  properties:
+                    concept:
+                      type: string
+                      title: Concept
+                    content:
+                      title: Content
+                  additionalProperties: false
+                  type: object
+                  required:
+                  - concept
+                  - content
+                  title: DictStuffAbstract
+                StuffContentAbstract:
+                  properties: {}
+                  type: object
+                  title: StuffContentAbstract
+                WorkingMemoryAbstract_Any_:
+                  properties:
+                    root:
+                      additionalProperties: true
+                      type: object
+                      title: Root
+                    aliases:
+                      additionalProperties:
+                        type: string
+                      type: object
+                      title: Aliases
+                  additionalProperties: false
+                  type: object
+                  title: WorkingMemoryAbstract[Any]
+              properties:
+                pipe_code:
+                  anyOf:
+                  - type: string
+                  - type: 'null'
+                  title: Pipe Code
+                mthds_contents:
+                  anyOf:
+                  - items:
+                      type: string
+                    type: array
+                  - type: 'null'
+                  title: Mthds Contents
+                inputs:
+                  anyOf:
+                  - additionalProperties:
+                      anyOf:
+                      - type: string
+                      - items:
+                          type: string
+                        type: array
+                      - $ref: '#/$defs/StuffContentAbstract'
+                      - items:
+                          $ref: '#/$defs/StuffContentAbstract'
+                        type: array
+                      - additionalProperties: true
+                        type: object
+                      - $ref: '#/$defs/DictStuffAbstract'
+                    type: object
+                  - $ref: '#/$defs/WorkingMemoryAbstract_Any_'
+                  - type: 'null'
+                  title: Inputs
+                output_name:
+                  anyOf:
+                  - type: string
+                  - type: 'null'
+                  title: Output Name
+                output_multiplicity:
+                  anyOf:
+                  - type: boolean
+                  - type: integer
+                  - type: 'null'
+                  title: Output Multiplicity
+                dynamic_output_concept_ref:
+                  anyOf:
+                  - type: string
+                  - type: 'null'
+                  title: Dynamic Output Concept Ref
+              type: object
+              title: RunRequest
+              description: "Body of the protocol's `POST /execute` — mirrors `RunRequest` in\n`mthds-protocol.openapi.yaml`.\n\
+                \nAttributes:\n    pipe_code (str | None): Code of the pipe to execute\n    mthds_contents (list[str] | None):\
+                \ List of MTHDS bundle contents to load\n    inputs (PipelineInputs | WorkingMemory | None): Inputs in PipelineInputs\
+                \ format - Pydantic validation is skipped\n        to preserve the flexible format (dicts, strings, StuffContent\
+                \ objects, etc.)\n    output_name (str | None): Name of the output slot to write to\n    output_multiplicity\
+                \ (VariableMultiplicity | None): Output multiplicity setting\n    dynamic_output_concept_ref (str | None):\
+                \ Override for the dynamic output concept ref"
+        required: true
       responses:
         '200':
           description: Successful Response
@@ -211,6 +305,120 @@ paths:
 
         RFC 7807 problem response.'
       operationId: start_v1_start_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $defs:
+                DictStuffAbstract:
+                  properties:
+                    concept:
+                      type: string
+                      title: Concept
+                    content:
+                      title: Content
+                  additionalProperties: false
+                  type: object
+                  required:
+                  - concept
+                  - content
+                  title: DictStuffAbstract
+                StuffContentAbstract:
+                  properties: {}
+                  type: object
+                  title: StuffContentAbstract
+                WorkingMemoryAbstract_Any_:
+                  properties:
+                    root:
+                      additionalProperties: true
+                      type: object
+                      title: Root
+                    aliases:
+                      additionalProperties:
+                        type: string
+                      type: object
+                      title: Aliases
+                  additionalProperties: false
+                  type: object
+                  title: WorkingMemoryAbstract[Any]
+              properties:
+                pipe_code:
+                  anyOf:
+                  - type: string
+                  - type: 'null'
+                  title: Pipe Code
+                mthds_contents:
+                  anyOf:
+                  - items:
+                      type: string
+                    type: array
+                  - type: 'null'
+                  title: Mthds Contents
+                inputs:
+                  anyOf:
+                  - additionalProperties:
+                      anyOf:
+                      - type: string
+                      - items:
+                          type: string
+                        type: array
+                      - $ref: '#/$defs/StuffContentAbstract'
+                      - items:
+                          $ref: '#/$defs/StuffContentAbstract'
+                        type: array
+                      - additionalProperties: true
+                        type: object
+                      - $ref: '#/$defs/DictStuffAbstract'
+                    type: object
+                  - $ref: '#/$defs/WorkingMemoryAbstract_Any_'
+                  - type: 'null'
+                  title: Inputs
+                output_name:
+                  anyOf:
+                  - type: string
+                  - type: 'null'
+                  title: Output Name
+                output_multiplicity:
+                  anyOf:
+                  - type: boolean
+                  - type: integer
+                  - type: 'null'
+                  title: Output Multiplicity
+                dynamic_output_concept_ref:
+                  anyOf:
+                  - type: string
+                  - type: 'null'
+                  title: Dynamic Output Concept Ref
+                pipeline_run_id:
+                  anyOf:
+                  - type: string
+                    maxLength: 128
+                  - type: 'null'
+                  title: Pipeline Run Id
+                callback_urls:
+                  anyOf:
+                  - items:
+                      type: string
+                    type: array
+                  - type: 'null'
+                  title: Callback Urls
+                method_id:
+                  anyOf:
+                  - type: string
+                    minLength: 1
+                  - type: 'null'
+                  title: Method Id
+              type: object
+              title: StartRequest
+              description: "Body of the protocol's `POST /start` — `RunRequest` plus the async extras.\n\nMirrors `StartRequest`\
+                \ in `mthds-protocol.openapi.yaml`, with the hosted\n`method_id` extension:\n\n- `pipeline_run_id` — client-supplied\
+                \ run identifier; bare runners accept\n  it, the hosted API rejects it with 422 (the server-generated id in\n\
+                \  `StartAck` is always authoritative).\n- `callback_urls` — completion webhooks, HMAC-signed by the runner\
+                \ via\n  `X-Completion-Signature`. http/https only; private/loopback/metadata\n  hosts are rejected server-side.\n\
+                - `method_id` — HOSTED EXTENSION: a stored method in the active org's\n  catalog, mutually exclusive with\
+                \ `mthds_contents`. The platform is the\n  source of truth for which combinations it accepts; the SDK does\
+                \ not\n  over-validate."
+        required: true
       responses:
         '202':
           description: Successful Response

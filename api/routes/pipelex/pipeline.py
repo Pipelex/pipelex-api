@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from kajson import kajson
 from kajson.exceptions import KajsonDecoderError
 from mthds.client.exceptions import PipelineRequestError
-from mthds.client.pipeline import RunRequest, RunState
+from mthds.client.pipeline import RunRequest, RunState, StartRequest
 from pipelex.config import get_config
 from pipelex.pipe_run.delivery_assignment import DeliveryAssignment, StorageTarget, WebhookTarget
 from pipelex.pipeline.pipeline_response import PipelexRunResult, PipelexStartAck
@@ -264,7 +264,17 @@ async def _parse_request(request: Request) -> tuple[RunRequest, PipelineApiExtra
 @router.post(
     "/execute",
     response_model=PipelexRunResult,
-    openapi_extra={"x-mthds-protocol": True},
+    # The body is read through the raw Request (kajson decoding — see
+    # `_parse_request`), so FastAPI cannot infer a typed body parameter;
+    # document it explicitly so the committed OpenAPI artifact (and protocol
+    # conformance tooling) publishes the request schema.
+    openapi_extra={
+        "x-mthds-protocol": True,
+        "requestBody": {
+            "required": True,
+            "content": {"application/json": {"schema": RunRequest.model_json_schema()}},
+        },
+    },
 )
 async def execute(request: Request) -> JSONResponse:
     """Execute a method synchronously and return its full output (MTHDS Protocol `POST /execute`).
@@ -291,7 +301,17 @@ async def execute(request: Request) -> JSONResponse:
     "/start",
     response_model=PipelexStartAck,
     status_code=202,
-    openapi_extra={"x-mthds-protocol": True},
+    # Documented body = the protocol's StartRequest (RunRequest + the async
+    # extras). `method_id` appears in the schema as the hosted extension this
+    # runner accepts-and-ignores. Raw-Request parsing prevents FastAPI from
+    # inferring it — see the /execute note.
+    openapi_extra={
+        "x-mthds-protocol": True,
+        "requestBody": {
+            "required": True,
+            "content": {"application/json": {"schema": StartRequest.model_json_schema()}},
+        },
+    },
 )
 async def start(
     request: Request,
