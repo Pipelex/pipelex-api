@@ -22,6 +22,7 @@ from api.exception_handlers import register_exception_handlers
 from api.middleware import REQUEST_ID_HEADER, RequestIdMiddleware, request_body_size_middleware
 from api.problem_document import PROBLEM_JSON_MEDIA_TYPE
 from api.routes import router as api_router
+from api.routes.version import router as version_router
 from api.security import RequestUser, get_request_user
 
 USER_A = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"
@@ -39,7 +40,8 @@ def _build_client(*, user: RequestUser | None = None) -> TestClient:
     """
     app = FastAPI(redirect_slashes=False)
     app.add_middleware(BaseHTTPMiddleware, dispatch=request_body_size_middleware)
-    app.include_router(api_router, prefix="/api/v1")
+    app.include_router(version_router, prefix="/v1")
+    app.include_router(api_router, prefix="/v1")
     register_exception_handlers(app)
 
     async def _override_user() -> RequestUser | None:
@@ -52,13 +54,13 @@ def _build_client(*, user: RequestUser | None = None) -> TestClient:
 class TestErrorResponses:
     def test_validation_error_is_rfc7807_input_domain(self):
         # /models with an unknown category → raise_validation_error → 422.
-        response = _build_client().get("/api/v1/models?type=not-a-real-category")
+        response = _build_client().get("/v1/models?type=not-a-real-category")
         assert response.status_code == 422
         assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
         body = response.json()
         assert body["error_type"] == "InvalidModelCategory"
         assert body["error_domain"] == "input"
-        assert body["instance"] == "/api/v1/models"
+        assert body["instance"] == "/v1/models"
         assert body["status"] == 422
         assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
         # API-authored caller-input errors are non-retryable across the surface.
@@ -68,14 +70,14 @@ class TestErrorResponses:
         # FastAPI's automatic body validation (here: mthds_contents below its
         # min_length) must answer in the same RFC 7807 shape as every other
         # path — not FastAPI's default {"detail": [...]} / application/json.
-        response = _build_client().post("/api/v1/validate", json={"mthds_contents": []})
+        response = _build_client().post("/v1/validate", json={"mthds_contents": []})
         assert response.status_code == 422
         assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
         body = response.json()
         assert body["error_type"] == "ValidationError"
         assert body["error_domain"] == "input"
         assert body["status"] == 422
-        assert body["instance"] == "/api/v1/validate"
+        assert body["instance"] == "/v1/validate"
         assert isinstance(body["detail"], str)
         assert "mthds_contents" in body["detail"]
         assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
@@ -84,7 +86,7 @@ class TestErrorResponses:
     def test_bad_request_is_rfc7807(self):
         # A malformed storage URI → raise_bad_request → 400.
         client = _build_client(user=RequestUser(user_id=USER_A))
-        response = client.post("/api/v1/resolve-storage-url", json={"uri": f"pipelex-storage://{USER_A}/../secret.pdf"})
+        response = client.post("/v1/resolve-storage-url", json={"uri": f"pipelex-storage://{USER_A}/../secret.pdf"})
         assert response.status_code == 400
         assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
         body = response.json()
@@ -97,7 +99,7 @@ class TestErrorResponses:
         # REGRESSION T2: a cross-user storage URI → raise_forbidden → 403.
         client = _build_client(user=RequestUser(user_id=USER_A))
         stranger_uri = f"pipelex-storage://{USER_B}/assets/{FILE_HASH}.pdf"
-        response = client.post("/api/v1/resolve-storage-url", json={"uri": stranger_uri})
+        response = client.post("/v1/resolve-storage-url", json={"uri": stranger_uri})
         assert response.status_code == 403
         assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
         body = response.json()
@@ -109,7 +111,7 @@ class TestErrorResponses:
     def test_payload_too_large_is_rfc7807(self):
         # REGRESSION T1: a body over the cap → 413 via the body-size middleware.
         response = _build_client().get(
-            "/api/v1/pipelex_version",
+            "/v1/version",
             headers={"content-length": str(200 * 1024 * 1024)},
         )
         assert response.status_code == 413
@@ -162,7 +164,7 @@ class TestErrorResponses:
     def test_internal_server_error_is_rfc7807_config_domain(self, mocker: MockerFixture):
         # Absent package metadata → raise_internal_server_error → 500 CONFIG.
         mocker.patch("api.routes.version.version", side_effect=PackageNotFoundError("pipelex"))
-        response = _build_client().get("/api/v1/pipelex_version")
+        response = _build_client().get("/v1/version")
         assert response.status_code == 500
         assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
         body = response.json()
@@ -177,7 +179,7 @@ class TestErrorResponses:
 
     def test_unauthenticated_carries_www_authenticate_challenge(self):
         # An unauthenticated upload → raise_unauthenticated → 401 + challenge.
-        response = _build_client(user=None).post("/api/v1/upload", json={"filename": "a.txt", "data": "aGk="})
+        response = _build_client(user=None).post("/v1/upload", json={"filename": "a.txt", "data": "aGk="})
         assert response.status_code == 401
         assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
         assert response.headers["WWW-Authenticate"] == "Bearer"
@@ -189,7 +191,7 @@ class TestErrorResponses:
     def test_inbound_request_id_is_echoed_into_error_body(self):
         # A caller-supplied X-Request-ID rides through to the response body.
         response = _build_client().get(
-            "/api/v1/models?type=not-a-real-category",
+            "/v1/models?type=not-a-real-category",
             headers={REQUEST_ID_HEADER: "inbound-correlation-303"},
         )
         assert response.status_code == 422

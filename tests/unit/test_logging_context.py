@@ -11,12 +11,12 @@ class TestLoggingContext:
         assert get_route_path() is None
 
     def test_getters_return_bound_values(self):
-        with bound_request_context(request_id="REQ123", route_path="/api/v1/pipeline/start"):
+        with bound_request_context(request_id="REQ123", route_path="/v1/start"):
             assert get_request_id() == "REQ123"
-            assert get_route_path() == "/api/v1/pipeline/start"
+            assert get_route_path() == "/v1/start"
 
     def test_context_resets_on_clean_exit(self):
-        with bound_request_context(request_id="REQ123", route_path="/api/v1/pipeline/start"):
+        with bound_request_context(request_id="REQ123", route_path="/v1/start"):
             pass
         assert get_request_id() is None
         assert get_route_path() is None

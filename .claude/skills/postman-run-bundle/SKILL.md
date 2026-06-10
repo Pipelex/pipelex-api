@@ -9,8 +9,8 @@ description: >-
   "run the fashion_moodboard bundle against the API", "validate this bundle via the API", "dry-run this
   method against the API", "give me the curl for this bundle", or just "postman" said alongside a bundle
   path. It resolves the bundle exactly like `pipelex run bundle <path>` (auto-detects bundle.mthds / the
-  single .mthds, reads main_pipe, loads the sibling inputs.json) and targets /api/v1/pipeline/execute,
-  /start, and /api/v1/validate. Trigger it even when the user does not name the endpoint or the word
+  single .mthds, reads main_pipe, loads the sibling inputs.json) and targets /v1/execute,
+  /v1/start, and /v1/validate. Trigger it even when the user does not name the endpoint or the word
   "skill".
 ---
 
@@ -27,9 +27,9 @@ For the bundle the user names, it inserts requests into the collection under:
 ```
 Run Bundle/
   <bundle>/            (named by the bundle's `domain`, or the filename)
-    Execute (sync)      POST {{base_url}}/api/v1/pipeline/execute
-    Start (async)       POST {{base_url}}/api/v1/pipeline/start
-    Validate (dry-run)  POST {{base_url}}/api/v1/validate
+    Execute (sync)      POST {{base_url}}/v1/execute
+    Start (async)       POST {{base_url}}/v1/start
+    Validate (dry-run)  POST {{base_url}}/v1/validate
 ```
 
 Which of these appears depends on `--endpoint`: the default `both` is `execute` + `start`; `validate` is its own choice and is never bundled with the run endpoints (different body, see below).
@@ -70,7 +70,7 @@ Requests use the collection variable `{{base_url}}` and inherit the collection's
 
 ## Validate = the API's dry-run
 
-The API has **no separate "dry-run" endpoint that takes inputs**. `POST /api/v1/validate` *is* the dry-run: it parses, loads, and dry-runs every pipe with mock inputs and **zero inference** (no LLM calls, no cost, no latency), then returns the validated bundle blueprint, a `graph_spec`, and per-pipe input/output JSON-Schema `pipe_structures`. It confirms the whole pipeline wires up — concepts resolve, pipe inputs/outputs match, controllers find their sub-pipes — without ever running it. That makes it the safe, free counterpart to `execute`/`start`: reach for it to "just check" or "dry-run" a bundle.
+The API has **no separate "dry-run" endpoint that takes inputs**. `POST /v1/validate` *is* the dry-run: it parses, loads, and dry-runs every pipe with mock inputs and **zero inference** (no LLM calls, no cost, no latency), then returns the validated bundle blueprint, a `graph_spec`, and per-pipe input/output JSON-Schema `pipe_structures`. It confirms the whole pipeline wires up — concepts resolve, pipe inputs/outputs match, controllers find their sub-pipes — without ever running it. That makes it the safe, free counterpart to `execute`/`start`: reach for it to "just check" or "dry-run" a bundle.
 
 Two things to know:
 
@@ -79,7 +79,7 @@ Two things to know:
 
 ## Callback URLs (the async `start` endpoint)
 
-`/api/v1/pipeline/start` is fire-and-forget: it returns a `pipeline_run_id` immediately and POSTs the finished result to a webhook later. So a `start` request **must** carry `callback_urls`. The skill resolves it in this order:
+`/v1/start` is fire-and-forget: it returns a `run_id` immediately and POSTs the finished result to a webhook later. So a `start` request **must** carry `callback_urls`. The skill resolves it in this order:
 
 1. **`--callback-url <url>`** if you pass one (repeatable — the field is a JSON list, but a single URL is the common case).
 2. **`CALLBACK_URL`** in the environment or the repo `.env` (e.g. `CALLBACK_URL=https://webhook.site/<id>`). `make` exports `.env`, so the make targets pick it up automatically; the script also reads `.env` directly when invoked outside `make`.
@@ -93,7 +93,7 @@ From the `pipelex-api` repo root, the make targets are the convenient wrapper (t
 
 ```bash
 make bundle-run      BUNDLE=<dir|.mthds>   # POST to a running API, print the response
-make bundle-validate BUNDLE=<dir|.mthds>   # dry-run validate via /api/v1/validate (no inference, no cost)
+make bundle-validate BUNDLE=<dir|.mthds>   # dry-run validate via /v1/validate (no inference, no cost)
 make bundle-curl     BUNDLE=<dir|.mthds>   # emit a ready-to-run curl
 make bundle-postman  BUNDLE=<dir|.mthds>   # push Execute/Start into the Postman collection
 make bundle-dry      BUNDLE=<dir|.mthds>   # print the request body only
@@ -121,9 +121,9 @@ python3 .claude/skills/postman-run-bundle/scripts/build_postman_query.py <bundle
 #   --base-url https://api.pipelex.com/runner   --token <bearer>
 ```
 
-`--run` uses `Execute (sync)` so it waits for and prints the result; pass `--endpoint start` to fire-and-forget and get a `pipeline_run_id` back (a `start` run needs a `--callback-url` or `CALLBACK_URL` — see [Callback URLs](#callback-urls-the-async-start-endpoint)). The API must be up — start it locally with `make run` first. Heads-up: `execute`/`start` trigger real inference (cost + latency), so for an image-gen bundle like `fashion_moodboard` confirm the user wants a live run.
+`--run` uses `Execute (sync)` so it waits for and prints the result; pass `--endpoint start` to fire-and-forget and get a `run_id` back (a `start` run needs a `--callback-url` or `CALLBACK_URL` — see [Callback URLs](#callback-urls-the-async-start-endpoint)). The API must be up — start it locally with `make run` first. Heads-up: `execute`/`start` trigger real inference (cost + latency), so for an image-gen bundle like `fashion_moodboard` confirm the user wants a live run.
 
-**Dry-run validate it** — `--endpoint validate` hits `/api/v1/validate`, which parses, loads, and dry-runs every pipe with **no inference** (free, no cost, no latency). Safe to run live without confirmation:
+**Dry-run validate it** — `--endpoint validate` hits `/v1/validate`, which parses, loads, and dry-runs every pipe with **no inference** (free, no cost, no latency). Safe to run live without confirmation:
 
 ```bash
 python3 .claude/skills/postman-run-bundle/scripts/build_postman_query.py <bundle-path> --run --endpoint validate
@@ -181,7 +181,7 @@ A related limit: the API receives only the inline `mthds_contents`, not the bund
 
 - **No `POSTMAN_API_KEY`** → the script exits asking you to `source ~/.zshenv`. Do that and retry. If it's still unset, the user needs to add it to `~/.zshenv` (Postman → Settings → API keys → Generate).
 - **No `main_pipe` and no `--pipe`** (run endpoints) → the script exits; ask the user which pipe to run and pass `--pipe`.
-- **`start` selected and no callback URL** → the script exits ("the async /pipeline/start endpoint requires callback_urls"). Resolve it from `--callback-url`, `CALLBACK_URL` in `.env`, or ask the user for one (e.g. a `https://webhook.site/...` endpoint), then re-run. `execute`/`validate` never hit this.
+- **`start` selected and no callback URL** → the script exits ("the async /start endpoint requires callback_urls"). Resolve it from `--callback-url`, `CALLBACK_URL` in `.env`, or ask the user for one (e.g. a `https://webhook.site/...` endpoint), then re-run. `execute`/`validate` never hit this.
 - **No `main_pipe`, validating** → the script proceeds (validate needs no `pipe_code`), but the API returns a `422` *"Bundle does not declare a main_pipe"*. `--pipe` can't help here — `/validate` takes no `pipe_code`; the bundle itself must declare a `main_pipe`.
 
 ## Constants

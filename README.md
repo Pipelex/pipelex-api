@@ -35,6 +35,8 @@ The official REST API server for building and executing Pipelex pipelines. Deplo
 
 The **Pipelex API Server** is a FastAPI-based REST API that allows you to execute [Pipelex](https://github.com/Pipelex/pipelex) pipelines via HTTP requests. Deploy your pipelines as HTTP endpoints and integrate them into any application or workflow.
 
+It is the open-source reference implementation of the **[MTHDS Protocol](https://mthds.ai)** — the minimal HTTP contract every MTHDS runner implements (`POST /execute`, `POST /start`, `POST /validate`, `GET /models`, `GET /version`). The contracts nest: **MTHDS Protocol ⊂ Pipelex API (this server) ⊂ Pipelex hosted API**. This server adds the build tooling extensions (`/build/*`) on top of the protocol; the hosted API at `api.pipelex.com/v1` adds durable runs, the method catalog, and account management on top of this server — same shapes throughout. All routes live under the `/v1` base path; the committed contract is [`docs/openapi/pipelex-api.openapi.yaml`](docs/openapi/pipelex-api.openapi.yaml).
+
 # 🚀 Quick Start with Docker
 
 **Official Docker image available at:** [`pipelex/pipelex-api`](https://hub.docker.com/r/pipelex/pipelex-api)
@@ -65,10 +67,10 @@ The API is now running at `http://localhost:8081`. To customize behavior (enable
 
 # 🧪 Run your first pipeline
 
-Once `/health` is green, send an inline pipeline definition and inputs to `/api/v1/pipeline/execute`. The example below summarizes a string with a one-pipe MTHDS bundle — no files, no auth, copy-paste:
+Once `/health` is green, send an inline pipeline definition and inputs to `/v1/execute`. The example below summarizes a string with a one-pipe MTHDS bundle — no files, no auth, copy-paste:
 
 ```bash
-curl -s http://localhost:8081/api/v1/pipeline/execute \
+curl -s http://localhost:8081/v1/execute \
   -H "Content-Type: application/json" \
   -d '{
     "pipe_code": "summarize",
@@ -77,7 +79,7 @@ curl -s http://localhost:8081/api/v1/pipeline/execute \
   }'
 ```
 
-You'll get back a JSON response with `pipeline_state: "COMPLETED"` and the summary under `pipe_output.working_memory.root.<main_stuff_name>.content`.
+You'll get back a JSON response with `state: "COMPLETED"` and the summary under `pipe_output.working_memory.root.<main_stuff_name>.content`.
 
 **Passing files (PDFs, images) as inputs.** Use the `Document` concept and point it at any HTTP(S) URL:
 
@@ -97,12 +99,12 @@ For inline MTHDS in the request, `mthds_contents` is a JSON array of raw `.mthds
 
 # 📈 How to scale Pipelex
 
-A single Pipelex API container is great for development, prototyping, and low-concurrency workloads — pipelines run in-process and `/api/v1/pipeline/execute` blocks the request thread until they finish.
+A single Pipelex API container is great for development, prototyping, and low-concurrency workloads — pipelines run in-process and `/v1/execute` blocks the request thread until they finish.
 
 For production-scale workloads (high concurrency, long-running pipelines, retries, durable execution, horizontal scaling), the recommended path is to run Pipelex on top of [**Temporal**](https://temporal.io/). With Temporal enabled:
 
 - Pipeline runs become durable workflows — survive worker crashes, support retries and timeouts out of the box.
-- The API container becomes a thin orchestrator: it submits workflows to a Temporal cluster and returns a `pipeline_run_id` immediately (this is what `POST /api/v1/pipeline/start` already does).
+- The API container becomes a thin orchestrator: it submits workflows to a Temporal cluster and returns a `run_id` immediately (this is what `POST /v1/start` already does).
 - Pipeline execution itself runs on a separate pool of **Pipelex workers** that you scale independently from the HTTP layer.
 - Async completion callbacks (`callback_urls` + `X-Completion-Signature`, see [pipe-run.md](docs/pipe-run.md)) let your application be notified when each run finishes, without polling.
 

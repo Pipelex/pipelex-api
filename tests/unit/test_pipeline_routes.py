@@ -1,4 +1,4 @@
-"""Smoke + hardening tests for /pipeline/execute and /pipeline/start.
+"""Smoke + hardening tests for /execute and /start (MTHDS Protocol run routes).
 
 The actual pipeline runner is mocked: we only assert that the API layer
 parses, validates, dispatches, and shapes responses correctly.
@@ -9,9 +9,9 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from mthds.client.pipeline import PipelineState
+from mthds.client.pipeline import RunState
 from pipelex.base_exceptions import PipelexConfigError
-from pipelex.pipeline.pipeline_response import PipelexPipelineStartResponse
+from pipelex.pipeline.pipeline_response import PipelexStartAck
 from pytest_mock import MockerFixture
 
 from api.exception_handlers import register_exception_handlers
@@ -28,40 +28,40 @@ def _build_client(mocker: MockerFixture, *, with_request_id_middleware: bool = F
     header binds the request-scoped contextvar the route reads.
     """
     app = FastAPI()
-    app.include_router(pipeline_router, prefix="/api/v1")
+    app.include_router(pipeline_router, prefix="/v1")
     register_exception_handlers(app)
 
     fake_execute_response = mocker.MagicMock()
     fake_execute_response.model_dump.return_value = {
-        "pipeline_run_id": "test-run-1",
+        "run_id": "test-run-1",
         "created_at": "2026-01-15T12:00:00Z",
-        "pipeline_state": "COMPLETED",
+        "state": "COMPLETED",
         "finished_at": "2026-01-15T12:00:01Z",
         "main_stuff_name": "main_stuff",
         "pipe_output": {"working_memory": {"root": {}, "aliases": {}}},
     }
 
-    fake_start_response = PipelexPipelineStartResponse(
-        pipeline_run_id="test-run-1",
+    fake_start_response = PipelexStartAck(
+        run_id="test-run-1",
         created_at="2026-01-15T12:00:00Z",
-        pipeline_state=PipelineState.STARTED,
+        state=RunState.STARTED,
         workflow_id="wf-1",
     )
 
     fake_runner = mocker.MagicMock()
-    fake_runner.execute_pipeline = mocker.AsyncMock(return_value=fake_execute_response)
-    fake_runner.start_pipeline = mocker.AsyncMock(return_value=fake_start_response)
+    fake_runner.execute = mocker.AsyncMock(return_value=fake_execute_response)
+    fake_runner.start = mocker.AsyncMock(return_value=fake_start_response)
     mocker.patch("api.routes.pipelex.pipeline.ApiRunner", return_value=fake_runner)
 
     asgi_app = RequestIdMiddleware(app) if with_request_id_middleware else app
-    return TestClient(asgi_app), fake_runner.execute_pipeline, fake_runner.start_pipeline
+    return TestClient(asgi_app), fake_runner.execute, fake_runner.start
 
 
 class TestPipelineRoutes:
     def test_execute_happy_path(self, mocker: MockerFixture):
         client, execute_mock, _ = _build_client(mocker)
         response = client.post(
-            "/api/v1/pipeline/execute",
+            "/v1/execute",
             json={"pipe_code": "echo", "mthds_contents": [VALID_MTHDS], "inputs": {"text": "hello"}},
         )
         assert response.status_code == 200
@@ -70,7 +70,7 @@ class TestPipelineRoutes:
     def test_execute_rejects_non_object_body(self, mocker: MockerFixture):
         client, _, _ = _build_client(mocker)
         response = client.post(
-            "/api/v1/pipeline/execute",
+            "/v1/execute",
             content=b'"just a string"',
             headers={"content-type": "application/json"},
         )
@@ -81,7 +81,7 @@ class TestPipelineRoutes:
     def test_execute_rejects_invalid_json(self, mocker: MockerFixture):
         client, _, _ = _build_client(mocker)
         response = client.post(
-            "/api/v1/pipeline/execute",
+            "/v1/execute",
             content=b"{not json",
             headers={"content-type": "application/json"},
         )
@@ -102,7 +102,7 @@ class TestPipelineRoutes:
             side_effect=RecursionError("maximum recursion depth exceeded"),
         )
         response = client.post(
-            "/api/v1/pipeline/execute",
+            "/v1/execute",
             content=b'{"any": "valid-json-here"}',
             headers={"content-type": "application/json"},
         )
@@ -144,7 +144,7 @@ class TestPipelineRoutes:
         """
         client, _, _ = _build_client(mocker)
         response = client.post(
-            "/api/v1/pipeline/execute",
+            "/v1/execute",
             content=body,
             headers={"content-type": "application/json"},
         )
@@ -156,10 +156,10 @@ class TestPipelineRoutes:
         # The opaque-500 sentinel must never appear for a crafted body.
         assert problem["error_type"] != "InternalServerError", label
 
-    def test_start_happy_path(self, mocker: MockerFixture):
+    def test_start_happy_path_returns_202(self, mocker: MockerFixture):
         client, _, start_mock = _build_client(mocker)
         response = client.post(
-            "/api/v1/pipeline/start",
+            "/v1/start",
             json={
                 "pipe_code": "echo",
                 "mthds_contents": [VALID_MTHDS],
@@ -167,15 +167,36 @@ class TestPipelineRoutes:
                 "callback_urls": ["https://example.com/done"],
             },
         )
-        assert response.status_code == 200
+        # Protocol: `POST /start` answers 202 Accepted with a StartAck.
+        assert response.status_code == 202
+        body = response.json()
+        assert body["run_id"] == "test-run-1"
+        assert body["state"] == "STARTED"
         start_mock.assert_awaited_once()
         kwargs = start_mock.await_args.kwargs
         assert kwargs["callback_urls"] == ["https://example.com/done"]
 
-    def test_parse_request_binds_pipe_code_and_pipeline_run_id_to_state(self, mocker: MockerFixture):
+    def test_start_forwards_client_run_id(self, mocker: MockerFixture):
+        # D11: the open-source runner ACCEPTS a client-supplied run_id and
+        # forwards it to the runner's `start` as the `run_id` kwarg.
+        client, _, start_mock = _build_client(mocker)
+        response = client.post(
+            "/v1/start",
+            json={
+                "pipe_code": "echo",
+                "mthds_contents": [VALID_MTHDS],
+                "inputs": {"text": "hello"},
+                "run_id": "client-chosen-run-42",
+            },
+        )
+        assert response.status_code == 202
+        start_mock.assert_awaited_once()
+        assert start_mock.await_args.kwargs["run_id"] == "client-chosen-run-42"
+
+    def test_parse_request_binds_pipe_code_and_run_id_to_state(self, mocker: MockerFixture):
         # End-to-end: a real POST that goes through `_parse_request` must bind
-        # `pipe_code` / `pipeline_run_id` on `request.state` so that a
-        # downstream failure (here: `start_pipeline` raising `PipelexConfigError`)
+        # `pipe_code` / `run_id` on `request.state` so that a
+        # downstream failure (here: `start` raising `PipelexConfigError`)
         # is logged with both fields. The unit-level tests pin the
         # handler->getter->log path; this one pins that `_parse_request` itself
         # actually writes to `request.state` against the production route.
@@ -186,26 +207,26 @@ class TestPipelineRoutes:
         # `test_exception_handlers.py` instead of substring matching.
         client, _, start_mock = _build_client(mocker)
         body_pipe_code = "echo"
-        body_pipeline_run_id = "run-end-to-end-0001"
+        body_run_id = "run-end-to-end-0001"
         start_mock.side_effect = PipelexConfigError("simulated config fault inside the runner")
         log_spy = mocker.patch("api.exception_handlers.log")
         response = client.post(
-            "/api/v1/pipeline/start",
+            "/v1/start",
             json={
                 "pipe_code": body_pipe_code,
                 "mthds_contents": [VALID_MTHDS],
                 "inputs": {"text": "hello"},
-                "pipeline_run_id": body_pipeline_run_id,
+                "run_id": body_run_id,
             },
         )
         assert response.status_code == 500
         log_spy.error.assert_called_once()
         rendered = log_spy.error.call_args.args[0]
         assert f"pipe_code={body_pipe_code}" in rendered
-        assert f"pipeline_run_id={body_pipeline_run_id}" in rendered
+        assert f"run_id={body_run_id}" in rendered
 
     def test_parse_request_drops_empty_correlation_fields(self, mocker: MockerFixture):
-        # An empty-string `pipe_code` / `pipeline_run_id` in the body must NOT
+        # An empty-string `pipe_code` / `run_id` in the body must NOT
         # render as a bare `pipe_code=` token in the operator log — the bare
         # token reads as a logfmt parse error to downstream sinks and defeats
         # grep-by-value. `_coerce_correlation_field` normalizes empty strings
@@ -214,12 +235,12 @@ class TestPipelineRoutes:
         start_mock.side_effect = PipelexConfigError("simulated config fault")
         log_spy = mocker.patch("api.exception_handlers.log")
         response = client.post(
-            "/api/v1/pipeline/start",
+            "/v1/start",
             json={
                 "pipe_code": "",
                 "mthds_contents": [VALID_MTHDS],
                 "inputs": {"text": "hello"},
-                "pipeline_run_id": "",
+                "run_id": "",
             },
         )
         assert response.status_code == 500
@@ -227,22 +248,22 @@ class TestPipelineRoutes:
         rendered = log_spy.error.call_args.args[0]
         # No bare token of either kind — neither `pipe_code= ` nor at end-of-line.
         assert "pipe_code=" not in rendered
-        assert "pipeline_run_id=" not in rendered
+        assert "run_id=" not in rendered
 
     def test_parse_request_caps_oversized_pipe_code(self, mocker: MockerFixture):
-        # `PipelineRequest.pipe_code` carries no Pydantic max_length, so a
+        # `RunRequest.pipe_code` carries no Pydantic max_length, so a
         # caller can in principle send a megabyte-long string. The binding
         # site caps the value rendered into operator logs so a single failed
         # request cannot blow per-line log-sink budgets. 256 is the limit;
         # anything longer is silently truncated for the log surface (the
-        # actual `pipeline_request.pipe_code` passed to the runner is
+        # actual `run_request.pipe_code` passed to the runner is
         # unchanged — only the `request.state` mirror is capped).
         client, _, start_mock = _build_client(mocker)
         start_mock.side_effect = PipelexConfigError("simulated config fault")
         log_spy = mocker.patch("api.exception_handlers.log")
         oversized = "x" * 5000
         response = client.post(
-            "/api/v1/pipeline/start",
+            "/v1/start",
             json={
                 "pipe_code": oversized,
                 "mthds_contents": [VALID_MTHDS],
@@ -266,7 +287,7 @@ class TestPipelineRoutes:
         log_spy = mocker.patch("api.exception_handlers.log")
         body_pipe_code = "echo"
         response = client.post(
-            "/api/v1/pipeline/start",
+            "/v1/start",
             json={
                 "pipe_code": body_pipe_code,
                 # An AWS-metadata URL — blocked by `_is_disallowed_host`, so
@@ -283,17 +304,17 @@ class TestPipelineRoutes:
     def test_start_propagates_request_id_to_runner(self, mocker: MockerFixture):
         # The middleware binds the inbound `X-Request-ID` onto the request-scoped
         # contextvar; the route reads it via `get_request_id()` and passes it as
-        # `request_id=` to `ApiRunner.start_pipeline`, which forwards it to
+        # `request_id=` to `ApiRunner.start`, which forwards it to
         # `pipeline_run_setup(...)` so it lands on `JobMetadata.request_id`.
         # Without this hop the worker's `WorkflowLog` would carry `None`.
         client, _, start_mock = _build_client(mocker, with_request_id_middleware=True)
         inbound_request_id = "01HNJZ4XR7K3Q9D8MWAQ7FY2E5"
         response = client.post(
-            "/api/v1/pipeline/start",
+            "/v1/start",
             json={"pipe_code": "echo", "mthds_contents": [VALID_MTHDS], "inputs": {"text": "hello"}},
             headers={REQUEST_ID_HEADER: inbound_request_id},
         )
-        assert response.status_code == 200
+        assert response.status_code == 202
         assert response.headers[REQUEST_ID_HEADER] == inbound_request_id
         start_mock.assert_awaited_once()
         assert start_mock.await_args.kwargs["request_id"] == inbound_request_id
@@ -312,7 +333,7 @@ class TestPipelineRoutes:
     def test_start_rejects_ssrf_callbacks(self, mocker: MockerFixture, bad_url: str):
         client, _, start_mock = _build_client(mocker)
         response = client.post(
-            "/api/v1/pipeline/start",
+            "/v1/start",
             json={"pipe_code": "echo", "callback_urls": [bad_url]},
         )
         assert response.status_code == 422
@@ -323,7 +344,7 @@ class TestPipelineRoutes:
     def test_start_rejects_too_many_callbacks(self, mocker: MockerFixture):
         client, _, start_mock = _build_client(mocker)
         response = client.post(
-            "/api/v1/pipeline/start",
+            "/v1/start",
             json={
                 "pipe_code": "echo",
                 "callback_urls": [f"https://example.com/{idx}" for idx in range(20)],

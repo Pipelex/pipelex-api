@@ -26,14 +26,14 @@ JWT_SECRET_KEY=your-jwt-secret # used when AUTH_MODE=jwt
 # (see "Pipelex configuration files" below). Defaults to "dev" when unset.
 PIPELEX_ENV=dev
 
-# Required ONLY if you use POST /api/v1/pipeline/start with `callback_urls`
+# Required ONLY if you use POST /v1/start with `callback_urls`
 # (see pipe-run.md → "Async Completion Callbacks"). HMAC secret shared between
 # this server (signs callbacks) and your callback receiver (verifies them).
 # Read lazily — the server boots without it; the env var is only required at
 # the moment a callback signature is computed.
 # COMPLETION_CALLBACK_SECRET=<shared-with-your-callback-receiver>
 
-# Maximum decoded size, in MiB, accepted by POST /api/v1/upload. Defaults to
+# Maximum decoded size, in MiB, accepted by POST /v1/upload. Defaults to
 # 50 MiB. Raise it for larger documents, lower it to harden the server.
 # Read at startup — change requires a restart.
 # MAX_UPLOAD_MIB=50

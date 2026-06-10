@@ -84,23 +84,24 @@ def _pipe_code_of(request: Request) -> str | None:
     return getattr(request.state, "pipe_code", None)
 
 
-def _pipeline_run_id_of(request: Request) -> str | None:
-    """Return the parsed `pipeline_run_id` when `_parse_request` bound one on the request.
+def _run_id_of(request: Request) -> str | None:
+    """Return the parsed `run_id` when `_parse_request` bound one on the request.
 
-    Same shape as `_pipe_code_of`. Source: the raw body's `pipeline_run_id`,
-    normalized through `_coerce_correlation_field` at the binding site (empty
-    string → `None`, oversized → truncated). Letting the field ride every
-    error log lets an operator correlate the API-side failure with the
-    worker-side traces that share the same run id, without each backend frame
-    having to forward it.
+    Same shape as `_pipe_code_of`. Source: the raw body's `run_id` (the
+    protocol wire field — the pipelex runtime internals keep calling it
+    `pipeline_run_id`), normalized through `_coerce_correlation_field` at the
+    binding site (empty string → `None`, oversized → truncated). Letting the
+    field ride every error log lets an operator correlate the API-side failure
+    with the worker-side traces that share the same run id, without each
+    backend frame having to forward it.
     """
-    return getattr(request.state, "pipeline_run_id", None)
+    return getattr(request.state, "run_id", None)
 
 
 def _request_correlation_fields(request: Request) -> dict[str, str | None]:
     """Return the request-scoped correlation fields every error log carries.
 
-    Single source of truth for the `user_id` / `pipe_code` / `pipeline_run_id`
+    Single source of truth for the `user_id` / `pipe_code` / `run_id`
     field set so the three log paths (`_log_error_report`,
     `_log_api_authored_error`, `handle_unexpected_error`) cannot drift. Each
     value is `None` when the corresponding state is not bound on this request;
@@ -110,7 +111,7 @@ def _request_correlation_fields(request: Request) -> dict[str, str | None]:
     return {
         "user_id": _user_id_of(request),
         "pipe_code": _pipe_code_of(request),
-        "pipeline_run_id": _pipeline_run_id_of(request),
+        "run_id": _run_id_of(request),
     }
 
 
@@ -231,7 +232,7 @@ def _log_api_authored_error(*, document: dict[str, Any], status: int, request: R
     one `event=api_error` line a downstream sink can grep uniformly on
     `event`, `request_id`, `route`, `error_type`, `error_domain`, `retryable`,
     and `status`. Without this, an API-owned 500 (a `raise_internal_server_error`
-    site — `/pipelex_version`'s missing-package case is the canonical example)
+    site — `/version`'s missing-package case is the canonical example)
     would land with zero operator output, since `handle_api_error` only
     serializes the response.
 

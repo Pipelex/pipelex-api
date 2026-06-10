@@ -7,9 +7,9 @@ loads the sibling ``inputs.json``, and inserts a ready-to-run request into the
 live "Pipelex FastAPI" Postman collection under ``Run Bundle/<bundle>/``.
 
 Requests are generated per bundle (configurable via ``--endpoint``):
-``Execute (sync)`` -> ``POST /api/v1/pipeline/execute``, ``Start (async)`` ->
-``POST /api/v1/pipeline/start``, and ``Validate (dry-run)`` ->
-``POST /api/v1/validate`` (an inference-free check that parses, loads, and
+``Execute (sync)`` -> ``POST /v1/execute``, ``Start (async)`` ->
+``POST /v1/start``, and ``Validate (dry-run)`` ->
+``POST /v1/validate`` (an inference-free check that parses, loads, and
 dry-runs every pipe — no pipe_code, no inputs, no cost). All use the
 collection's ``{{base_url}}`` and inherit its ``{{auth_token}}`` bearer auth.
 
@@ -53,12 +53,12 @@ TOP_FOLDER_NAME = "Run Bundle"
 # name -> (request display name, URL path segments, body kind)
 # Body kind selects the request shape: "run" -> {pipe_code, mthds_contents, inputs}
 # for the sync execute; "start" -> the same plus {callback_urls} for the async
-# /pipeline/start; "validate" -> {mthds_contents, allow_signatures} for the
+# /start; "validate" -> {mthds_contents, allow_signatures} for the
 # inference-free /validate dry-run (no pipe_code, no inputs).
 ENDPOINTS: dict[str, tuple[str, list[str], str]] = {
-    "execute": ("Execute (sync)", ["api", "v1", "pipeline", "execute"], "run"),
-    "start": ("Start (async)", ["api", "v1", "pipeline", "start"], "start"),
-    "validate": ("Validate (dry-run)", ["api", "v1", "validate"], "validate"),
+    "execute": ("Execute (sync)", ["v1", "execute"], "run"),
+    "start": ("Start (async)", ["v1", "start"], "start"),
+    "validate": ("Validate (dry-run)", ["v1", "validate"], "validate"),
 }
 
 
@@ -174,7 +174,7 @@ def collect_local_urls(value: Any, acc: list[str] | None = None) -> list[str]:
     return acc
 
 
-# --- callback urls (async /pipeline/start only) ----------------------------
+# --- callback urls (async /start only) --------------------------------------
 
 CALLBACK_URL_ENV_VAR = "CALLBACK_URL"
 
@@ -237,10 +237,10 @@ def build_run_body(
     inputs: Any,
     callback_urls: list[str] | None = None,
 ) -> str:
-    """Body for /pipeline/execute and /start: pipe_code + mthds_contents + inputs.
+    """Body for /execute and /start: pipe_code + mthds_contents + inputs.
 
-    The async /pipeline/start adds ``callback_urls`` — the webhook(s) the runner
-    POSTs the finished result to. It is omitted for the sync /pipeline/execute.
+    The async /start adds ``callback_urls`` — the webhook(s) the runner
+    POSTs the finished result to. It is omitted for the sync /execute.
     """
     body: dict[str, Any] = {}
     if pipe_code:
@@ -388,7 +388,7 @@ def main() -> None:
         action="append",
         metavar="URL",
         help=(
-            "Webhook URL for the async /pipeline/start callback (repeatable; only used by the start "
+            "Webhook URL for the async /start callback (repeatable; only used by the start "
             "endpoint). Falls back to CALLBACK_URL in the environment / .env. Required whenever start "
             "is the endpoint being built or run."
         ),
@@ -404,7 +404,7 @@ def main() -> None:
         default="both",
         help=(
             "Which endpoint(s) to target (default: both = execute + start). 'validate' hits "
-            "/api/v1/validate — an inference-free dry-run that parses, loads, and dry-runs every pipe "
+            "/v1/validate — an inference-free dry-run that parses, loads, and dry-runs every pipe "
             "(no pipe_code/inputs, no cost). For --run, 'both' runs execute (sync)."
         ),
     )
@@ -454,7 +454,7 @@ def main() -> None:
             "or pass --pipe <pipe_code>."
         )
 
-    # callback_urls belongs to the async /pipeline/start endpoint only. Resolve it
+    # callback_urls belongs to the async /start endpoint only. Resolve it
     # from --callback-url, then CALLBACK_URL (environment or .env). If start is in
     # play and none is found, stop and ask the user for one.
     callback_urls: list[str] = []
@@ -462,7 +462,7 @@ def main() -> None:
         callback_urls = resolve_callback_urls(args.callback_url)
         if not callback_urls:
             fail(
-                "the async /pipeline/start endpoint requires callback_urls, but none was found. "
+                "the async /start endpoint requires callback_urls, but none was found. "
                 "Pass --callback-url <https-url>, or set CALLBACK_URL in your .env. If you don't "
                 "have one, ask the user for a callback URL (e.g. a https://webhook.site/... endpoint)."
             )
@@ -496,7 +496,7 @@ def main() -> None:
     if needs_start:
         print(f"callback:    {', '.join(callback_urls)}")
     if needs_validate:
-        print(f"validate:    POST /api/v1/validate (no inference) — allow_signatures={args.allow_signatures}")
+        print(f"validate:    POST /v1/validate (no inference) — allow_signatures={args.allow_signatures}")
     if local_url_warnings:
         warn_target = "the API" if mode in ("run", "curl") else "Postman"
         print("\nWARNING: inputs reference local (non-http) url(s) — file uploads are out of scope.")

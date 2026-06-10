@@ -49,6 +49,9 @@ jobs:
       - name: Run mypy merge check
         run: make merge-check-mypy
 
+      - name: Check committed OpenAPI artifact for drift
+        run: make openapi-check
+
 # --------------------------------------------------------------------------
 # 2.  Aggregator job — the *single* required status check
 # --------------------------------------------------------------------------

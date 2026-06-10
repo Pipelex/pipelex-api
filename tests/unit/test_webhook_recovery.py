@@ -2,10 +2,10 @@
 
 The API surfaces a pipelex `ErrorReport` to clients along two paths:
 
-1. The **synchronous HTTP path** — `POST /pipeline/execute` (and every other
+1. The **synchronous HTTP path** — `POST /execute` (and every other
    route that propagates a `PipelexError`) renders the report via
    `build_problem_document(...)` → RFC 7807 `application/problem+json`.
-2. The **asynchronous webhook path** — `POST /pipeline/start` schedules a
+2. The **asynchronous webhook path** — `POST /start` schedules a
    Temporal workflow; on completion (success or `FAILED`), pipelex's
    `DeliveryExecutor._notify_webhook(...)` posts a JSON payload to the
    caller's callback URL. On `FAILED`, the payload carries
@@ -126,7 +126,7 @@ class TestWebhookRecoveryCrossPath:
         webhook_payload = report.to_dict(disclosure_mode=DisclosureMode.VERBOSE)
         problem_doc = build_problem_document(
             report,
-            instance="/api/v1/pipeline/execute",
+            instance="/v1/execute",
             request_id="REQ_T6",
             disclosure_mode=DisclosureMode.VERBOSE,
         )
@@ -162,7 +162,7 @@ class TestWebhookRecoveryCrossPath:
         webhook_payload = report.to_dict(disclosure_mode=DisclosureMode.VERBOSE)
         problem_doc = build_problem_document(
             report,
-            instance="/api/v1/pipeline/execute",
+            instance="/v1/execute",
             request_id="REQ_T6",
             disclosure_mode=DisclosureMode.VERBOSE,
         )

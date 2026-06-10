@@ -18,7 +18,7 @@ from tests.unit._constants import SIGNATURE_MTHDS
 
 def _build_client() -> TestClient:
     app = FastAPI()
-    app.include_router(api_router, prefix="/api/v1")
+    app.include_router(api_router, prefix="/v1")
     register_exception_handlers(app)
     return TestClient(app)
 
@@ -27,10 +27,10 @@ class TestAllowSignatures:
     @pytest.mark.parametrize(
         ("path", "payload", "expected_error_type"),
         [
-            ("/api/v1/validate", {"mthds_contents": [SIGNATURE_MTHDS]}, "ValidateBundleError"),
-            ("/api/v1/build/runner", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq"}, "SignaturesNotAllowedError"),
-            ("/api/v1/build/inputs", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq"}, "ValidateBundleError"),
-            ("/api/v1/build/output", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq"}, "ValidateBundleError"),
+            ("/v1/validate", {"mthds_contents": [SIGNATURE_MTHDS]}, "ValidateBundleError"),
+            ("/v1/build/runner", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq"}, "SignaturesNotAllowedError"),
+            ("/v1/build/inputs", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq"}, "ValidateBundleError"),
+            ("/v1/build/output", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq"}, "ValidateBundleError"),
         ],
     )
     def test_signatures_rejected_by_default(self, path: str, payload: dict[str, object], expected_error_type: str):
@@ -51,10 +51,10 @@ class TestAllowSignatures:
     @pytest.mark.parametrize(
         ("path", "payload"),
         [
-            ("/api/v1/validate", {"mthds_contents": [SIGNATURE_MTHDS], "allow_signatures": True}),
-            ("/api/v1/build/runner", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq", "allow_signatures": True}),
-            ("/api/v1/build/inputs", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq", "allow_signatures": True}),
-            ("/api/v1/build/output", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq", "allow_signatures": True}),
+            ("/v1/validate", {"mthds_contents": [SIGNATURE_MTHDS], "allow_signatures": True}),
+            ("/v1/build/runner", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq", "allow_signatures": True}),
+            ("/v1/build/inputs", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq", "allow_signatures": True}),
+            ("/v1/build/output", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq", "allow_signatures": True}),
         ],
     )
     def test_signatures_accepted_when_opted_in(self, path: str, payload: dict[str, object]):
@@ -70,7 +70,7 @@ class TestAllowSignatures:
         # generated for the caller pipe.
         client = _build_client()
         response = client.post(
-            "/api/v1/build/runner",
+            "/v1/build/runner",
             json={"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq", "allow_signatures": True},
         )
         assert response.status_code == 200, response.text

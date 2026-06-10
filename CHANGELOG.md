@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### Breaking Changes — MTHDS Protocol alignment (master plan 05, Phase C1)
+
+This server is now the reference implementation of the **[MTHDS Protocol](https://mthds.ai)** (contract nesting: MTHDS Protocol ⊂ Pipelex API ⊂ Pipelex hosted API). Clients on the new SDKs (`mthds` Python/JS protocol releases) require a pipelex-api image carrying these changes — **the minimum image version for the `/v1` surface is this release**; an older image 404s on every `/v1/*` call.
+
+- **Base path: `/api/v1` → `/v1`, no aliases.** The API router now mounts at `/v1` (SDKs compose `{MTHDS_API_URL}/v1/{endpoint}`). Zero `/api/v1` routes remain.
+- **Run routes renamed:** `POST /api/v1/pipeline/execute` → `POST /v1/execute`, `POST /api/v1/pipeline/start` → `POST /v1/start`. `/start` now answers **202 Accepted** (protocol `StartAck`) instead of 200.
+- **Wire fields renamed (D1):** request extra `pipeline_run_id` → `run_id` (client-supplied run ids on `/start` are still accepted — the protocol allows it and `StartAck.run_id` is authoritative); responses serialize `run_id` / `state` instead of `pipeline_run_id` / `pipeline_state`. The pipelex runtime internals keep `pipeline_run_id` — only the wire renames.
+- **`GET /version` replaces `GET /pipelex_version` + `GET /api_version` (both deleted, no alias).** Returns the protocol `VersionInfo`: `{protocol_version, implementation: "pipelex-api", implementation_version, runtime_version}`. PUBLIC — excluded from auth exactly like `/health` (it's the handshake clients use before they have credentials).
+- **Completion-callback payload now carries `run_id`.** The webhook POSTed to `callback_urls` carries the protocol `run_id` field alongside the runtime's existing `pipeline_run_id`/`status` keys; the `X-Completion-Signature` is `HMAC-SHA256(secret, run_id)` (unchanged scheme, renamed input). The `status` → `state` key rename lives in the pipelex runtime's delivery executor and ships with a later pipelex release — receivers should read `run_id` + `status` for now.
+- **Pipelex pinned to 0.33.0** (`PipelexMTHDSProtocol` — the renamed `PipelexRunner` — with protocol methods `execute`/`start`/`validate`/`models`/`version`; `PipelexRunResult`/`PipelexStartAck` response models).
+
+### Added — MTHDS Protocol alignment
+
+- **Committed OpenAPI artifact + drift gate.** `docs/openapi/pipelex-api.openapi.yaml` is the layer-2 contract, exported from the live app via `make openapi-export` and drift-checked in CI via `make openapi-check` (wired into the lint workflow and `make check`). The five protocol routes are tagged `x-mthds-protocol: true`; `/upload` and `/resolve-storage-url` are documented as NON-CONTRACT in their descriptions (kept in the schema for self-hosters' interactive docs).
+- **Protocol conformance suite.** `tests/unit/test_protocol_conformance.py` gates CI on: the five protocol paths under `/v1` (and zero legacy paths), the `RunRequest` anyOf rule (422 on empty body), the public `/version` handshake + shape, client-supplied `run_id` acceptance, and the completion-callback E2E — a local in-test HTTP receiver verifies delivery, the `X-Completion-Signature` HMAC, and the payload's `run_id`/status fields through the real `DeliveryExecutor` code path (Temporal dispatch faked in-process).
+
+### Changed — temporary regression
+
+- **Temporal-enabled `/validate` reverts to the direct in-process implementation.** The one-round-trip worker offload (`wf_dry_validate` → `act_dry_validate`, entry below) depended on a pipelex feature branch that is not part of the pinned pipelex 0.33.0 (MTHDS-protocol branch). `/validate` now always runs `validate_bundle` + best-effort `dry_run_pipeline` in-process (the dry-run leg still dispatches through the configured pipe-run backend when Temporal is enabled — the prior behavior). Same wire contract. Restore the one-round-trip dispatch when a pipelex release carries both the protocol surface and `act_dry_validate`.
+
 ### Changed
 
 - **Temporal-enabled `/validate` now runs as ONE worker round-trip.** When `temporal.is_enabled` is true, the route dispatches the whole job — validation sweep **+** graph dry-run — as the one-step wrapper workflow `wf_dry_validate` (→ the single in-process `act_dry_validate` activity) via pipelex's `dispatch_dry_validate`, instead of running `validate_bundle` API-side and `dry_run_pipeline` as a top-level worker workflow with a tracing-backend round-trip. The worker traces the graph in memory and returns `{status map, graph_spec}` on the activity result; the route re-parses the blueprints and builds `pipe_structures` from a local load-only library acquisition. The wire contract is unchanged on both backends: same 200 `ValidateResponse` envelope, same best-effort `graph_spec` (null when the graph dry-run fails), same RFC 7807 422 carrying `error_type=ValidationError` for the missing-`main_pipe` precondition and `error_type=ValidateBundleError` for validation failures — both with `error_domain=input` (the structured report crosses the activity boundary and the global handler renders it identically). Direct mode (Temporal disabled) is untouched. Requires a pipelex version that ships `act_dry_validate` (newer than v0.32.1).

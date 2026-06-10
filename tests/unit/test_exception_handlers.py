@@ -301,18 +301,18 @@ def _bind_test_user(request: Request) -> None:
 # `request.state` the same way `api.routes.pipelex.pipeline._parse_request`
 # binds them in production.
 _TEST_PIPE_CODE = "echo"
-_TEST_PIPELINE_RUN_ID = "run-00000000-0000-0000-0000-000000000099"
+_TEST_RUN_ID = "run-00000000-0000-0000-0000-000000000099"
 
 
-def _bind_test_pipeline_state(request: Request) -> None:
-    """Set `request.state.pipe_code` / `pipeline_run_id` the same shape `_parse_request` would.
+def _bind_test_run_state(request: Request) -> None:
+    """Set `request.state.pipe_code` / `run_id` the same shape `_parse_request` would.
 
     Stand-in for "the body was parsed and the two identifiers were bound" so
     the error-log enrichment can be exercised against the handler functions
-    without driving a real `/pipeline/execute` body through `_parse_request`.
+    without driving a real `/execute` body through `_parse_request`.
     """
     request.state.pipe_code = _TEST_PIPE_CODE
-    request.state.pipeline_run_id = _TEST_PIPELINE_RUN_ID
+    request.state.run_id = _TEST_RUN_ID
 
 
 @_router.get("/authenticated-config-error")
@@ -336,31 +336,31 @@ async def authenticated_unexpected_error_route(request: Request) -> None:
 
 
 @_router.get("/pipeline-state-pipelex-error")
-async def pipeline_state_pipelex_error_route(request: Request) -> None:
+async def run_state_pipelex_error_route(request: Request) -> None:
     # Stand-in for the production flow: a body went through `_parse_request`
     # (state bound), then pipelex raised a `PipelexError` further down the
     # stack. Exercises `_log_error_report`.
-    _bind_test_pipeline_state(request)
+    _bind_test_run_state(request)
     msg = "the gateway config is missing"
     raise PipelexConfigError(msg)
 
 
 @_router.get("/pipeline-state-api-input-error")
-async def pipeline_state_api_input_error_route(request: Request) -> None:
+async def run_state_api_input_error_route(request: Request) -> None:
     # An API-authored 4xx raised after `_parse_request` bound state — exercises
     # `_log_api_authored_error`.
-    _bind_test_pipeline_state(request)
+    _bind_test_run_state(request)
     raise_validation_error("a caller-side mistake")
 
 
 @_router.get("/pipeline-state-unexpected-error")
-async def pipeline_state_unexpected_error_route(request: Request) -> None:
+async def run_state_unexpected_error_route(request: Request) -> None:
     # An unclassified exception escaping after `_parse_request` bound state —
     # exercises the catch-all `handle_unexpected_error` log path. The most
     # operationally expensive case: by definition the failure was not
     # classifiable upstream, so carrying the pipe-state identifiers is what
     # gives the operator a starting point for debugging.
-    _bind_test_pipeline_state(request)
+    _bind_test_run_state(request)
     msg = "something nobody anticipated"
     raise RuntimeError(msg)
 
@@ -535,7 +535,7 @@ class TestExceptionHandlers:
 
     def test_api_authored_500_emits_structured_error_log(self, mocker: MockerFixture):
         # Without `handle_api_error` logging, an `ApiError`-shaped 500 produces
-        # zero operator output (`/pipelex_version`'s `PackageNotFoundError →
+        # zero operator output (`/version`'s `PackageNotFoundError →
         # raise_internal_server_error` is the canonical silent case). Assert
         # the handler emits one `event=api_error` line at `error` level with
         # the response fields — same shape `_log_error_report` emits for a
@@ -626,8 +626,8 @@ class TestExceptionHandlers:
         rendered = log_spy.error.call_args.args[0]
         assert "user_id=" not in rendered
 
-    def test_pipeline_state_rides_pipelex_error_log(self, mocker: MockerFixture):
-        # `_parse_request` binds `pipe_code` / `pipeline_run_id` on
+    def test_run_state_rides_pipelex_error_log(self, mocker: MockerFixture):
+        # `_parse_request` binds `pipe_code` / `run_id` on
         # `request.state` so a downstream pipelex failure is tied to the
         # specific pipe and run id without each backend frame having to forward
         # them. Same mechanism as `user_id` (request.state + a `_*_of` getter
@@ -639,10 +639,10 @@ class TestExceptionHandlers:
         log_spy.error.assert_called_once()
         rendered = log_spy.error.call_args.args[0]
         assert f"pipe_code={_TEST_PIPE_CODE}" in rendered
-        assert f"pipeline_run_id={_TEST_PIPELINE_RUN_ID}" in rendered
+        assert f"run_id={_TEST_RUN_ID}" in rendered
         assert "error_type=PipelexConfigError" in rendered
 
-    def test_pipeline_state_rides_api_authored_log(self, mocker: MockerFixture):
+    def test_run_state_rides_api_authored_log(self, mocker: MockerFixture):
         # API-authored 4xx surface: `raise_validation_error` raised from a
         # route that has already bound pipe state must ship the same fields,
         # so the operator log is uniform across the validation and the
@@ -653,10 +653,10 @@ class TestExceptionHandlers:
         log_spy.warning.assert_called_once()
         rendered = log_spy.warning.call_args.args[0]
         assert f"pipe_code={_TEST_PIPE_CODE}" in rendered
-        assert f"pipeline_run_id={_TEST_PIPELINE_RUN_ID}" in rendered
+        assert f"run_id={_TEST_RUN_ID}" in rendered
         assert "error_type=ValidationError" in rendered
 
-    def test_pipeline_state_rides_unexpected_error_log(self, mocker: MockerFixture):
+    def test_run_state_rides_unexpected_error_log(self, mocker: MockerFixture):
         # The catch-all 500 is the most operationally expensive case for a
         # missing pipe-state field — by definition the failure was not
         # classifiable upstream, so the identifiers in the log are the
@@ -668,15 +668,15 @@ class TestExceptionHandlers:
         log_spy.error.assert_called_once()
         rendered = log_spy.error.call_args.args[0]
         assert f"pipe_code={_TEST_PIPE_CODE}" in rendered
-        assert f"pipeline_run_id={_TEST_PIPELINE_RUN_ID}" in rendered
+        assert f"run_id={_TEST_RUN_ID}" in rendered
         assert "error_type=RuntimeError" in rendered
 
-    def test_pipeline_state_absent_when_parse_request_did_not_bind(self, mocker: MockerFixture):
+    def test_run_state_absent_when_parse_request_did_not_bind(self, mocker: MockerFixture):
         # A route that didn't go through `_parse_request` (here: `/config-error`,
         # a GET that never touches the body) has no `pipe_code` /
-        # `pipeline_run_id` on `request.state`. The getters return `None` and
+        # `run_id` on `request.state`. The getters return `None` and
         # `emit_error_log` drops `None`-valued fields, so the rendered line
-        # carries no `pipe_code=` or `pipeline_run_id=` token — never
+        # carries no `pipe_code=` or `run_id=` token — never
         # `pipe_code=None`, which would be misleading noise. Same defensive
         # posture as `test_user_id_absent_from_unauthenticated_error_log`.
         log_spy = mocker.patch("api.exception_handlers.log")
@@ -685,7 +685,7 @@ class TestExceptionHandlers:
         log_spy.error.assert_called_once()
         rendered = log_spy.error.call_args.args[0]
         assert "pipe_code=" not in rendered
-        assert "pipeline_run_id=" not in rendered
+        assert "run_id=" not in rendered
 
     def test_request_validation_error_emits_structured_warning_log(self, mocker: MockerFixture):
         # FastAPI's automatic-validation 422 goes through

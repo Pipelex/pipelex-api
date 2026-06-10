@@ -2,7 +2,7 @@
 
 Validate MTHDS content by parsing, loading, and dry-running pipes without executing them.
 
-**Endpoint:** `POST /api/v1/validate`
+**Endpoint:** `POST /v1/validate`
 
 **Request Body:**
 
@@ -85,7 +85,7 @@ If the bundle is invalid, the endpoint returns **HTTP 422** with an [RFC 7807 pr
   "title": "Validation error",
   "status": 422,
   "detail": "Bundle does not declare a main_pipe, which is required for validation",
-  "instance": "/api/v1/validate",
+  "instance": "/v1/validate",
   "error_type": "ValidationError",
   "error_domain": "input",
   "retryable": false,

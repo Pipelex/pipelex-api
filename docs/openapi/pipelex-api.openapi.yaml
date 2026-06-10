@@ -1,0 +1,3039 @@
+# GENERATED FILE — do not edit by hand. Regenerate with `make openapi-export`.
+openapi: 3.1.0
+info:
+  title: Pipelex API
+  summary: The open-source Pipelex runner — implements MTHDS Protocol v0.1.0.
+  description: 'This server implements the [MTHDS Protocol](https://mthds.ai) v0.1.0 (`POST /execute`, `POST /start`, `POST
+    /validate`, `GET /models`, `GET /version` — marked `x-mthds-protocol: true`) plus the Pipelex build tooling extensions
+    (`/build/*`). Contract layering: MTHDS Protocol ⊂ Pipelex API (this server) ⊂ Pipelex hosted API. Routes not in the published
+    contract (`/upload`, `/resolve-storage-url`) are documented as non-contract in their descriptions. All endpoints are served
+    under the `/v1` base path; errors are RFC 7807 `application/problem+json`.'
+  license:
+    name: MIT
+    identifier: MIT
+  version: 0.2.0
+paths:
+  /health:
+    get:
+      tags:
+      - health
+      summary: Get Health
+      operationId: get_health_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Get Health Health Get
+  /v1/version:
+    get:
+      tags:
+      - discovery
+      summary: Get Version
+      description: 'Protocol and implementation versions (MTHDS Protocol `GET /version`).
+
+
+        The handshake clients use for feature detection: `implementation`
+
+        identifies this runner, `implementation_version` is this server package''s
+
+        version, and `runtime_version` is the underlying pipelex runtime version.'
+      operationId: get_version_v1_version_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionInfo'
+      x-mthds-protocol: true
+  /v1/build/inputs:
+    post:
+      tags:
+      - build
+      summary: Build Inputs
+      description: 'Generate example input JSON for a pipe.
+
+
+        `validate_bundle` opens a single library, loads the bundle, and on success leaves it loaded +
+
+        current (the D6 loaded-on-success contract); on failure it tears that library down itself. So
+
+        this route reuses the already-current library directly — no second `open_library` /
+
+        `load_from_blueprints` — and owns the teardown only on the success path it reaches. Scoping the
+
+        sweep to the requested pipe (`dry_run_pipe_codes`) avoids dry-running unrelated sibling pipes.
+
+
+        Pipelex domain failures propagate untouched: the global `PipelexError` handler in
+
+        `api.exception_handlers` turns them into an RFC 7807 problem response.'
+      operationId: build_inputs_v1_build_inputs_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuildInputsRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                title: Response Build Inputs V1 Build Inputs Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/build/output:
+    post:
+      tags:
+      - build
+      summary: Build Output
+      description: 'Generate example output JSON for a pipe.
+
+
+        `validate_bundle` opens a single library, loads the bundle, and on success leaves it loaded +
+
+        current (the D6 loaded-on-success contract); on failure it tears that library down itself. So
+
+        this route reuses the already-current library directly — no second `open_library` /
+
+        `load_from_blueprints` — and owns the teardown only on the success path it reaches. Scoping the
+
+        sweep to the requested pipe (`dry_run_pipe_codes`) avoids dry-running unrelated sibling pipes.
+
+
+        Pipelex domain failures propagate untouched: the global `PipelexError` handler in
+
+        `api.exception_handlers` turns them into an RFC 7807 problem response.'
+      operationId: build_output_v1_build_output_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuildOutputRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                title: Response Build Output V1 Build Output Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/build/runner:
+    post:
+      tags:
+      - build
+      summary: Build Runner
+      description: 'Generate Python runner code for a pipe from MTHDS content.
+
+
+        Pipelex domain failures propagate untouched: the global `PipelexError`
+
+        handler in `api.exception_handlers` turns them into an RFC 7807 problem response. The
+
+        `try`/`finally` guarantees the library is torn down on every path that
+
+        actually opened one — `library_id` stays `None` until `open_library`
+
+        returns, so a failure before that point is a no-op for teardown rather
+
+        than a leak. Matches the pattern in `build/inputs.py` and `build/output.py`.'
+      operationId: build_runner_v1_build_runner_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuildRunnerRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildRunnerResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/execute:
+    post:
+      tags:
+      - run
+      summary: Execute
+      description: 'Execute a method synchronously and return its full output (MTHDS Protocol `POST /execute`).
+
+
+        Pipelex domain failures propagate untouched: the global `PipelexError`
+
+        handler in `api.exception_handlers` turns them into an RFC 7807 problem response.'
+      operationId: execute_v1_execute_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelexRunResult'
+      x-mthds-protocol: true
+  /v1/start:
+    post:
+      tags:
+      - run
+      summary: Start
+      description: 'Start a method asynchronously; returns its run_id immediately (MTHDS Protocol `POST /start`).
+
+
+        Answers `202 Accepted` with a `StartAck`. A client-supplied `run_id` is
+
+        honored (protocol D11: this runner accepts it; `StartAck.run_id` is always
+
+        authoritative). Pipelex domain failures propagate untouched: the global
+
+        `PipelexError` handler in `api.exception_handlers` turns them into an
+
+        RFC 7807 problem response.'
+      operationId: start_v1_start_post
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelexStartAck'
+      x-mthds-protocol: true
+  /v1/validate:
+    post:
+      tags:
+      - validate
+      summary: Validate Mthds
+      description: "Validate MTHDS content by parsing, loading, and dry-running pipes (MTHDS Protocol `POST /validate`).\n\
+        \nRuns `validate_bundle` (sweep) + `dry_run_pipeline` (graph) in-process.\nWhen Temporal is enabled, the dry-run leg\
+        \ dispatches through the configured\npipe-run backend like any other execution.\n\nNOTE: the one-round-trip Temporal\
+        \ offload (`wf_dry_validate` →\n`act_dry_validate`, PR #12) is temporarily reverted — the pinned pipelex\n(0.33.0,\
+        \ MTHDS-protocol branch) does not ship `act_dry_validate`. Restore\nthe dispatch (see git history of this module)\
+        \ once a pipelex release\ncarries both the protocol surface and the dry-validate activity.\n\nResponse contract:\n\
+        - **Success (200):** the `ValidateResponse` envelope — the validated\n  `pipelex_bundle_blueprint`, the best-effort\
+        \ `graph_spec`, per-pipe\n  `pipe_structures`, plus the `success` / `message` flags clients use to\n  gate UI on a\
+        \ known-good bundle.\n- **Failure (422):** RFC 7807 `application/problem+json` — same shape as\n  every other API\
+        \ endpoint. `ValidateBundleError` is a `PipelexError`\n  (`error_domain = INPUT`) and propagates to the global handler\
+        \ in\n  `api.exception_handlers` unchanged. \"Bundle has no `main_pipe`\" is an\n  API-side semantic precondition\
+        \ for this endpoint and is raised via\n  `raise_validation_error`."
+      operationId: validate_mthds_v1_validate_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValidateRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidateResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-mthds-protocol: true
+  /v1/models:
+    get:
+      tags:
+      - agent
+      summary: Get Models
+      description: List available model presets, aliases, waterfalls, and talent mappings (MTHDS Protocol `GET /models`).
+      operationId: get_models_v1_models_get
+      parameters:
+      - name: type
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              type: string
+          - type: 'null'
+          description: 'Filter by model category: llm, extract, img_gen, search'
+          title: Type
+        description: 'Filter by model category: llm, extract, img_gen, search'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Get Models V1 Models Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-mthds-protocol: true
+  /v1/build/concept:
+    post:
+      tags:
+      - agent
+      summary: Build Concept
+      description: 'Convert a JSON concept spec to TOML format.
+
+
+        A malformed spec surfaces as a Pydantic `ValidationError` — an API-owned
+
+        422. Pipelex domain failures propagate untouched to the global
+
+        `PipelexError` handler in `api.exception_handlers`.
+
+
+        Known gap (tracked as `pipelex-changes.md` item #11): a non-dict `structure`
+
+        (`{"structure": "string"}`) or a `structure` field that is neither a string
+
+        nor a dict (`{"structure": {"f": 42}}`) makes `parse_concept_spec` leak a
+
+        bare `AttributeError`/`TypeError` instead of a typed error, so the request
+
+        surfaces as an opaque 500. We deliberately don''t catch those here — they
+
+        are also the signal of a real pipelex programming bug, and a broad route
+
+        catch would mask both. The fix is upstream shape validation in
+
+        `parse_concept_spec`.'
+      operationId: build_concept_v1_build_concept_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuildConceptRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildConceptResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/build/pipe-spec:
+    post:
+      tags:
+      - agent
+      summary: Build Pipe Spec
+      description: 'Convert a JSON pipe spec to TOML format.
+
+
+        Two caller-mistake paths surface as a 422 here: a `ValidationError` from
+
+        Pydantic when the spec shape doesn''t match the chosen pipe type, and a
+
+        `ValueError` from `parse_pipe_spec` when `pipe_type` is not one of the
+
+        known pipe types (documented in `parse_pipe_spec`''s docstring; raised at
+
+        exactly one site). Pipelex domain failures propagate untouched to the
+
+        global `PipelexError` handler in `api.exception_handlers`.'
+      operationId: build_pipe_spec_v1_build_pipe_spec_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuildPipeSpecRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildPipeSpecResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/upload:
+    post:
+      tags:
+      - uploader
+      summary: Upload File
+      description: 'Upload a file to pipelex storage, scoped by user.
+
+
+        NON-CONTRACT: this route is NOT part of the published Pipelex API contract
+
+        (neither the MTHDS Protocol nor the build extensions). It is a deployment
+
+        convenience slated for replacement by the storage redesign — do not build
+
+        new integrations on it.
+
+
+        Accepts base64-encoded file data, stores it via the configured storage provider,
+
+        and returns the pipelex-storage:// URI that pipelex resolves at runtime.'
+      operationId: upload_file_v1_upload_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/resolve-storage-url:
+    post:
+      tags:
+      - storage
+      summary: Resolve Storage Url
+      description: "Resolve a pipelex-storage:// URI to a short-lived presigned URL.\n\nNON-CONTRACT: this route is NOT part\
+        \ of the published Pipelex API contract\n(neither the MTHDS Protocol nor the build extensions). It is a deployment\n\
+        convenience slated for replacement by the storage redesign — do not build\nnew integrations on it.\n\nSecurity:\n\
+        \  1. Requires authenticated user (user_id != \"anonymous\").\n  2. URI format is validated to block path traversal\
+        \ and malformed segments.\n  3. The URI's first path segment must equal the requester's user_id (ownership check).\n\
+        \  4. Fails loud if the storage provider falls back to a non-presigned URL."
+      operationId: resolve_storage_url_v1_resolve_storage_url_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveStorageUrlRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolveStorageUrlResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /:
+    get:
+      summary: Root
+      operationId: root__get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+                title: Response Root  Get
+components:
+  schemas:
+    AspectRatio:
+      type: string
+      enum:
+      - square
+      - landscape_4_3
+      - landscape_3_2
+      - landscape_16_9
+      - landscape_21_9
+      - portrait_3_4
+      - portrait_2_3
+      - portrait_9_16
+      - portrait_9_21
+      title: AspectRatio
+    Background:
+      type: string
+      enum:
+      - transparent
+      - opaque
+      - auto
+      title: Background
+    BuildConceptRequest:
+      properties:
+        spec:
+          additionalProperties: true
+          type: object
+          title: Spec
+          description: JSON concept specification.
+      type: object
+      required:
+      - spec
+      title: BuildConceptRequest
+    BuildConceptResponse:
+      properties:
+        success:
+          type: boolean
+          title: Success
+          description: Whether the operation was successful
+          default: true
+        concept_code:
+          type: string
+          title: Concept Code
+          description: The concept code that was generated
+        toml:
+          type: string
+          title: Toml
+          description: Generated TOML content for the concept
+      type: object
+      required:
+      - concept_code
+      - toml
+      title: BuildConceptResponse
+    BuildInputsRequest:
+      properties:
+        mthds_contents:
+          items:
+            type: string
+          type: array
+          maxItems: 16
+          minItems: 1
+          title: Mthds Contents
+          description: MTHDS contents to load (always an array, even for a single file).
+        allow_signatures:
+          type: boolean
+          title: Allow Signatures
+          description: When true, the validation sweep tolerates unimplemented pipe signatures instead of rejecting the bundle
+            (signatures dry-run trivially by minting a mock). Defaults to false (strict).
+          default: false
+        pipe_code:
+          type: string
+          maxLength: 256
+          minLength: 1
+          title: Pipe Code
+          description: Pipe code to generate inputs JSON for.
+      type: object
+      required:
+      - mthds_contents
+      - pipe_code
+      title: BuildInputsRequest
+    BuildOutputRequest:
+      properties:
+        mthds_contents:
+          items:
+            type: string
+          type: array
+          maxItems: 16
+          minItems: 1
+          title: Mthds Contents
+          description: MTHDS contents to load (always an array, even for a single file).
+        allow_signatures:
+          type: boolean
+          title: Allow Signatures
+          description: When true, the validation sweep tolerates unimplemented pipe signatures instead of rejecting the bundle
+            (signatures dry-run trivially by minting a mock). Defaults to false (strict).
+          default: false
+        pipe_code:
+          type: string
+          maxLength: 256
+          minLength: 1
+          title: Pipe Code
+          description: Pipe code to generate output JSON for.
+        format:
+          $ref: '#/components/schemas/ConceptRepresentationFormat'
+          description: Format to generate output in.
+          default: schema
+      type: object
+      required:
+      - mthds_contents
+      - pipe_code
+      title: BuildOutputRequest
+    BuildPipeSpecRequest:
+      properties:
+        pipe_type:
+          type: string
+          maxLength: 128
+          minLength: 1
+          title: Pipe Type
+          description: The pipe type (e.g. PipeLLM, PipeSequence, etc.).
+        spec:
+          additionalProperties: true
+          type: object
+          title: Spec
+          description: JSON pipe specification.
+      type: object
+      required:
+      - pipe_type
+      - spec
+      title: BuildPipeSpecRequest
+    BuildPipeSpecResponse:
+      properties:
+        success:
+          type: boolean
+          title: Success
+          description: Whether the operation was successful
+          default: true
+        pipe_code:
+          type: string
+          title: Pipe Code
+          description: The pipe code that was generated
+        pipe_type:
+          type: string
+          title: Pipe Type
+          description: The pipe type
+        toml:
+          type: string
+          title: Toml
+          description: Generated TOML content for the pipe
+      type: object
+      required:
+      - pipe_code
+      - pipe_type
+      - toml
+      title: BuildPipeSpecResponse
+    BuildRunnerRequest:
+      properties:
+        mthds_contents:
+          items:
+            type: string
+          type: array
+          maxItems: 16
+          minItems: 1
+          title: Mthds Contents
+          description: MTHDS contents to load (always an array, even for a single file).
+        allow_signatures:
+          type: boolean
+          title: Allow Signatures
+          description: When true, the validation sweep tolerates unimplemented pipe signatures instead of rejecting the bundle
+            (signatures dry-run trivially by minting a mock). Defaults to false (strict).
+          default: false
+        pipe_code:
+          type: string
+          maxLength: 256
+          minLength: 1
+          title: Pipe Code
+          description: Pipe code to generate runner code for.
+      type: object
+      required:
+      - mthds_contents
+      - pipe_code
+      title: BuildRunnerRequest
+    BuildRunnerResponse:
+      properties:
+        python_code:
+          type: string
+          title: Python Code
+          description: Generated Python code for running the workflow
+        pipe_code:
+          type: string
+          title: Pipe Code
+          description: Pipe code that was used
+        success:
+          type: boolean
+          title: Success
+          description: Whether the operation was successful
+          default: true
+        message:
+          type: string
+          title: Message
+          description: Status message
+          default: Runner code generated successfully
+      type: object
+      required:
+      - python_code
+      - pipe_code
+      title: BuildRunnerResponse
+    Concept:
+      properties:
+        code:
+          type: string
+          title: Code
+        domain_code:
+          type: string
+          title: Domain Code
+        description:
+          type: string
+          title: Description
+        structure_class_name:
+          type: string
+          title: Structure Class Name
+        refines:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Refines
+      additionalProperties: false
+      type: object
+      required:
+      - code
+      - domain_code
+      - description
+      - structure_class_name
+      title: Concept
+    ConceptBlueprint:
+      properties:
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+        description:
+          type: string
+          title: Description
+        structure:
+          anyOf:
+          - type: string
+          - additionalProperties:
+              anyOf:
+              - type: string
+              - $ref: '#/components/schemas/ConceptStructureBlueprint'
+            type: object
+          - type: 'null'
+          title: Structure
+        refines:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Refines
+      additionalProperties: false
+      type: object
+      required:
+      - description
+      title: ConceptBlueprint
+    ConceptRepresentationFormat:
+      type: string
+      enum:
+      - json
+      - python
+      - schema
+      title: ConceptRepresentationFormat
+      description: Output format for concept representations.
+    ConceptStructureBlueprint:
+      properties:
+        description:
+          type: string
+          title: Description
+        type:
+          anyOf:
+          - $ref: '#/components/schemas/ConceptStructureBlueprintFieldType'
+          - type: 'null'
+        key_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Key Type
+        value_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Value Type
+        item_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Item Type
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        item_concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Item Concept Ref
+        choices:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Choices
+        default_value:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Default Value
+        required:
+          type: boolean
+          title: Required
+          default: false
+      type: object
+      required:
+      - description
+      title: ConceptStructureBlueprint
+    ConceptStructureBlueprintFieldType:
+      type: string
+      enum:
+      - text
+      - list
+      - dict
+      - integer
+      - boolean
+      - number
+      - date
+      - concept
+      title: ConceptStructureBlueprintFieldType
+    ConstructBlueprint:
+      additionalProperties: true
+      type: object
+    ConstructFieldBlueprint:
+      properties:
+        method:
+          $ref: '#/components/schemas/ConstructFieldMethod'
+        fixed_value:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Fixed Value
+        from_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: From Path
+        template:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Template
+        nested:
+          anyOf:
+          - $ref: '#/components/schemas/ConstructBlueprint'
+          - type: 'null'
+        list_to_dict_keyed_by:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: List To Dict Keyed By
+      additionalProperties: false
+      type: object
+      required:
+      - method
+      title: ConstructFieldBlueprint
+      description: "Blueprint for composing a single field in a StructuredContent.\n\nDefines how a field value is composed\
+        \ using one of 4 methods:\n1. Fixed value: literal string, number, bool, or list\n2. Variable reference (from): path\
+        \ to variable in working memory\n3. Template: Jinja2 template string (with $ preprocessing)\n4. Nested construct:\
+        \ recursive ConstructBlueprint\n\nAttributes:\n    method: The composition method to use\n    fixed_value: Literal\
+        \ value (for FIXED method)\n    from_path: Variable path in working memory (for FROM_VAR method)\n    template: Jinja2\
+        \ template string (for TEMPLATE method)\n    nested: Nested ConstructBlueprint (for NESTED method)\n    list_to_dict_keyed_by:\
+        \ Optional modifier for FROM_VAR method that converts\n        a ListContent/list to dict keyed by the specified attribute\
+        \ name"
+    ConstructFieldMethod:
+      type: string
+      enum:
+      - fixed
+      - from_var
+      - template
+      - nested
+      title: ConstructFieldMethod
+      description: Method used to compose a field value.
+    CostCategory:
+      type: string
+      enum:
+      - input
+      - input_cached
+      - input_non_cached
+      - input_joined
+      - input_audio
+      - output
+      - output_audio
+      - output_reasoning
+      - output_accepted_prediction
+      - output_rejected_prediction
+      title: CostCategory
+    DataInclusionConfig:
+      properties:
+        stuff_json_content:
+          type: boolean
+          title: Stuff Json Content
+        stuff_text_content:
+          type: boolean
+          title: Stuff Text Content
+        stuff_html_content:
+          type: boolean
+          title: Stuff Html Content
+        error_stack_traces:
+          type: boolean
+          title: Error Stack Traces
+        pipe_and_concept_registry:
+          type: boolean
+          title: Pipe And Concept Registry
+      additionalProperties: false
+      type: object
+      required:
+      - stuff_json_content
+      - stuff_text_content
+      - stuff_html_content
+      - error_stack_traces
+      - pipe_and_concept_registry
+      title: DataInclusionConfig
+      description: Controls which data is included in graph outputs.
+    EdgeKind:
+      type: string
+      enum:
+      - control
+      - data
+      - contains
+      - selected_outcome
+      - batch_item
+      - batch_aggregate
+      - parallel_combine
+      title: EdgeKind
+      description: Types of edges in the execution graph.
+    EdgeSpec:
+      properties:
+        id:
+          type: string
+          title: Id
+        source:
+          type: string
+          title: Source
+        target:
+          type: string
+          title: Target
+        kind:
+          $ref: '#/components/schemas/EdgeKind'
+        label:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Label
+        source_stuff_digest:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Stuff Digest
+        target_stuff_digest:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Stuff Digest
+        meta:
+          additionalProperties: true
+          type: object
+          title: Meta
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - source
+      - target
+      - kind
+      title: EdgeSpec
+      description: Specification for an edge in the execution graph.
+    ElaborationMetadata:
+      properties:
+        parent_pipe_code:
+          type: string
+          title: Parent Pipe Code
+        step_role:
+          $ref: '#/components/schemas/StepRole'
+      type: object
+      required:
+      - parent_pipe_code
+      - step_role
+      title: ElaborationMetadata
+      description: Side-table entry recording how a synthetic pipe was generated by the bundle elaborator.
+    ErrorSpec:
+      properties:
+        error_type:
+          type: string
+          title: Error Type
+        message:
+          type: string
+          title: Message
+        stack:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Stack
+      additionalProperties: false
+      type: object
+      required:
+      - error_type
+      - message
+      title: ErrorSpec
+      description: 'Error information for failed nodes.
+
+
+        Stack traces are automatically truncated to MAX_STACK_LENGTH.'
+    ExtractSetting:
+      properties:
+        model:
+          type: string
+          title: Model
+        max_nb_images:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Max Nb Images
+        image_min_size:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Image Min Size
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+      additionalProperties: false
+      type: object
+      required:
+      - model
+      title: ExtractSetting
+    ExtractTokensUsage:
+      properties:
+        model_type:
+          type: string
+          const: extract
+          title: Model Type
+          default: extract
+        job_metadata:
+          $ref: '#/components/schemas/JobMetadata'
+        inference_model_name:
+          type: string
+          title: Inference Model Name
+        unit_costs:
+          additionalProperties:
+            type: number
+          propertyNames:
+            $ref: '#/components/schemas/CostCategory'
+          type: object
+          title: Unit Costs
+        inference_model_id:
+          type: string
+          title: Inference Model Id
+        nb_tokens_by_category:
+          additionalProperties:
+            type: integer
+          propertyNames:
+            $ref: '#/components/schemas/TokenCategory'
+          type: object
+          title: Nb Tokens By Category
+      type: object
+      required:
+      - job_metadata
+      - inference_model_name
+      - unit_costs
+      - inference_model_id
+      - nb_tokens_by_category
+      title: ExtractTokensUsage
+    GraphSpec:
+      properties:
+        graph_id:
+          type: string
+          title: Graph Id
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        pipeline_ref:
+          $ref: '#/components/schemas/PipelineRef'
+        nodes:
+          items:
+            $ref: '#/components/schemas/NodeSpec'
+          type: array
+          title: Nodes
+        edges:
+          items:
+            $ref: '#/components/schemas/EdgeSpec'
+          type: array
+          title: Edges
+        meta:
+          additionalProperties: true
+          type: object
+          title: Meta
+        pipe_registry:
+          additionalProperties:
+            additionalProperties: true
+            type: object
+          type: object
+          title: Pipe Registry
+        concept_registry:
+          additionalProperties:
+            additionalProperties: true
+            type: object
+          type: object
+          title: Concept Registry
+      additionalProperties: false
+      type: object
+      required:
+      - graph_id
+      - created_at
+      title: GraphSpec
+      description: 'The canonical specification for a pipeline execution graph.
+
+
+        This is the top-level model representing a complete run graph.
+
+        It is versioned and designed for JSON serialization.'
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    IOSpec:
+      properties:
+        name:
+          type: string
+          title: Name
+        concept:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept
+        content_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Content Type
+        preview:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Preview
+        size:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Size
+        digest:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Digest
+        data:
+          anyOf:
+          - type: string
+          - additionalProperties: true
+            type: object
+          - items:
+              type: string
+            type: array
+          - items:
+              additionalProperties: true
+              type: object
+            type: array
+          - type: 'null'
+          title: Data
+        data_text:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Data Text
+        data_html:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Data Html
+        extra:
+          additionalProperties: true
+          type: object
+          title: Extra
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      title: IOSpec
+      description: 'Specification for an input or output variable.
+
+
+        Previews are automatically truncated to MAX_PREVIEW_LENGTH to prevent
+
+        accidental storage of large payloads or sensitive data.
+
+
+        The optional `data` field can hold the full serialized content when
+
+        full data capture is enabled (via --graph-full-data CLI option).'
+    ImageFormat:
+      type: string
+      enum:
+      - png
+      - jpeg
+      - webp
+      title: ImageFormat
+    ImgGenSetting:
+      properties:
+        model:
+          type: string
+          title: Model
+        quality:
+          anyOf:
+          - $ref: '#/components/schemas/Quality'
+          - type: 'null'
+        nb_steps:
+          anyOf:
+          - type: integer
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Nb Steps
+        guidance_scale:
+          anyOf:
+          - type: number
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Guidance Scale
+        is_moderated:
+          type: boolean
+          title: Is Moderated
+          default: false
+        safety_tolerance:
+          anyOf:
+          - type: integer
+            maximum: 6.0
+            minimum: 1.0
+          - type: 'null'
+          title: Safety Tolerance
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+      additionalProperties: false
+      type: object
+      required:
+      - model
+      title: ImgGenSetting
+    ImgGenTokensUsage:
+      properties:
+        model_type:
+          type: string
+          const: img_gen
+          title: Model Type
+          default: img_gen
+        job_metadata:
+          $ref: '#/components/schemas/JobMetadata'
+        inference_model_name:
+          type: string
+          title: Inference Model Name
+        unit_costs:
+          additionalProperties:
+            type: number
+          propertyNames:
+            $ref: '#/components/schemas/CostCategory'
+          type: object
+          title: Unit Costs
+        inference_model_id:
+          type: string
+          title: Inference Model Id
+        nb_tokens_by_category:
+          additionalProperties:
+            type: integer
+          propertyNames:
+            $ref: '#/components/schemas/TokenCategory'
+          type: object
+          title: Nb Tokens By Category
+      type: object
+      required:
+      - job_metadata
+      - inference_model_name
+      - unit_costs
+      - inference_model_id
+      - nb_tokens_by_category
+      title: ImgGenTokensUsage
+    JobCategory:
+      type: string
+      enum:
+      - mock_job
+      - llm_job
+      - img_gen_job
+      - jinja2_job
+      - extract_job
+      - search_job
+      title: JobCategory
+    JobMetadata:
+      properties:
+        user_id:
+          type: string
+          title: User Id
+        pipeline_run_id:
+          type: string
+          title: Pipeline Run Id
+        pipe_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pipe Code
+        session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Session Id
+        request_id:
+          anyOf:
+          - type: string
+            maxLength: 128
+            pattern: ^[\x20-\x7E]+$
+          - type: 'null'
+          title: Request Id
+        pipe_run_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pipe Run Id
+        otel_context:
+          anyOf:
+          - $ref: '#/components/schemas/OtelContext'
+          - type: 'null'
+        trace_context:
+          anyOf:
+          - $ref: '#/components/schemas/TraceContext'
+          - type: 'null'
+        content_generation_job_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Content Generation Job Id
+        unit_job_id:
+          anyOf:
+          - $ref: '#/components/schemas/UnitJobId'
+          - type: 'null'
+        job_category:
+          anyOf:
+          - $ref: '#/components/schemas/JobCategory'
+          - type: 'null'
+        is_mock_inference:
+          type: boolean
+          title: Is Mock Inference
+          default: false
+        started_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Started At
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+      type: object
+      required:
+      - user_id
+      - pipeline_run_id
+      title: JobMetadata
+    LLMSetting:
+      properties:
+        model:
+          type: string
+          title: Model
+        temperature:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Temperature
+        max_tokens:
+          anyOf:
+          - type: integer
+          - enum:
+            - auto
+          - type: 'null'
+          title: Max Tokens
+        image_detail:
+          anyOf:
+          - $ref: '#/components/schemas/PromptImageDetail'
+          - type: 'null'
+        prompting_target:
+          anyOf:
+          - $ref: '#/components/schemas/PromptingTarget'
+          - type: 'null'
+        reasoning_effort:
+          anyOf:
+          - $ref: '#/components/schemas/ReasoningEffort'
+          - type: 'null'
+        reasoning_budget:
+          anyOf:
+          - type: integer
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Reasoning Budget
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+      additionalProperties: false
+      type: object
+      required:
+      - model
+      - temperature
+      title: LLMSetting
+    LLMTokensUsage:
+      properties:
+        model_type:
+          type: string
+          const: llm
+          title: Model Type
+          default: llm
+        job_metadata:
+          $ref: '#/components/schemas/JobMetadata'
+        inference_model_name:
+          type: string
+          title: Inference Model Name
+        unit_costs:
+          additionalProperties:
+            type: number
+          propertyNames:
+            $ref: '#/components/schemas/CostCategory'
+          type: object
+          title: Unit Costs
+        inference_model_id:
+          type: string
+          title: Inference Model Id
+        nb_tokens_by_category:
+          additionalProperties:
+            type: integer
+          propertyNames:
+            $ref: '#/components/schemas/TokenCategory'
+          type: object
+          title: Nb Tokens By Category
+      type: object
+      required:
+      - job_metadata
+      - inference_model_name
+      - unit_costs
+      - inference_model_id
+      - nb_tokens_by_category
+      title: LLMTokensUsage
+    ModelReference:
+      type: string
+    ModelReferenceKind:
+      type: string
+      enum:
+      - preset
+      - alias
+      - waterfall
+      - handle
+      title: ModelReferenceKind
+      description: The kind of model reference.
+    NodeIOSpec:
+      properties:
+        inputs:
+          items:
+            $ref: '#/components/schemas/IOSpec'
+          type: array
+          title: Inputs
+        outputs:
+          items:
+            $ref: '#/components/schemas/IOSpec'
+          type: array
+          title: Outputs
+      additionalProperties: false
+      type: object
+      title: NodeIOSpec
+      description: Input/output specification for a node.
+    NodeKind:
+      type: string
+      enum:
+      - pipe_call
+      - controller
+      - operator
+      - input
+      - output
+      - artifact
+      - error
+      title: NodeKind
+      description: Types of nodes in the execution graph.
+    NodeSpec:
+      properties:
+        id:
+          type: string
+          title: Id
+        kind:
+          $ref: '#/components/schemas/NodeKind'
+        pipe_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pipe Code
+        pipe_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pipe Type
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        domain_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Domain Code
+        status:
+          $ref: '#/components/schemas/NodeStatus'
+        timing:
+          anyOf:
+          - $ref: '#/components/schemas/TimingSpec'
+          - type: 'null'
+        io:
+          $ref: '#/components/schemas/NodeIOSpec'
+        error:
+          anyOf:
+          - $ref: '#/components/schemas/ErrorSpec'
+          - type: 'null'
+        tags:
+          additionalProperties:
+            type: string
+          type: object
+          title: Tags
+        metrics:
+          additionalProperties:
+            type: number
+          type: object
+          title: Metrics
+        execution_data:
+          additionalProperties: true
+          type: object
+          title: Execution Data
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - kind
+      - status
+      title: NodeSpec
+      description: 'Specification for a node in the execution graph.
+
+
+        Each node represents a pipe invocation during execution.'
+    NodeStatus:
+      type: string
+      enum:
+      - scheduled
+      - running
+      - succeeded
+      - failed
+      - skipped
+      - canceled
+      title: NodeStatus
+      description: Execution status of a node.
+    OtelContext:
+      properties:
+        trace_id:
+          type: integer
+          title: Trace Id
+          description: 128-bit, derived from pipeline_run_id
+        trace_name:
+          type: string
+          title: Trace Name
+          description: Trace name with pipe_code (for custom telemetry)
+        trace_name_redacted:
+          type: string
+          title: Trace Name Redacted
+          description: Trace name without pipe_code (for Pipelex telemetry)
+        span_id:
+          type: integer
+          title: Span Id
+          description: 64-bit, derived from pipe_run_id
+      additionalProperties: false
+      type: object
+      required:
+      - trace_id
+      - trace_name
+      - trace_name_redacted
+      - span_id
+      title: OtelContext
+      description: OpenTelemetry context for tracing, derived from business IDs.
+    PipeBatchBlueprint:
+      properties:
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+        pipe_category:
+          type: string
+          const: PipeController
+          title: Pipe Category
+          default: PipeController
+        type:
+          type: string
+          const: PipeBatch
+          title: Type
+          default: PipeBatch
+        description:
+          type: string
+          title: Description
+        inputs:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Inputs
+        output:
+          type: string
+          title: Output
+        branch_pipe_code:
+          type: string
+          title: Branch Pipe Code
+        input_list_name:
+          type: string
+          title: Input List Name
+        input_item_name:
+          type: string
+          title: Input Item Name
+      additionalProperties: false
+      type: object
+      required:
+      - description
+      - output
+      - branch_pipe_code
+      - input_list_name
+      - input_item_name
+      title: PipeBatchBlueprint
+    PipeComposeBlueprint:
+      properties:
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+        pipe_category:
+          type: string
+          const: PipeOperator
+          title: Pipe Category
+          default: PipeOperator
+        type:
+          type: string
+          const: PipeCompose
+          title: Type
+          default: PipeCompose
+        description:
+          type: string
+          title: Description
+        inputs:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Inputs
+        output:
+          type: string
+          title: Output
+        template:
+          anyOf:
+          - type: string
+          - $ref: '#/components/schemas/TemplateBlueprint'
+          - type: 'null'
+          title: Template
+        construct:
+          anyOf:
+          - $ref: '#/components/schemas/ConstructBlueprint'
+          - type: 'null'
+      additionalProperties: false
+      type: object
+      required:
+      - description
+      - output
+      title: PipeComposeBlueprint
+    PipeConditionBlueprint:
+      properties:
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+        pipe_category:
+          type: string
+          const: PipeController
+          title: Pipe Category
+          default: PipeController
+        type:
+          type: string
+          const: PipeCondition
+          title: Type
+          default: PipeCondition
+        description:
+          type: string
+          title: Description
+        inputs:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Inputs
+        output:
+          type: string
+          title: Output
+        expression_template:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Expression Template
+        expression:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Expression
+        outcomes:
+          additionalProperties:
+            type: string
+          type: object
+          title: Outcomes
+          x-schema-required: true
+        default_outcome:
+          anyOf:
+          - type: string
+          - $ref: '#/components/schemas/SpecialOutcome'
+          title: Default Outcome
+        add_alias_from_expression_to:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Add Alias From Expression To
+      additionalProperties: false
+      type: object
+      required:
+      - description
+      - output
+      - default_outcome
+      title: PipeConditionBlueprint
+    PipeExtractBlueprint:
+      properties:
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+        pipe_category:
+          type: string
+          const: PipeOperator
+          title: Pipe Category
+          default: PipeOperator
+        type:
+          type: string
+          const: PipeExtract
+          title: Type
+          default: PipeExtract
+        description:
+          type: string
+          title: Description
+        inputs:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Inputs
+        output:
+          type: string
+          title: Output
+        model:
+          anyOf:
+          - $ref: '#/components/schemas/ExtractSetting'
+          - type: string
+          - $ref: '#/components/schemas/ModelReference'
+          - type: 'null'
+          title: Model
+        max_page_images:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Page Images
+        page_image_captions:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Page Image Captions
+        page_views:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Page Views
+        page_views_dpi:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Page Views Dpi
+        render_js:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Render Js
+        include_raw_html:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Include Raw Html
+      additionalProperties: false
+      type: object
+      required:
+      - description
+      - output
+      title: PipeExtractBlueprint
+    PipeFuncBlueprint:
+      properties:
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+        pipe_category:
+          type: string
+          const: PipeOperator
+          title: Pipe Category
+          default: PipeOperator
+        type:
+          type: string
+          const: PipeFunc
+          title: Type
+          default: PipeFunc
+        description:
+          type: string
+          title: Description
+        inputs:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Inputs
+        output:
+          type: string
+          title: Output
+        function_name:
+          type: string
+          title: Function Name
+          description: The name of the function to call.
+      additionalProperties: false
+      type: object
+      required:
+      - description
+      - output
+      - function_name
+      title: PipeFuncBlueprint
+    PipeImgGenBlueprint:
+      properties:
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+        pipe_category:
+          type: string
+          const: PipeOperator
+          title: Pipe Category
+          default: PipeOperator
+        type:
+          type: string
+          const: PipeImgGen
+          title: Type
+          default: PipeImgGen
+        description:
+          type: string
+          title: Description
+        inputs:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Inputs
+        output:
+          type: string
+          title: Output
+        prompt:
+          type: string
+          title: Prompt
+        negative_prompt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Negative Prompt
+        model:
+          anyOf:
+          - $ref: '#/components/schemas/ImgGenSetting'
+          - type: string
+          - $ref: '#/components/schemas/ModelReference'
+          - type: 'null'
+          title: Model
+        aspect_ratio:
+          anyOf:
+          - $ref: '#/components/schemas/AspectRatio'
+          - type: 'null'
+        is_raw:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Raw
+        seed:
+          anyOf:
+          - type: integer
+          - type: string
+            const: auto
+          - type: 'null'
+          title: Seed
+        background:
+          anyOf:
+          - $ref: '#/components/schemas/Background'
+          - type: 'null'
+        output_format:
+          anyOf:
+          - $ref: '#/components/schemas/ImageFormat'
+          - type: 'null'
+      additionalProperties: false
+      type: object
+      required:
+      - description
+      - output
+      - prompt
+      title: PipeImgGenBlueprint
+    PipeLLMBlueprint:
+      properties:
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+        pipe_category:
+          type: string
+          const: PipeOperator
+          title: Pipe Category
+          default: PipeOperator
+        type:
+          type: string
+          const: PipeLLM
+          title: Type
+          default: PipeLLM
+        description:
+          type: string
+          title: Description
+        inputs:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Inputs
+        output:
+          type: string
+          title: Output
+        model:
+          anyOf:
+          - $ref: '#/components/schemas/LLMSetting'
+          - type: string
+          - $ref: '#/components/schemas/ModelReference'
+          - type: 'null'
+          title: Model
+        model_to_structure:
+          anyOf:
+          - $ref: '#/components/schemas/LLMSetting'
+          - type: string
+          - $ref: '#/components/schemas/ModelReference'
+          - type: 'null'
+          title: Model To Structure
+        system_prompt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: System Prompt
+        prompt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Prompt
+        structuring_method:
+          anyOf:
+          - $ref: '#/components/schemas/StructuringMethod'
+          - type: 'null'
+      additionalProperties: false
+      type: object
+      required:
+      - description
+      - output
+      title: PipeLLMBlueprint
+    PipeOutput:
+      properties:
+        working_memory:
+          $ref: '#/components/schemas/WorkingMemory'
+        pipeline_run_id:
+          type: string
+          title: Pipeline Run Id
+          default: untitled
+        working_memory_raw:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Working Memory Raw
+        graph_spec:
+          anyOf:
+          - $ref: '#/components/schemas/GraphSpec'
+          - type: 'null'
+        graph_assembly_error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Graph Assembly Error
+        tokens_usages:
+          anyOf:
+          - items:
+              oneOf:
+              - $ref: '#/components/schemas/LLMTokensUsage'
+              - $ref: '#/components/schemas/ImgGenTokensUsage'
+              - $ref: '#/components/schemas/ExtractTokensUsage'
+              - $ref: '#/components/schemas/SearchTokensUsage'
+              discriminator:
+                propertyName: model_type
+                mapping:
+                  extract: '#/components/schemas/ExtractTokensUsage'
+                  img_gen: '#/components/schemas/ImgGenTokensUsage'
+                  llm: '#/components/schemas/LLMTokensUsage'
+                  search: '#/components/schemas/SearchTokensUsage'
+            type: array
+          - type: 'null'
+          title: Tokens Usages
+        usage_assembly_error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Usage Assembly Error
+      additionalProperties: false
+      type: object
+      title: PipeOutput
+    PipeParallelBlueprint:
+      properties:
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+        pipe_category:
+          type: string
+          const: PipeController
+          title: Pipe Category
+          default: PipeController
+        type:
+          type: string
+          const: PipeParallel
+          title: Type
+          default: PipeParallel
+        description:
+          type: string
+          title: Description
+        inputs:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Inputs
+        output:
+          type: string
+          title: Output
+        branches:
+          items:
+            $ref: '#/components/schemas/SubPipeBlueprint'
+          type: array
+          title: Branches
+        add_each_output:
+          type: boolean
+          title: Add Each Output
+          default: false
+        combined_output:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Combined Output
+      additionalProperties: false
+      type: object
+      required:
+      - description
+      - output
+      - branches
+      title: PipeParallelBlueprint
+    PipeSearchBlueprint:
+      properties:
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+        pipe_category:
+          type: string
+          const: PipeOperator
+          title: Pipe Category
+          default: PipeOperator
+        type:
+          type: string
+          const: PipeSearch
+          title: Type
+          default: PipeSearch
+        description:
+          type: string
+          title: Description
+        inputs:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Inputs
+        output:
+          type: string
+          title: Output
+        prompt:
+          type: string
+          title: Prompt
+        model:
+          anyOf:
+          - $ref: '#/components/schemas/SearchSetting'
+          - type: string
+          - $ref: '#/components/schemas/ModelReference'
+          - type: 'null'
+          title: Model
+        include_images:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Include Images
+        max_results:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Results
+        from_date:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: From Date
+        to_date:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: To Date
+        include_domains:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Include Domains
+        exclude_domains:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Exclude Domains
+      additionalProperties: false
+      type: object
+      required:
+      - description
+      - output
+      - prompt
+      title: PipeSearchBlueprint
+    PipeSequenceBlueprint:
+      properties:
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+        pipe_category:
+          type: string
+          const: PipeController
+          title: Pipe Category
+          default: PipeController
+        type:
+          type: string
+          const: PipeSequence
+          title: Type
+          default: PipeSequence
+        description:
+          type: string
+          title: Description
+        inputs:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Inputs
+        output:
+          type: string
+          title: Output
+        steps:
+          items:
+            $ref: '#/components/schemas/SubPipeBlueprint'
+          type: array
+          title: Steps
+      additionalProperties: false
+      type: object
+      required:
+      - description
+      - output
+      - steps
+      title: PipeSequenceBlueprint
+    PipeSignatureBlueprint:
+      properties:
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+        pipe_category:
+          type: string
+          const: PipeSignature
+          title: Pipe Category
+          default: PipeSignature
+        type:
+          type: string
+          const: PipeSignature
+          title: Type
+          default: PipeSignature
+        description:
+          type: string
+          title: Description
+        inputs:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Inputs
+        output:
+          type: string
+          title: Output
+        signature_for:
+          anyOf:
+          - $ref: '#/components/schemas/PipeType'
+          - type: 'null'
+          description: Intended downstream pipe type when this signature is implemented (optional hint for agents).
+      additionalProperties: false
+      type: object
+      required:
+      - description
+      - output
+      title: PipeSignatureBlueprint
+      description: 'Contract-only pipe blueprint.
+
+
+        A `PipeSignature` declares inputs and output but has no implementation. It exists so
+
+        that an in-progress pipeline can be validated (dry-run mocks the declared output)
+
+        before all its pipes are implemented.'
+    PipeStructureBlueprint:
+      properties:
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+        pipe_category:
+          type: string
+          const: PipeOperator
+          title: Pipe Category
+          default: PipeOperator
+        type:
+          type: string
+          const: PipeStructure
+          title: Type
+          default: PipeStructure
+        description:
+          type: string
+          title: Description
+        inputs:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Inputs
+        output:
+          type: string
+          title: Output
+        model:
+          anyOf:
+          - $ref: '#/components/schemas/LLMSetting'
+          - type: string
+          - $ref: '#/components/schemas/ModelReference'
+          - type: 'null'
+          title: Model
+      additionalProperties: false
+      type: object
+      required:
+      - description
+      - output
+      title: PipeStructureBlueprint
+    PipeType:
+      type: string
+      enum:
+      - PipeFunc
+      - PipeImgGen
+      - PipeCompose
+      - PipeLLM
+      - PipeExtract
+      - PipeSearch
+      - PipeStructure
+      - PipeBatch
+      - PipeCondition
+      - PipeParallel
+      - PipeSequence
+      - PipeSignature
+      title: PipeType
+    PipelexBundleBlueprint:
+      properties:
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+        domain:
+          type: string
+          title: Domain
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        system_prompt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: System Prompt
+        main_pipe:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Main Pipe
+        concept:
+          anyOf:
+          - additionalProperties:
+              anyOf:
+              - $ref: '#/components/schemas/ConceptBlueprint'
+              - type: string
+            type: object
+          - type: 'null'
+          title: Concept
+        pipe:
+          anyOf:
+          - additionalProperties:
+              oneOf:
+              - $ref: '#/components/schemas/PipeFuncBlueprint'
+              - $ref: '#/components/schemas/PipeImgGenBlueprint'
+              - $ref: '#/components/schemas/PipeComposeBlueprint'
+              - $ref: '#/components/schemas/PipeLLMBlueprint'
+              - $ref: '#/components/schemas/PipeExtractBlueprint'
+              - $ref: '#/components/schemas/PipeSearchBlueprint'
+              - $ref: '#/components/schemas/PipeStructureBlueprint'
+              - $ref: '#/components/schemas/PipeBatchBlueprint'
+              - $ref: '#/components/schemas/PipeConditionBlueprint'
+              - $ref: '#/components/schemas/PipeParallelBlueprint'
+              - $ref: '#/components/schemas/PipeSequenceBlueprint'
+              - $ref: '#/components/schemas/PipeSignatureBlueprint'
+              discriminator:
+                propertyName: type
+                mapping:
+                  PipeBatch: '#/components/schemas/PipeBatchBlueprint'
+                  PipeCompose: '#/components/schemas/PipeComposeBlueprint'
+                  PipeCondition: '#/components/schemas/PipeConditionBlueprint'
+                  PipeExtract: '#/components/schemas/PipeExtractBlueprint'
+                  PipeFunc: '#/components/schemas/PipeFuncBlueprint'
+                  PipeImgGen: '#/components/schemas/PipeImgGenBlueprint'
+                  PipeLLM: '#/components/schemas/PipeLLMBlueprint'
+                  PipeParallel: '#/components/schemas/PipeParallelBlueprint'
+                  PipeSearch: '#/components/schemas/PipeSearchBlueprint'
+                  PipeSequence: '#/components/schemas/PipeSequenceBlueprint'
+                  PipeSignature: '#/components/schemas/PipeSignatureBlueprint'
+                  PipeStructure: '#/components/schemas/PipeStructureBlueprint'
+            type: object
+          - type: 'null'
+          title: Pipe
+      additionalProperties: false
+      type: object
+      required:
+      - domain
+      title: PipelexBundleBlueprint
+    PipelexRunResult:
+      properties:
+        run_id:
+          type: string
+          title: Run Id
+        created_at:
+          type: string
+          title: Created At
+        state:
+          $ref: '#/components/schemas/RunState'
+        finished_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Finished At
+        main_stuff_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Main Stuff Name
+        pipe_output:
+          $ref: '#/components/schemas/PipeOutput'
+      type: object
+      required:
+      - run_id
+      - created_at
+      - state
+      - pipe_output
+      title: PipelexRunResult
+    PipelexStartAck:
+      properties:
+        run_id:
+          type: string
+          title: Run Id
+        created_at:
+          type: string
+          title: Created At
+        state:
+          $ref: '#/components/schemas/RunState'
+        finished_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Finished At
+        main_stuff_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Main Stuff Name
+        pipe_output:
+          anyOf:
+          - $ref: '#/components/schemas/PipeOutput'
+          - type: 'null'
+        workflow_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Workflow Id
+      type: object
+      required:
+      - run_id
+      - created_at
+      - state
+      title: PipelexStartAck
+    PipelineRef:
+      properties:
+        domain:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Domain
+        main_pipe:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Main Pipe
+        entrypoint:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Entrypoint
+      additionalProperties: false
+      type: object
+      title: PipelineRef
+      description: Reference to the pipeline that was executed.
+    PromptImageDetail:
+      type: string
+      enum:
+      - high
+      - low
+      - auto
+      title: PromptImageDetail
+    PromptingTarget:
+      type: string
+      enum:
+      - openai
+      - anthropic
+      - mistral
+      - gemini
+      - fal
+      title: PromptingTarget
+    Quality:
+      type: string
+      enum:
+      - low
+      - medium
+      - high
+      title: Quality
+    ReasoningEffort:
+      type: string
+      enum:
+      - none
+      - minimal
+      - low
+      - medium
+      - high
+      - xhigh
+      - max
+      title: ReasoningEffort
+    ResolveStorageUrlRequest:
+      properties:
+        uri:
+          type: string
+          maxLength: 512
+          title: Uri
+          description: pipelex-storage:// URI to resolve
+      additionalProperties: false
+      type: object
+      required:
+      - uri
+      title: ResolveStorageUrlRequest
+    ResolveStorageUrlResponse:
+      properties:
+        url:
+          type: string
+          title: Url
+          description: Short-lived presigned URL, fetchable directly by the browser
+        expires_at:
+          type: string
+          format: date-time
+          title: Expires At
+          description: UTC expiry timestamp of the presigned URL
+        content_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Content Type
+          description: Content type guessed from the URI extension
+      type: object
+      required:
+      - url
+      - expires_at
+      title: ResolveStorageUrlResponse
+    RunState:
+      type: string
+      enum:
+      - STARTED
+      - RUNNING
+      - COMPLETED
+      - FAILED
+      - CANCELLED
+      - ERROR
+      title: RunState
+      description: Run lifecycle state — mirrors the protocol's `RunState` enum.
+    SearchSetting:
+      properties:
+        model:
+          type: string
+          title: Model
+        include_images:
+          type: boolean
+          title: Include Images
+          default: false
+        include_inline_citations:
+          type: boolean
+          title: Include Inline Citations
+          default: true
+        max_results:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Max Results
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+      additionalProperties: false
+      type: object
+      required:
+      - model
+      title: SearchSetting
+    SearchTokensUsage:
+      properties:
+        model_type:
+          type: string
+          const: search
+          title: Model Type
+          default: search
+        job_metadata:
+          $ref: '#/components/schemas/JobMetadata'
+        inference_model_name:
+          type: string
+          title: Inference Model Name
+        unit_costs:
+          additionalProperties:
+            type: number
+          propertyNames:
+            $ref: '#/components/schemas/CostCategory'
+          type: object
+          title: Unit Costs
+        inference_model_id:
+          type: string
+          title: Inference Model Id
+        nb_tokens_by_category:
+          additionalProperties:
+            type: integer
+          propertyNames:
+            $ref: '#/components/schemas/TokenCategory'
+          type: object
+          title: Nb Tokens By Category
+      type: object
+      required:
+      - job_metadata
+      - inference_model_name
+      - unit_costs
+      - inference_model_id
+      - nb_tokens_by_category
+      title: SearchTokensUsage
+    SpecialOutcome:
+      type: string
+      enum:
+      - fail
+      - continue
+      title: SpecialOutcome
+    StepRole:
+      type: string
+      enum:
+      - draft_text
+      - structure
+      title: StepRole
+      description: 'Role played by a synthetic pipe inside an elaborated bundle.
+
+
+        DRAFT_TEXT: step-1 of a `preliminary_text` elaboration — the pipe that produces the draft Text.
+
+        STRUCTURE: step-2 of a `preliminary_text` elaboration — the pipe that turns the draft Text into the structured concept.'
+    StructuringMethod:
+      type: string
+      enum:
+      - direct
+      - preliminary_text
+      title: StructuringMethod
+    Stuff:
+      properties:
+        stuff_code:
+          type: string
+          title: Stuff Code
+        stuff_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Stuff Name
+        concept:
+          $ref: '#/components/schemas/Concept'
+        content:
+          $ref: '#/components/schemas/StuffContent'
+      additionalProperties: false
+      type: object
+      required:
+      - stuff_code
+      - concept
+      - content
+      title: Stuff
+    StuffContent:
+      properties: {}
+      type: object
+      title: StuffContent
+    SubPipeBlueprint:
+      properties:
+        pipe:
+          type: string
+          title: Pipe
+        result:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Result
+        nb_output:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Nb Output
+        multiple_output:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Multiple Output
+        batch_over:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Batch Over
+        batch_as:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Batch As
+      additionalProperties: false
+      type: object
+      required:
+      - pipe
+      title: SubPipeBlueprint
+    TagStyle:
+      type: string
+      enum:
+      - no_tag
+      - ticks
+      - xml
+      - square_brackets
+      title: TagStyle
+    TemplateBlueprint:
+      properties:
+        template:
+          type: string
+          title: Template
+          description: Raw template source
+        templating_style:
+          anyOf:
+          - $ref: '#/components/schemas/TemplatingStyle'
+          - type: 'null'
+          description: Style of prompting to use (typically for different LLMs)
+        category:
+          $ref: '#/components/schemas/TemplateCategory'
+          description: Category of the template (could also be HTML, MARKDOWN, MERMAID, etc.), influences template rendering
+            rules
+        extra_context:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Extra Context
+          description: Additional context variables for template rendering
+      type: object
+      required:
+      - template
+      - category
+      title: TemplateBlueprint
+    TemplateCategory:
+      type: string
+      enum:
+      - basic
+      - expression
+      - html
+      - markdown
+      - mermaid
+      - llm_prompt
+      - img_gen_prompt
+      title: TemplateCategory
+    TemplatingStyle:
+      properties:
+        tag_style:
+          $ref: '#/components/schemas/TagStyle'
+        text_format:
+          $ref: '#/components/schemas/TextFormat'
+          default: plain
+      type: object
+      required:
+      - tag_style
+      title: TemplatingStyle
+    TextFormat:
+      type: string
+      enum:
+      - plain
+      - markdown
+      - html
+      - json
+      title: TextFormat
+    TimingSpec:
+      properties:
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        ended_at:
+          type: string
+          format: date-time
+          title: Ended At
+        duration:
+          type: number
+          title: Duration
+          description: Duration in seconds, included in JSON serialization.
+          readOnly: true
+      additionalProperties: false
+      type: object
+      required:
+      - started_at
+      - ended_at
+      - duration
+      title: TimingSpec
+      description: Timing information for a node execution.
+    TokenCategory:
+      type: string
+      enum:
+      - input
+      - input_cached
+      - input_non_cached
+      - input_joined
+      - input_audio
+      - output
+      - output_audio
+      - output_reasoning
+      - output_accepted_prediction
+      - output_rejected_prediction
+      title: TokenCategory
+    TraceContext:
+      properties:
+        graph_id:
+          type: string
+          title: Graph Id
+          description: Unique identifier for this execution trace (typically the pipeline run id)
+        tracer_key:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tracer Key
+          description: Lookup key in GraphTracerManager. Defaults to graph_id when None.
+        parent_node_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Parent Node Id
+          description: Node ID of the parent pipe, None for root
+        node_sequence:
+          type: integer
+          title: Node Sequence
+          description: Monotonic counter for generating node IDs
+          default: 0
+        data_inclusion:
+          $ref: '#/components/schemas/DataInclusionConfig'
+          description: Controls which data formats to capture
+        emit_graph_events:
+          type: boolean
+          title: Emit Graph Events
+          description: Whether to emit graph (node/edge) trace events
+          default: true
+        emit_usage_events:
+          type: boolean
+          title: Emit Usage Events
+          description: Whether to emit usage (cost) trace events
+          default: true
+      additionalProperties: false
+      type: object
+      required:
+      - graph_id
+      - data_inclusion
+      title: TraceContext
+      description: "Serializable per-execution trace context passed through JobMetadata.\n\nTracks parent-child relationships\
+        \ as pipes execute, building the node tree that\nboth the graph stream (edges) and the usage stream (cost attribution)\
+        \ read from.\nDesigned to be serializable for distributed environments where contextvars don't work.\n\nAttributes:\n\
+        \    graph_id: Unique identifier for this execution trace (typically pipeline_run_id).\n    parent_node_id: The node\
+        \ ID of the parent pipe (None for root). The shared anchor —\n        read by the graph stream (edges) and the usage\
+        \ stream (cost attribution).\n    node_sequence: Monotonic counter for generating unique node IDs within this trace.\n\
+        \    data_inclusion: Configuration controlling which data formats to capture in IOSpec fields.\n    emit_graph_events:\
+        \ Whether graph (node/edge) trace events should be emitted for this run\n        (driven by ``is_generate_graph``).\
+        \ The in-memory tracer always accumulates; this only\n        gates event emission onto the shared event-log transport.\n\
+        \    emit_usage_events: Whether usage (cost) trace events should be emitted for this run\n        (driven by ``is_generate_usage``).\
+        \ Independent of ``emit_graph_events`` so cost reporting\n        survives ``--no-graph``."
+    UnitJobId:
+      type: string
+      enum:
+      - llm_gen_text
+      - llm_gen_object
+      - img_gen_text_to_image
+      - extract_pages
+      - search_sourced_answer
+      - search_structured
+      title: UnitJobId
+    UploadRequest:
+      properties:
+        filename:
+          type: string
+          maxLength: 512
+          title: Filename
+          description: Original filename with extension (e.g. 'resume.pdf')
+        data:
+          type: string
+          maxLength: 69905071
+          title: Data
+          description: File content as base64-encoded string (max 50 MiB decoded)
+        content_type:
+          anyOf:
+          - type: string
+            maxLength: 255
+          - type: 'null'
+          title: Content Type
+          description: MIME type (e.g. 'application/pdf')
+      additionalProperties: false
+      type: object
+      required:
+      - filename
+      - data
+      title: UploadRequest
+    UploadResponse:
+      properties:
+        uri:
+          type: string
+          title: Uri
+          description: pipelex-storage:// URI for the uploaded file
+        filename:
+          type: string
+          title: Filename
+          description: Original filename
+      type: object
+      required:
+      - uri
+      - filename
+      title: UploadResponse
+    ValidateRequest:
+      properties:
+        mthds_contents:
+          items:
+            type: string
+          type: array
+          maxItems: 16
+          minItems: 1
+          title: Mthds Contents
+          description: MTHDS contents to load (always an array, even for a single file).
+        allow_signatures:
+          type: boolean
+          title: Allow Signatures
+          description: When true, the validation sweep tolerates unimplemented pipe signatures instead of rejecting the bundle
+            (signatures dry-run trivially by minting a mock). Defaults to false (strict).
+          default: false
+      type: object
+      required:
+      - mthds_contents
+      title: ValidateRequest
+      description: '`/validate` needs nothing beyond the shared `mthds_contents` + `allow_signatures` payload.'
+    ValidateResponse:
+      properties:
+        mthds_contents:
+          items:
+            type: string
+          type: array
+          title: Mthds Contents
+          description: The MTHDS contents that were validated
+        pipelex_bundle_blueprint:
+          $ref: '#/components/schemas/PipelexBundleBlueprint'
+          description: Generated pipelex bundle blueprint
+        graph_spec:
+          anyOf:
+          - $ref: '#/components/schemas/GraphSpec'
+          - type: 'null'
+          description: Graph spec from the dry run
+        pipe_structures:
+          additionalProperties: true
+          type: object
+          title: Pipe Structures
+          description: Per-pipe input/output JSON Schema structures
+        success:
+          type: boolean
+          title: Success
+          description: Whether the validation was successful
+          default: true
+        message:
+          type: string
+          title: Message
+          description: Status message
+          default: MTHDS content validated successfully
+      type: object
+      required:
+      - mthds_contents
+      - pipelex_bundle_blueprint
+      title: ValidateResponse
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    VersionInfo:
+      properties:
+        protocol_version:
+          type: string
+          title: Protocol Version
+        implementation:
+          type: string
+          title: Implementation
+        implementation_version:
+          type: string
+          title: Implementation Version
+        runtime_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Runtime Version
+      type: object
+      required:
+      - protocol_version
+      - implementation
+      - implementation_version
+      title: VersionInfo
+      description: 'Protocol + implementation versions — `GET /version` (always public).
+
+
+        The handshake clients use for feature detection: `implementation`
+
+        identifies the runner, and hosted extensions (durable runs, `method_id`)
+
+        light up based on what the server advertises.'
+    WorkingMemory:
+      properties:
+        root:
+          additionalProperties:
+            $ref: '#/components/schemas/Stuff'
+          type: object
+          title: Root
+        aliases:
+          additionalProperties:
+            type: string
+          type: object
+          title: Aliases
+      additionalProperties: false
+      type: object
+      title: WorkingMemory

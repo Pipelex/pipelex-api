@@ -12,7 +12,7 @@ A failure response looks like this:
   "title": "Validation error",
   "status": 422,
   "detail": "Bundle does not declare a main_pipe, which is required for validation",
-  "instance": "/api/v1/validate",
+  "instance": "/v1/validate",
   "error_type": "ValidationError",
   "error_domain": "input",
   "retryable": false,
@@ -89,7 +89,7 @@ When opening an issue, include the `request_id` from the response (or response h
 ### 422 — input validation failure
 
 ```http
-POST /api/v1/validate
+POST /v1/validate
 {"mthds_contents": ["domain = \"x\"\ndescription = \"x\"\n"]}
 ```
 
@@ -103,7 +103,7 @@ X-Request-ID: 9f2c1ab3-…
   "title": "Validation error",
   "status": 422,
   "detail": "Bundle does not declare a main_pipe, which is required for validation",
-  "instance": "/api/v1/validate",
+  "instance": "/v1/validate",
   "error_type": "ValidationError",
   "error_domain": "input",
   "retryable": false,
@@ -123,7 +123,7 @@ X-Request-ID: 9f2c1ab3-…
   "title": "Environment variable not set",
   "status": 500,
   "detail": "Missing required environment variable: COMPLETION_CALLBACK_SECRET",
-  "instance": "/api/v1/pipeline/start",
+  "instance": "/v1/start",
   "error_type": "EnvVarNotFoundError",
   "request_id": "9f2c1ab3-…"
 }
@@ -146,7 +146,7 @@ X-Request-ID: 9f2c1ab3-…
   "title": "Unauthenticated",
   "status": 401,
   "detail": "Missing bearer token.",
-  "instance": "/api/v1/pipeline/execute",
+  "instance": "/v1/execute",
   "error_type": "Unauthenticated",
   "error_domain": "input",
   "retryable": false,
@@ -156,6 +156,6 @@ X-Request-ID: 9f2c1ab3-…
 
 ## Async callbacks (webhook payload)
 
-For [async pipeline runs](pipe-run.md) registering a `callback_url`, the failure payload delivered to the caller's webhook **does not** use this envelope. The webhook body carries the raw `ErrorReport` dict under an `error` key, alongside `pipeline_run_id`, `status`, and the run metadata — a non-HTTP receiver (queue, log shipper) does not necessarily want an RFC 7807 wrapper.
+For [async pipeline runs](pipe-run.md) registering a `callback_url`, the failure payload delivered to the caller's webhook **does not** use this envelope. The webhook body carries the raw `ErrorReport` dict under an `error` key, alongside `run_id` (the protocol field) plus the runtime's legacy `pipeline_run_id` / `status` keys — a non-HTTP receiver (queue, log shipper) does not necessarily want an RFC 7807 wrapper.
 
 The classification fields (`error_type`, `error_domain`, `retryable`, etc.) surface identically on both paths; only the envelope members (`type`, `status`, `detail`, `instance`, `request_id`) are sync-only. See [Pipe Run → Async Completion Callbacks](pipe-run.md) for the full webhook contract.

@@ -1,6 +1,6 @@
 # Pipe Run
 
-Execute pipelines with flexible input formats. Choose between synchronous execution (wait for completion) or asynchronous execution (non-blocking).
+Execute pipelines with flexible input formats. Choose between synchronous execution (wait for completion) or asynchronous execution (non-blocking). Both routes are part of the [MTHDS Protocol](https://mthds.ai) — this server is the protocol's reference implementation.
 
 > **About `mthds_contents` and MTHDS.** An "MTHDS file" is a Pipelex pipeline definition written in TOML (with the `.mthds` extension). The `mthds_contents` field on every endpoint below is a JSON array of those file contents as raw strings — typically `[open("my_pipe.mthds").read()]` from a client. You can either pass a `pipe_code` referring to a pipe already registered on the server, pass `mthds_contents` inline (the array must contain a file with a `main_pipe` property), or both.
 
@@ -8,7 +8,7 @@ Execute pipelines with flexible input formats. Choose between synchronous execut
 
 Execute a Pipelex pipeline with flexible inputs and wait for completion.
 
-**Endpoint:** `POST /api/v1/pipeline/execute`
+**Endpoint:** `POST /v1/execute`
 
 **Request Body:**
 
@@ -45,9 +45,9 @@ Execute a Pipelex pipeline with flexible inputs and wait for completion.
 
 ```json
 {
-  "pipeline_run_id": "abc123...",
+  "run_id": "abc123...",
   "created_at": "2026-01-15T12:00:00Z",
-  "pipeline_state": "COMPLETED",
+  "state": "COMPLETED",
   "finished_at": "2026-01-15T12:00:05Z",
   "main_stuff_name": "result",
   "pipe_output": {
@@ -61,9 +61,9 @@ Execute a Pipelex pipeline with flexible inputs and wait for completion.
 
 **Response Fields:**
 
-- `pipeline_run_id` (string): Unique identifier for the pipeline run.
+- `run_id` (string): Unique identifier for the run.
 - `created_at` (string): ISO timestamp when the pipeline was created.
-- `pipeline_state` (string): One of `"RUNNING"`, `"COMPLETED"`, `"FAILED"`, `"CANCELLED"`, `"ERROR"`, `"STARTED"`.
+- `state` (string): One of `"RUNNING"`, `"COMPLETED"`, `"FAILED"`, `"CANCELLED"`, `"ERROR"`, `"STARTED"`.
 - `finished_at` (string | null): ISO timestamp when the pipeline finished, or `null` if still running.
 - `main_stuff_name` (string | null): Key under `pipe_output.working_memory.root` where the main result lives. Use this to extract the typed output: `pipe_output.working_memory.root[main_stuff_name].content`.
 - `pipe_output` (object): Result of the pipeline execution. Contains `working_memory` with `root` (every named stuff produced during the run) and `aliases` (built-in name mappings such as `main_stuff`).
@@ -76,7 +76,7 @@ Execute a Pipelex pipeline with flexible inputs and wait for completion.
 
 Start a pipeline execution without waiting for completion (non-blocking).
 
-**Endpoint:** `POST /api/v1/pipeline/start`
+**Endpoint:** `POST /v1/start`
 
 **Request Body:**
 
@@ -111,17 +111,18 @@ Start a pipeline execution without waiting for completion (non-blocking).
 
 **Important Notes:**
 
-- This endpoint returns immediately with a `pipeline_run_id`
+- This endpoint answers `202 Accepted` immediately with a `StartAck` carrying the `run_id`
 - The pipeline continues executing in the background
 - `pipe_output` will be `null` in the response (pipeline hasn't completed yet)
+- The request body MAY carry a client-supplied **`run_id`** (max 128 chars): this server honors it, and the `StartAck.run_id` echoes it back. When absent, the server generates one. (`StartAck.run_id` is always authoritative — protocol rule.)
 
-**Response:**
+**Response (202):**
 
 ```json
 {
-  "pipeline_run_id": "abc123...",
+  "run_id": "abc123...",
   "created_at": "2026-01-15T12:00:00Z",
-  "pipeline_state": "STARTED",
+  "state": "STARTED",
   "finished_at": null,
   "main_stuff_name": null,
   "pipe_output": null,
@@ -131,9 +132,9 @@ Start a pipeline execution without waiting for completion (non-blocking).
 
 **Response Fields:**
 
-- `pipeline_run_id` (string): Unique identifier for the pipeline run. Use this to correlate callbacks (see below).
+- `run_id` (string): Unique identifier for the run. Use this to correlate callbacks (see below).
 - `created_at` (string): ISO timestamp when the pipeline was started.
-- `pipeline_state` (string): Always `"STARTED"` from this endpoint — the pipeline is queued, not finished.
+- `state` (string): Always `"STARTED"` from this endpoint — the pipeline is queued, not finished.
 - `finished_at` (null): Always `null`; the pipeline hasn't completed.
 - `main_stuff_name` (null): Always `null`; populated only on the eventual completion callback.
 - `pipe_output` (null): Always `null`; the result isn't ready yet.
@@ -143,7 +144,7 @@ Start a pipeline execution without waiting for completion (non-blocking).
 
 #### Async Completion Callbacks (optional)
 
-`POST /api/v1/pipeline/start` accepts an additional optional field in the request body, **`callback_urls`** — a list of HTTP(S) endpoints the server will POST to once the pipeline finishes.
+`POST /v1/start` accepts an additional optional field in the request body, **`callback_urls`** — a list of HTTP(S) endpoints the server will POST to once the pipeline finishes.
 
 ```json
 {
@@ -155,8 +156,8 @@ Start a pipeline execution without waiting for completion (non-blocking).
 
 When the pipeline completes, each URL in the list receives a POST carrying:
 
-- The result payload in the body
-- An **`X-Completion-Signature`** header — `HMAC-SHA256(secret, pipeline_run_id)` rendered as a hex digest
+- The completion payload in the body: `run_id` (the protocol field), the delivery `status` (`"COMPLETED"` or `"FAILED"`), `result_url` (when results were stored), `error` (the raw `ErrorReport` dict on failure), plus the runtime's legacy `pipeline_run_id` key
+- An **`X-Completion-Signature`** header — `HMAC-SHA256(secret, run_id)` rendered as a hex digest
 
 **Verifying the signature on the receiver side**
 
@@ -167,7 +168,7 @@ import hmac, hashlib
 
 expected = hmac.new(
     SHARED_SECRET.encode("utf-8"),
-    pipeline_run_id.encode("utf-8"),
+    run_id.encode("utf-8"),
     hashlib.sha256,
 ).hexdigest()
 
@@ -179,7 +180,7 @@ The signer (this server) and the verifier (your callback receiver) must share th
 
 **Server-side requirement**
 
-Set the `COMPLETION_CALLBACK_SECRET` environment variable on the API server **only if** you use `callback_urls`. The variable is read lazily — the server boots fine without it, and only requires it when actually signing a callback. If you call `/pipeline/start` with `callback_urls` and the env var isn't set, you'll get a 500 with `EnvVarNotFoundError: Environment variable 'COMPLETION_CALLBACK_SECRET' is required but not set`.
+Set the `COMPLETION_CALLBACK_SECRET` environment variable on the API server **only if** you use `callback_urls`. The variable is read lazily — the server boots fine without it, and only requires it when actually signing a callback. If you call `/start` with `callback_urls` and the env var isn't set, you'll get a 500 with `EnvVarNotFoundError: Environment variable 'COMPLETION_CALLBACK_SECRET' is required but not set`.
 
 The receiver-side secret must be the same value. In typical deployments both sides pull from a shared secrets store (AWS Secrets Manager, Vault, etc.).
 
@@ -486,7 +487,7 @@ The system will:
 
 ### 2.7: File / Document Input
 
-For pipes whose inputs declare `Document`, `Image`, or `PDF` (any URL-bearing native concept), provide a `url` inside `content`. The URL can be public HTTP(S), a `pipelex-storage://` URI (returned by `/api/v1/upload`), or a base64 data URL.
+For pipes whose inputs declare `Document`, `Image`, or `PDF` (any URL-bearing native concept), provide a `url` inside `content`. The URL can be public HTTP(S), a `pipelex-storage://` URI (returned by `/v1/upload`), or a base64 data URL.
 
 ```json
 {

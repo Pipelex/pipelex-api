@@ -1,7 +1,7 @@
 """Shared request/response models for API routes.
 
 These are API-server-only models that wrap or validate fields not covered
-by the upstream `mthds.client.pipeline.PipelineRequest`.
+by the upstream `mthds.client.pipeline.RunRequest`.
 """
 
 from ipaddress import ip_address
@@ -17,7 +17,7 @@ _ALLOWED_CALLBACK_SCHEMES = frozenset({"http", "https"})
 def _is_disallowed_host(host: str) -> bool:
     """True if `host` looks like a private/loopback/link-local address.
 
-    Used to harden /pipeline/start callback_urls against SSRF — a malicious
+    Used to harden /start callback_urls against SSRF — a malicious
     client could otherwise aim webhooks at internal services or cloud metadata
     endpoints (e.g. 169.254.169.254). Best-effort: hostnames that resolve to
     private addresses at fire time aren't blocked here, only literal IPs.
@@ -34,14 +34,15 @@ def _is_disallowed_host(host: str) -> bool:
 
 
 class PipelineApiExtras(BaseModel):
-    """Validates the API-server-only fields on `/pipeline/start` requests.
+    """Validates the API-server-only fields on `/start` requests.
 
-    The upstream `PipelineRequest` model doesn't know about these fields.
+    Mirrors the protocol's `StartRequest` extras (`run_id`, `callback_urls`).
+    The upstream `RunRequest` model doesn't know about these fields.
     """
 
     model_config = ConfigDict(extra="ignore")
 
-    pipeline_run_id: str | None = Field(default=None, max_length=128)
+    run_id: str | None = Field(default=None, max_length=128)
     callback_urls: list[str] | None = Field(default=None, max_length=MAX_CALLBACK_URLS)
 
     @field_validator("callback_urls")

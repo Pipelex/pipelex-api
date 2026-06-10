@@ -6,7 +6,7 @@ Generate input schemas, output representations, and Python runner code for pipel
 
 Generate example input JSON for a pipe, showing the expected input structure with concept types and placeholder content.
 
-**Endpoint:** `POST /api/v1/build/inputs`
+**Endpoint:** `POST /v1/build/inputs`
 
 **Request Body:**
 
@@ -49,7 +49,7 @@ Returns the expected input structure as JSON, with concept types and placeholder
 
 Generate the output representation for a pipe in one of three formats.
 
-**Endpoint:** `POST /api/v1/build/output`
+**Endpoint:** `POST /v1/build/output`
 
 **Request Body:**
 
@@ -98,7 +98,7 @@ Generate the output representation for a pipe in one of three formats.
 
 Generate Python runner code for executing a pipe. Returns ready-to-use Python code with all necessary imports and setup.
 
-**Endpoint:** `POST /api/v1/build/runner`
+**Endpoint:** `POST /v1/build/runner`
 
 **Request Body:**
 
