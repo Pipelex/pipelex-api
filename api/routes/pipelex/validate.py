@@ -73,9 +73,9 @@ def _find_main_blueprint(blueprints: list[PipelexBundleBlueprint]) -> PipelexBun
     return None
 
 
-@router.post("/validate", response_model=ValidateResponse)
+@router.post("/validate", response_model=ValidateResponse, openapi_extra={"x-mthds-protocol": True})
 async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
-    """Validate MTHDS content by parsing, loading, and dry-running pipes.
+    """Validate MTHDS content by parsing, loading, and dry-running pipes (MTHDS Protocol `POST /validate`).
 
     Two backends, one contract:
 
@@ -85,7 +85,9 @@ async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
       as ONE in-process activity (`wf_dry_validate` → `act_dry_validate`) and awaits
       `{status map, graph_spec}` in a single round-trip. The activity runs `validate_bundle`
       itself and traces the graph in memory, so the error contract and the best-effort-graph
-      semantics are identical to the direct path.
+      semantics are identical to the direct path. This avoids dispatching the dry-run pipeline
+      pipe-by-pipe through Temporal (one workflow + activities per pipe), which is what makes
+      the in-process activity the fast path on a Temporal-enabled runner.
 
     Response contract:
     - **Success (200):** the `ValidateResponse` envelope — the validated
@@ -105,8 +107,7 @@ async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
     """
     if get_config().temporal.is_enabled:
         return await _validate_via_temporal(request_data)
-    else:
-        return await _validate_direct(request_data)
+    return await _validate_direct(request_data)
 
 
 async def _validate_via_temporal(request_data: ValidateRequest) -> JSONResponse:
@@ -156,7 +157,7 @@ async def _validate_via_temporal(request_data: ValidateRequest) -> JSONResponse:
 
 
 async def _validate_direct(request_data: ValidateRequest) -> JSONResponse:
-    """Direct backend: in-process `validate_bundle` + best-effort `dry_run_pipeline` (unchanged)."""
+    """Direct backend: in-process `validate_bundle` + best-effort `dry_run_pipeline`."""
     mthds_contents = request_data.mthds_contents
 
     # `ValidateBundleError` (and any other `PipelexError`) propagates: the

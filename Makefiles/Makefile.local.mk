@@ -26,7 +26,7 @@ define HELP_LOCAL
 
 	$(YELLOW)Run an MTHDS bundle through the API (resolves like `pipelex run bundle`):$(RESET)
 	make bundle-run$(RESET) BUNDLE=<dir|.mthds>:      POST the bundle to a running API and print the response (start `make run` first).
-	make bundle-validate$(RESET) BUNDLE=<dir|.mthds>: Dry-run validate the bundle via /api/v1/validate — no pipe_code/inputs, no inference, no cost.
+	make bundle-validate$(RESET) BUNDLE=<dir|.mthds>: Dry-run validate the bundle via /v1/validate — no pipe_code/inputs, no inference, no cost.
 	make bundle-curl$(RESET) BUNDLE=<dir|.mthds>:     Emit a ready-to-run curl command for the bundle.
 	make bundle-postman$(RESET) BUNDLE=<dir|.mthds>:  Push Execute/Start requests into the live Pipelex FastAPI Postman collection.
 	make bundle-dry$(RESET) BUNDLE=<dir|.mthds>:      Print the request body only — touch nothing.
@@ -104,7 +104,7 @@ wip: run-wip
 # Pipelex attaches these five custom Keyword search attributes to every workflow
 # start. A namespace missing them rejects StartWorkflow with "Namespace <ns> has
 # no mapping defined for search attribute ...". `temporal-server` pre-registers
-# them so /pipeline/execute and /pipeline/start work out of the box;
+# them so /v1/execute and /v1/start work out of the box;
 # `temporal-server-bare` omits them so you can reproduce the missing-attribute
 # error (SearchAttributeRegistrationError). Keep in lockstep with
 # [temporal.search_attributes].attributes in the pipelex config.
@@ -129,7 +129,7 @@ temporal-server:
 ts: temporal-server
 
 # Start the dev server WITHOUT the search attributes, to reproduce the
-# missing-search-attribute error on /pipeline/execute and /pipeline/start.
+# missing-search-attribute error on /v1/execute and /v1/start.
 temporal-server-bare:
 	@if ! command -v temporal >/dev/null 2>&1; then \
 		echo "ERROR: 'temporal' CLI not found. Install it with: brew install temporal"; \
@@ -178,7 +178,7 @@ tstop: temporal-stop
 #   make bundle-postman  BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
 #   make bundle-dry      BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
 #
-# bundle-validate hits /api/v1/validate — an inference-free dry-run that parses,
+# bundle-validate hits /v1/validate — an inference-free dry-run that parses,
 # loads, and dry-runs every pipe (no pipe_code, no inputs, no cost). It is the
 # safe, free counterpart to bundle-run. The other modes accept ENDPOINT=validate
 # too (e.g. `make bundle-postman ENDPOINT=validate`).
@@ -202,7 +202,7 @@ bundle-run: env check-bundle-arg
 	$(call PRINT_TITLE,"Running bundle against the API")
 	$(VENV_PYTHON) $(BUNDLE_SCRIPT) $(BUNDLE) --run $(BUNDLE_RUN_OPTS) $(BUNDLE_OPTS)
 
-# Dry-run validate via /api/v1/validate — hardcodes --endpoint validate (so don't
+# Dry-run validate via /v1/validate — hardcodes --endpoint validate (so don't
 # pass ENDPOINT here). NAME/ALLOW_SIGNATURES/BASE_URL/TOKEN/ARGS still apply;
 # PIPE/INPUTS are intentionally omitted — the validate endpoint ignores them.
 bundle-validate: env check-bundle-arg

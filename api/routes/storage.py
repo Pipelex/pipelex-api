@@ -125,6 +125,11 @@ async def resolve_storage_url(
 ) -> ResolveStorageUrlResponse:
     """Resolve a pipelex-storage:// URI to a short-lived presigned URL.
 
+    NON-CONTRACT: this route is NOT part of the published Pipelex API contract
+    (neither the MTHDS Protocol nor the build extensions). It is a deployment
+    convenience slated for replacement by the storage redesign — do not build
+    new integrations on it.
+
     Security:
       1. Requires authenticated user (user_id != "anonymous").
       2. URI format is validated to block path traversal and malformed segments.

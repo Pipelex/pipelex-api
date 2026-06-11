@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### Changed — extension args are this server's own (callback_urls)
+
+- The MTHDS Protocol no longer defines `callback_urls` (or any completion channel) — it is now formally THIS server's extension. The `/start` OpenAPI schema is published from the server's own `PipelexApiStartRequest` model (protocol `StartRequest` + the documented `callback_urls` extension) instead of relying on the protocol model to advertise it. `ApiRunner.start` drops the dead `method_id` compatibility param (the hosted platform handles `method_id` itself and never forwards it) and gains the protocol's generic `extra` slot. SDK clients pass server-specific args via `extra` — e.g. `client.start(..., extra={"callback_urls": [...]})`.
+
+### Breaking Changes — MTHDS Protocol alignment (master plan 05, Phase C1)
+
+This server is now the reference implementation of the **[MTHDS Protocol](https://mthds.ai)** (contract nesting: MTHDS Protocol ⊂ Pipelex API ⊂ Pipelex hosted API). Clients on the new SDKs (`mthds` Python/JS protocol releases) require a pipelex-api image carrying these changes — **the minimum image version for the `/v1` surface is this release**; an older image 404s on every `/v1/*` call.
+
+- **Base path: `/api/v1` → `/v1`, no aliases.** The API router now mounts at `/v1` (SDKs compose `{MTHDS_API_URL}/v1/{endpoint}`). Zero `/api/v1` routes remain.
+- **Run routes renamed:** `POST /api/v1/pipeline/execute` → `POST /v1/execute`, `POST /api/v1/pipeline/start` → `POST /v1/start`. `/start` now answers **202 Accepted** (protocol `StartAck`) instead of 200.
+- **Wire fields renamed (D1):** request extra `pipeline_run_id` → `pipeline_run_id` (client-supplied run ids on `/start` are still accepted — the protocol allows it and `StartAck.pipeline_run_id` is authoritative); responses serialize `pipeline_run_id` / `state` instead of `pipeline_run_id` / `pipeline_state`. The pipelex runtime internals keep `pipeline_run_id` — only the wire renames.
+- **`GET /version` replaces `GET /pipelex_version` + `GET /api_version` (both deleted, no alias).** Returns the protocol `VersionInfo`: `{protocol_version, implementation: "pipelex-api", implementation_version, runtime_version}`. PUBLIC — excluded from auth exactly like `/health` (it's the handshake clients use before they have credentials).
+- **Completion-callback payload now carries `pipeline_run_id`.** The webhook POSTed to `callback_urls` carries the protocol `pipeline_run_id` field alongside the runtime's existing `pipeline_run_id`/`status` keys; the `X-Completion-Signature` is `HMAC-SHA256(secret, pipeline_run_id)` (unchanged scheme, renamed input). The `status` → `state` key rename lives in the pipelex runtime's delivery executor and ships with a later pipelex release — receivers should read `pipeline_run_id` + `status` for now.
+- **Pipelex pinned to 0.33.0** (`PipelexMTHDSProtocol` — the renamed `PipelexRunner` — with protocol methods `execute`/`start`/`validate`/`models`/`version`; `PipelexRunResult`/`PipelexStartAck` response models).
+
+### Added — MTHDS Protocol alignment
+
+- **Committed OpenAPI artifact + drift gate.** `docs/openapi/pipelex-api.openapi.yaml` is the layer-2 contract, exported from the live app via `make openapi-export` and drift-checked in CI via `make openapi-check` (wired into the lint workflow and `make check`). The five protocol routes are tagged `x-mthds-protocol: true`; `/upload` and `/resolve-storage-url` are documented as NON-CONTRACT in their descriptions (kept in the schema for self-hosters' interactive docs).
+- **Protocol conformance suite.** `tests/unit/test_protocol_conformance.py` gates CI on: the five protocol paths under `/v1` (and zero legacy paths), the `RunRequest` anyOf rule (422 on empty body), the public `/version` handshake + shape, client-supplied `pipeline_run_id` acceptance, and the completion-callback E2E — a local in-test HTTP receiver verifies delivery, the `X-Completion-Signature` HMAC, and the payload's `pipeline_run_id`/status fields through the real `DeliveryExecutor` code path (Temporal dispatch faked in-process).
+
+### Changed — `/validate` fast path restored
+
+- **Temporal-enabled `/validate` dispatches one in-process activity again.** The earlier temporary regression (direct in-process `validate_bundle` + `dry_run_pipeline`) is undone now that the pinned pipelex ships `wf_dry_validate` / `act_dry_validate`. On a Temporal-enabled runner, `/validate` runs the whole sweep **+** graph dry-run as ONE `act_dry_validate` activity (a single worker round-trip) instead of dispatching the dry-run pipeline pipe-by-pipe through Temporal (one workflow + activities per pipe) — restoring the fast path first added in PR #12. Direct (Temporal-disabled) mode is unchanged. Same wire contract; the error contract and best-effort-graph semantics are identical across both backends.
+
 ### Changed
 
 - **Duplicate `pipeline_run_id` now returns 409 Conflict instead of 500.** `PipelineManagerAlreadyExistsError` — raised when a submission reuses a `pipeline_run_id` that is still registered for an in-flight run — is mapped to 409 via `_ERROR_TYPE_STATUS_OVERRIDES`, so a genuinely concurrent duplicate is a client-visible conflict rather than an opaque internal error. Pairs with the pipelex-side fix that frees a run's registry entry when it completes or fails, making serial resubmission of the same id succeed (previously every resubmission of a used id 500'd until process restart). Documented in [`docs/error-responses.md`](https://github.com/Pipelex/pipelex-api/blob/main/docs/error-responses.md).

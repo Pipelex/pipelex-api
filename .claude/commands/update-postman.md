@@ -91,9 +91,9 @@ Compare the Postman baseline (step 1) against the code (step 3):
 Produce a clear **change plan** and show it to the user before proceeding:
 ```
 Changes to apply:
-  + ADD: POST /api/v1/new-endpoint (folder: Build)
-  ~ UPDATE: POST /api/v1/build/pipe-spec — request body changed (added "model" field)
-  - REMOVE: POST /api/v1/build/pipe — endpoint deleted
+  + ADD: POST /v1/new-endpoint (folder: Build)
+  ~ UPDATE: POST /v1/build/pipe-spec — request body changed (added "model" field)
+  - REMOVE: POST /v1/build/pipe — endpoint deleted
   = UNCHANGED: 28 requests
 ```
 
@@ -153,7 +153,7 @@ For **unchanged endpoints**, do NOT touch them.
 | Build Pipe Spec | 1 per pipe type, 1 invalid type error |
 | Models | no filter, filter by `llm`, filter by `extract`, multi-type |
 | Presigned Post URLs | single file, multiple files |
-| Version | api_version, pipelex_version |
+| Version | version (protocol handshake) |
 
 ### 8. Apply changes to the collection using Python
 
@@ -188,16 +188,16 @@ new_item = {
             "raw": json.dumps({...}, indent="\t")
         },
         "url": {
-            "raw": "{{base_url}}/api/v1/build/pipe-spec",
+            "raw": "{{base_url}}/v1/build/pipe-spec",
             "host": ["{{base_url}}"],
-            "path": ["api", "v1", "build", "pipe-spec"]
+            "path": ["v1", "build", "pipe-spec"]
         },
         "description": "..."
     },
     "response": [
         {
             "name": "200 OK",
-            "originalRequest": {"method": "POST", "url": {"raw": "{{base_url}}/api/v1/build/pipe-spec", "host": ["{{base_url}}"], "path": ["api", "v1", "build", "pipe-spec"]}},
+            "originalRequest": {"method": "POST", "url": {"raw": "{{base_url}}/v1/build/pipe-spec", "host": ["{{base_url}}"], "path": ["v1", "build", "pipe-spec"]}},
             "status": "OK",
             "code": 200,
             "body": json.dumps({...})
@@ -234,7 +234,7 @@ Key patterns:
 
 #### Folder organization:
 - `Health & Info` → `Root`, `Health Check`
-- `Version` → api_version, pipelex_version
+- `Version` → version (protocol handshake)
 - `Pipeline` → `Execute (sync)`, `Start (async)`
 - `Validate` → with valid/invalid sub-examples
 - `Build` → `Build Inputs`, `Build Output`, `Build Runner`
