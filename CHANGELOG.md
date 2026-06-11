@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed — extension args are this server's own (callback_urls)
+
+- The MTHDS Protocol no longer defines `callback_urls` (or any completion channel) — it is now formally THIS server's extension. The `/start` OpenAPI schema is published from the server's own `PipelexApiStartRequest` model (protocol `StartRequest` + the documented `callback_urls` extension) instead of relying on the protocol model to advertise it. `ApiRunner.start` drops the dead `method_id` compatibility param (the hosted platform handles `method_id` itself and never forwards it) and gains the protocol's generic `extra` slot. SDK clients pass server-specific args via `extra` — e.g. `client.start(..., extra={"callback_urls": [...]})`.
+
 ### Breaking Changes — MTHDS Protocol alignment (master plan 05, Phase C1)
 
 This server is now the reference implementation of the **[MTHDS Protocol](https://mthds.ai)** (contract nesting: MTHDS Protocol ⊂ Pipelex API ⊂ Pipelex hosted API). Clients on the new SDKs (`mthds` Python/JS protocol releases) require a pipelex-api image carrying these changes — **the minimum image version for the `/v1` surface is this release**; an older image 404s on every `/v1/*` call.

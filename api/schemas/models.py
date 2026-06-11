@@ -7,6 +7,7 @@ by the upstream `mthds.client.pipeline.RunRequest`.
 from ipaddress import ip_address
 from urllib.parse import urlparse
 
+from mthds.client.pipeline import StartRequest
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from api.limits import MAX_CALLBACK_URL_LEN, MAX_CALLBACK_URLS, MAX_MTHDS_FILE_BYTES, MAX_MTHDS_FILES_PER_REQUEST
@@ -36,8 +37,10 @@ def _is_disallowed_host(host: str) -> bool:
 class PipelineApiExtras(BaseModel):
     """Validates the API-server-only fields on `/start` requests.
 
-    Mirrors the protocol's `StartRequest` extras (`pipeline_run_id`, `callback_urls`).
-    The upstream `RunRequest` model doesn't know about these fields.
+    `pipeline_run_id` is the protocol's optional start arg; `callback_urls` is
+    THIS server's extension (the MTHDS Protocol defines no completion channel —
+    extension args are defined and handled by the implementation that owns
+    them). The upstream protocol models don't know about `callback_urls`.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -65,6 +68,25 @@ class PipelineApiExtras(BaseModel):
                 msg = f"callback URL host {parsed.hostname!r} is not allowed (private/loopback/metadata addresses are blocked)"
                 raise ValueError(msg)
         return value
+
+
+class PipelexApiStartRequest(StartRequest):
+    """Documented body of `POST /start` — the protocol's `StartRequest` plus THIS server's extensions.
+
+    Used only to publish the OpenAPI request schema: the protocol model no
+    longer advertises implementation extensions, so this server documents the
+    ones it implements itself. Wire validation happens in `PipelineApiExtras`.
+    """
+
+    callback_urls: list[str] | None = Field(
+        default=None,
+        description=(
+            "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — completion webhooks. "
+            "When the run finishes, the runner POSTs the RunResult to each URL, HMAC-SHA256-signed "
+            "via the X-Completion-Signature header. http/https only; private, loopback, link-local "
+            "and cloud-metadata hosts are rejected."
+        ),
+    )
 
 
 class MthdsContentsRequest(BaseModel):

@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from kajson import kajson
 from kajson.exceptions import KajsonDecoderError
 from mthds.client.exceptions import PipelineRequestError
-from mthds.client.pipeline import RunRequest, RunState, StartRequest
+from mthds.client.pipeline import RunRequest, RunState
 from pipelex.config import get_config
 from pipelex.pipe_run.delivery_assignment import DeliveryAssignment, StorageTarget, WebhookTarget
 from pipelex.pipeline.pipeline_response import PipelexRunResult, PipelexStartAck
@@ -24,7 +24,7 @@ from api.error_types import ErrorType
 from api.errors import raise_validation_error
 from api.logging_context import get_request_id
 from api.routes.pipelex.utils import get_current_iso_timestamp
-from api.schemas.models import PipelineApiExtras
+from api.schemas.models import PipelexApiStartRequest, PipelineApiExtras
 
 if TYPE_CHECKING:
     from mthds.models.pipe_output import VariableMultiplicity
@@ -72,8 +72,8 @@ class ApiRunner(PipelexMTHDSProtocol):
         output_multiplicity: VariableMultiplicity | None = None,
         dynamic_output_concept_ref: str | None = None,
         pipeline_run_id: str | None = None,
+        extra: dict[str, Any] | None = None,
         callback_urls: list[str] | None = None,
-        method_id: str | None = None,
         request_id: str | None = None,
     ) -> PipelexStartAck:
         """Start a method execution asynchronously without waiting for completion.
@@ -81,12 +81,17 @@ class ApiRunner(PipelexMTHDSProtocol):
         `pipeline_run_id` is the client-supplied run identifier — this open-source runner
         honors it (protocol: implementations MAY decline it, but then MUST 422;
         we accept it, and `StartAck.pipeline_run_id` echoes it back as authoritative).
-        `method_id` is a hosted-API extension this runner does not implement; it
-        is accepted for protocol-signature compatibility and ignored (the wire
-        layer never forwards it). `request_id` is an API-layer extra threaded
-        into `JobMetadata.request_id` for log correlation.
+        `callback_urls` is THIS server's extension (completion webhooks) — the wire
+        layer validates it (`PipelineApiExtras`) and passes it here by name.
+        `extra` is the protocol's generic extension slot; this runner's wire
+        extras are parsed by the route layer, so nothing reaches it — a
+        non-empty value is an in-process misuse and is rejected. `request_id`
+        is an API-layer extra threaded into `JobMetadata.request_id` for log
+        correlation.
         """
-        _ = method_id  # hosted extension — not implemented by the OSS runner
+        if extra:
+            msg = f"ApiRunner defines no extension args beyond its named ones; got {sorted(extra)}."
+            raise PipelineRequestError(msg)
         created_at = get_current_iso_timestamp()
         pipelex_inputs: PipelineInputs | WorkingMemory | None = cast("PipelineInputs | WorkingMemory | None", inputs)
 
@@ -301,15 +306,16 @@ async def execute(request: Request) -> JSONResponse:
     "/start",
     response_model=PipelexStartAck,
     status_code=202,
-    # Documented body = the protocol's StartRequest (RunRequest + the async
-    # extras). `method_id` appears in the schema as the hosted extension this
-    # runner accepts-and-ignores. Raw-Request parsing prevents FastAPI from
-    # inferring it — see the /execute note.
+    # Documented body = the protocol's StartRequest plus THIS server's own
+    # extensions (callback_urls) — the protocol model no longer advertises
+    # implementation extensions, so the server documents what it implements.
+    # Raw-Request parsing prevents FastAPI from inferring it — see the
+    # /execute note.
     openapi_extra={
         "x-mthds-protocol": True,
         "requestBody": {
             "required": True,
-            "content": {"application/json": {"schema": StartRequest.model_json_schema()}},
+            "content": {"application/json": {"schema": PipelexApiStartRequest.model_json_schema()}},
         },
     },
 )

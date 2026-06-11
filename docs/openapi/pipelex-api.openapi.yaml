@@ -269,15 +269,19 @@ paths:
                   - type: string
                   - type: 'null'
                   title: Dynamic Output Concept Ref
+              additionalProperties: true
               type: object
               title: RunRequest
               description: "Body of the protocol's `POST /execute` — mirrors `RunRequest` in\n`mthds-protocol.openapi.yaml`.\n\
-                \nAttributes:\n    pipe_code (str | None): Code of the pipe to execute\n    mthds_contents (list[str] | None):\
-                \ List of MTHDS bundle contents to load\n    inputs (PipelineInputs | WorkingMemory | None): Inputs in PipelineInputs\
-                \ format - Pydantic validation is skipped\n        to preserve the flexible format (dicts, strings, StuffContent\
-                \ objects, etc.)\n    output_name (str | None): Name of the output slot to write to\n    output_multiplicity\
-                \ (VariableMultiplicity | None): Output multiplicity setting\n    dynamic_output_concept_ref (str | None):\
-                \ Override for the dynamic output concept ref"
+                \nThe declared fields are the protocol's **basic** arguments. The model is\ndeliberately open (`extra=\"allow\"\
+                `): an implementation may accept extra\nrequest properties, and any extension arg given to the constructor\
+                \ is kept\nand serialized to the wire instead of being silently dropped.\n\nAttributes:\n    pipe_code (str\
+                \ | None): Code of the pipe to execute\n    mthds_contents (list[str] | None): List of MTHDS bundle contents\
+                \ to load\n    inputs (PipelineInputs | WorkingMemory | None): Inputs in PipelineInputs format - Pydantic\
+                \ validation is skipped\n        to preserve the flexible format (dicts, strings, StuffContent objects, etc.)\n\
+                \    output_name (str | None): Name of the output slot to write to\n    output_multiplicity (VariableMultiplicity\
+                \ | None): Output multiplicity setting\n    dynamic_output_concept_ref (str | None): Override for the dynamic\
+                \ output concept ref"
         required: true
       responses:
         '200':
@@ -402,22 +406,20 @@ paths:
                     type: array
                   - type: 'null'
                   title: Callback Urls
-                method_id:
-                  anyOf:
-                  - type: string
-                    minLength: 1
-                  - type: 'null'
-                  title: Method Id
+                  description: PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — completion webhooks. When the run
+                    finishes, the runner POSTs the RunResult to each URL, HMAC-SHA256-signed via the X-Completion-Signature
+                    header. http/https only; private, loopback, link-local and cloud-metadata hosts are rejected.
+              additionalProperties: true
               type: object
-              title: StartRequest
-              description: "Body of the protocol's `POST /start` — `RunRequest` plus the async extras.\n\nMirrors `StartRequest`\
-                \ in `mthds-protocol.openapi.yaml`, with the hosted\n`method_id` extension:\n\n- `pipeline_run_id` — client-supplied\
-                \ run identifier; bare runners accept\n  it, the hosted API rejects it with 422 (the server-generated id in\n\
-                \  `StartAck` is always authoritative).\n- `callback_urls` — completion webhooks, HMAC-signed by the runner\
-                \ via\n  `X-Completion-Signature`. http/https only; private/loopback/metadata\n  hosts are rejected server-side.\n\
-                - `method_id` — HOSTED EXTENSION: a stored method in the active org's\n  catalog, mutually exclusive with\
-                \ `mthds_contents`. The platform is the\n  source of truth for which combinations it accepts; the SDK does\
-                \ not\n  over-validate."
+              title: PipelexApiStartRequest
+              description: 'Documented body of `POST /start` — the protocol''s `StartRequest` plus THIS server''s extensions.
+
+
+                Used only to publish the OpenAPI request schema: the protocol model no
+
+                longer advertises implementation extensions, so this server documents the
+
+                ones it implements itself. Wire validation happens in `PipelineApiExtras`.'
         required: true
       responses:
         '202':
@@ -3227,7 +3229,7 @@ components:
 
         The handshake clients use for feature detection: `implementation`
 
-        identifies the runner, and hosted extensions (durable runs, `method_id`)
+        identifies the runner, and hosted extensions (e.g. durable runs)
 
         light up based on what the server advertises.'
     WorkingMemory:
