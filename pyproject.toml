@@ -16,15 +16,13 @@ classifiers = [
 
 dependencies = [
   "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal,temporal]==0.33.0",
-  "mthds>=0.5.0",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",
 ]
 
 [tool.uv.sources]
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "5ce4bf14b5563041f0652c75b6707d274dffa580" }
-mthds = { git = "https://github.com/mthds-ai/mthds-python.git", branch = "refactor/protocol" }
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "9a64896a33ca954e8a15bfbbe05b809ee9352bf2" }
 
 [build-system]
 requires = ["hatchling"]

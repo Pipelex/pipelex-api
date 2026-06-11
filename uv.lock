@@ -1326,14 +1326,15 @@ wheels = [
 
 [[package]]
 name = "kajson"
-version = "0.6.0"
+version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
+    { name = "tzdata" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8d/54/83c3b00f270c39037b699398e42e16837ef1109c8af47ac668fe3c14a817/kajson-0.6.0.tar.gz", hash = "sha256:7544a544e6f135f129015c9475ff2cc0a7fc8e76d6eea1d8d37f2e438ab4d936", size = 22567, upload-time = "2026-05-30T19:06:08.084Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d2/a4/da91af6dac42516e45a9897ba901d8ec2ee2b13b135caf6ce120867aac2b/kajson-0.7.0.tar.gz", hash = "sha256:1c8f80d157f980c9adb9fda0e77c1cc0078f50547d84ef548a5e19b5a84d8d37", size = 25071, upload-time = "2026-06-10T10:00:56.097Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e9/fb/e325ef3bd84f2d40286a09fe78447a0a20e3a6ec12ce28e0d4ecc8bce620/kajson-0.6.0-py3-none-any.whl", hash = "sha256:77ddb0e12b274479ced061d84da091a250fdeb3f4dd7444ae0c6ca929ba73431", size = 29024, upload-time = "2026-05-30T19:06:06.645Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/1c/8251c0dadd1843e020edf4ef162aaa7dd0e98cbd2e1fe33d843807cd7ce9/kajson-0.7.0-py3-none-any.whl", hash = "sha256:d9903327bc7f182ec481ffafd074765347365600592e5f9f67866d5b0ae4f939", size = 31524, upload-time = "2026-06-10T10:00:54.952Z" },
 ]
 
 [[package]]
@@ -1707,8 +1708,8 @@ wheels = [
 
 [[package]]
 name = "mthds"
-version = "0.5.0"
-source = { git = "https://github.com/mthds-ai/mthds-python.git?branch=refactor%2Fprotocol#4e99dcf0057538b35c1bc8eb861495e9df11eb58" }
+version = "0.4.0"
+source = { git = "https://github.com/mthds-ai/mthds-python.git?rev=33fcdf0681d894d09d57eab699894552360d954c#33fcdf0681d894d09d57eab699894552360d954c" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
@@ -2241,7 +2242,7 @@ wheels = [
 [[package]]
 name = "pipelex"
 version = "0.33.0"
-source = { git = "https://github.com/Pipelex/pipelex.git?rev=5ce4bf14b5563041f0652c75b6707d274dffa580#5ce4bf14b5563041f0652c75b6707d274dffa580" }
+source = { git = "https://github.com/Pipelex/pipelex.git?rev=9a64896a33ca954e8a15bfbbe05b809ee9352bf2#9a64896a33ca954e8a15bfbbe05b809ee9352bf2" }
 dependencies = [
     { name = "aiofiles" },
     { name = "datamodel-code-generator" },
@@ -2315,7 +2316,6 @@ version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
-    { name = "mthds" },
     { name = "pipelex", extra = ["anthropic", "bedrock", "fal", "google", "google-genai", "mistralai", "temporal"] },
     { name = "pyjwt" },
     { name = "uvicorn" },
@@ -2360,10 +2360,9 @@ requires-dist = [
     { name = "mkdocs-glightbox", marker = "extra == 'docs'", specifier = "==0.4.0" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = "==9.6.14" },
     { name = "mkdocs-meta-manager", marker = "extra == 'docs'", specifier = "==1.1.0" },
-    { name = "mthds", git = "https://github.com/mthds-ai/mthds-python.git?branch=refactor%2Fprotocol" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.2" },
     { name = "pandas-stubs", marker = "extra == 'dev'", specifier = ">=2.2.3.241126" },
-    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal", "temporal"], git = "https://github.com/Pipelex/pipelex.git?rev=5ce4bf14b5563041f0652c75b6707d274dffa580" },
+    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal", "temporal"], git = "https://github.com/Pipelex/pipelex.git?rev=9a64896a33ca954e8a15bfbbe05b809ee9352bf2" },
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.3.8" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.405" },
