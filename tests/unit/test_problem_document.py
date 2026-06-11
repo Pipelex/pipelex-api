@@ -37,26 +37,26 @@ def _synthetic_llm_report() -> ErrorReport:
 class TestProblemDocument:
     def test_builds_from_config_error(self):
         report = PipelexConfigError("the gateway config is missing").to_error_report()
-        doc = build_problem_document(report, instance="/api/v1/validate", request_id="REQ2", disclosure_mode=DisclosureMode.VERBOSE)
+        doc = build_problem_document(report, instance="/v1/validate", request_id="REQ2", disclosure_mode=DisclosureMode.VERBOSE)
         assert doc["status"] == 500
         assert doc["error_domain"] == "config"
         assert doc["error_type"] == "PipelexConfigError"
         assert doc["detail"] == "the gateway config is missing"
         assert doc["title"] == "Pipelex config"
         assert doc["type"].endswith("/pipelex-config-error/")
-        assert doc["instance"] == "/api/v1/validate"
+        assert doc["instance"] == "/v1/validate"
         assert doc["request_id"] == "REQ2"
 
     def test_builds_from_env_var_not_found_error(self):
-        # The original bug: /pipeline/start with a required env var unset.
+        # The original bug: /start with a required env var unset.
         report = EnvVarNotFoundError("Environment variable 'COMPLETION_CALLBACK_SECRET' is required but not set").to_error_report()
-        doc = build_problem_document(report, instance="/api/v1/pipeline/start", request_id="REQ1", disclosure_mode=DisclosureMode.VERBOSE)
+        doc = build_problem_document(report, instance="/v1/start", request_id="REQ1", disclosure_mode=DisclosureMode.VERBOSE)
         assert doc["status"] == 500
         assert doc["type"] == "https://docs.pipelex.com/latest/errors/env-var-not-found-error/"
         assert doc["title"] == "Environment variable not set"
         assert "COMPLETION_CALLBACK_SECRET" in doc["detail"]
         assert doc["error_type"] == "EnvVarNotFoundError"
-        assert doc["instance"] == "/api/v1/pipeline/start"
+        assert doc["instance"] == "/v1/start"
         assert doc["request_id"] == "REQ1"
         # EnvVarNotFoundError is a ToolError that pipelex classifies under the
         # config domain — a missing required env var is an operator-fixable
@@ -65,7 +65,7 @@ class TestProblemDocument:
 
     def test_builds_from_report_with_provider_metadata(self):
         report = _synthetic_llm_report()
-        doc = build_problem_document(report, instance="/api/v1/pipeline/execute", request_id="REQ7", disclosure_mode=DisclosureMode.VERBOSE)
+        doc = build_problem_document(report, instance="/v1/execute", request_id="REQ7", disclosure_mode=DisclosureMode.VERBOSE)
         assert doc["status"] == 429  # provider-429 passthrough
         assert doc["type"] == "https://docs.pipelex.com/latest/errors/llm-completion-error/"
         assert doc["title"] == "LLM completion error"
@@ -96,14 +96,14 @@ class TestProblemDocument:
             ErrorType.VALIDATION_ERROR,
             "field 'pipe_code' is required",
             422,
-            instance="/api/v1/pipeline/execute",
+            instance="/v1/execute",
             request_id="REQ9",
         )
         assert doc["type"] == "https://docs.pipelex.com/latest/errors/validation-error/"
         assert doc["title"] == "Validation error"
         assert doc["status"] == 422
         assert doc["detail"] == "field 'pipe_code' is required"
-        assert doc["instance"] == "/api/v1/pipeline/execute"
+        assert doc["instance"] == "/v1/execute"
         assert doc["request_id"] == "REQ9"
         assert doc["error_type"] == "ValidationError"
         assert doc["error_domain"] == "input"
@@ -123,7 +123,7 @@ class TestProblemDocument:
             ErrorType.SERVER_MISCONFIGURED,
             "Server configuration error: API_KEY not configured",
             500,
-            instance="/api/v1/upload",
+            instance="/v1/upload",
             request_id="REQ-CFG",
             error_domain=ErrorDomain.CONFIG,
         )

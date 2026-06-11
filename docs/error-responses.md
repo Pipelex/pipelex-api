@@ -12,7 +12,7 @@ A failure response looks like this:
   "title": "Validation error",
   "status": 422,
   "detail": "Bundle does not declare a main_pipe, which is required for validation",
-  "instance": "/api/v1/validate",
+  "instance": "/v1/validate",
   "error_type": "ValidationError",
   "error_domain": "input",
   "retryable": false,
@@ -49,8 +49,10 @@ A few specific statuses bypass the domain mapping:
 
 - **401** — missing/invalid bearer token. `WWW-Authenticate: Bearer` is set.
 - **403** — authenticated but not authorized (storage-ownership mismatch).
+- **409** — `error_type = "PipelineManagerAlreadyExistsError"`: the submitted `pipeline_run_id` is already registered for a run that is still in flight on this server. Completed and failed runs free their id, so this only fires for genuinely concurrent duplicates — resubmit after the in-flight run finishes, or pick a fresh id.
 - **413** — request body exceeds the configured size limit.
 - **429** — set by `Retry-After` when an upstream provider rate-limits and the originating error carries `provider_metadata.retry_after_seconds`.
+- **501** — `error_type = "AsyncExecutionNotEnabledError"`: this deployment does not provide async pipeline execution (`/pipeline/start`). Permanent under the current deployment — do not retry.
 
 The HTTP status is the source of truth for success vs failure — there is no `success: true/false` field anywhere in the envelope.
 
@@ -89,7 +91,7 @@ When opening an issue, include the `request_id` from the response (or response h
 ### 422 — input validation failure
 
 ```http
-POST /api/v1/validate
+POST /v1/validate
 {"mthds_contents": ["domain = \"x\"\ndescription = \"x\"\n"]}
 ```
 
@@ -103,7 +105,7 @@ X-Request-ID: 9f2c1ab3-…
   "title": "Validation error",
   "status": 422,
   "detail": "Bundle does not declare a main_pipe, which is required for validation",
-  "instance": "/api/v1/validate",
+  "instance": "/v1/validate",
   "error_type": "ValidationError",
   "error_domain": "input",
   "retryable": false,
@@ -123,7 +125,7 @@ X-Request-ID: 9f2c1ab3-…
   "title": "Environment variable not set",
   "status": 500,
   "detail": "Missing required environment variable: COMPLETION_CALLBACK_SECRET",
-  "instance": "/api/v1/pipeline/start",
+  "instance": "/v1/start",
   "error_type": "EnvVarNotFoundError",
   "request_id": "9f2c1ab3-…"
 }
@@ -146,7 +148,7 @@ X-Request-ID: 9f2c1ab3-…
   "title": "Unauthenticated",
   "status": 401,
   "detail": "Missing bearer token.",
-  "instance": "/api/v1/pipeline/execute",
+  "instance": "/v1/execute",
   "error_type": "Unauthenticated",
   "error_domain": "input",
   "retryable": false,
@@ -156,6 +158,6 @@ X-Request-ID: 9f2c1ab3-…
 
 ## Async callbacks (webhook payload)
 
-For [async pipeline runs](pipe-run.md) registering a `callback_url`, the failure payload delivered to the caller's webhook **does not** use this envelope. The webhook body carries the raw `ErrorReport` dict under an `error` key, alongside `pipeline_run_id`, `status`, and the run metadata — a non-HTTP receiver (queue, log shipper) does not necessarily want an RFC 7807 wrapper.
+For [async pipeline runs](pipe-run.md) registering a `callback_url`, the failure payload delivered to the caller's webhook **does not** use this envelope. The webhook body carries the raw `ErrorReport` dict under an `error` key, alongside `pipeline_run_id` (the protocol field) plus the runtime's legacy `pipeline_run_id` / `status` keys — a non-HTTP receiver (queue, log shipper) does not necessarily want an RFC 7807 wrapper.
 
 The classification fields (`error_type`, `error_domain`, `retryable`, etc.) surface identically on both paths; only the envelope members (`type`, `status`, `detail`, `instance`, `request_id`) are sync-only. See [Pipe Run → Async Completion Callbacks](pipe-run.md) for the full webhook contract.

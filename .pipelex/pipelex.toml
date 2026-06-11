@@ -210,7 +210,7 @@ region = ""
 
 [temporal]
 # Temporal is opt-in. With Temporal disabled the API runs pipelines in-process
-# (POST /pipeline/execute) and POST /pipeline/start is unavailable.
+# (POST /v1/execute) and POST /v1/start is unavailable.
 # To enable: add a [temporal] section in your pipelex_override.toml with
 # is_enabled = true and define a server under [temporal.temporal_config.temporal_server_configs.<name>].
 is_enabled = false

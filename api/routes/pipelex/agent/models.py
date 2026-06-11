@@ -11,11 +11,11 @@ from api.errors import raise_validation_error
 router = APIRouter(tags=["agent"])
 
 
-@router.get("/models")
+@router.get("/models", openapi_extra={"x-mthds-protocol": True})
 async def get_models(
     model_type: Annotated[list[str] | None, Query(alias="type", description="Filter by model category: llm, extract, img_gen, search")] = None,
 ) -> dict[str, Any]:
-    """List available model presets, aliases, waterfalls, and talent mappings."""
+    """List available model presets, aliases, waterfalls, and talent mappings (MTHDS Protocol `GET /models`)."""
     categories: list[ModelCategory] | None = None
     if model_type:
         try:

@@ -71,6 +71,11 @@ async def upload_file(
 ) -> UploadResponse:
     """Upload a file to pipelex storage, scoped by user.
 
+    NON-CONTRACT: this route is NOT part of the published Pipelex API contract
+    (neither the MTHDS Protocol nor the build extensions). It is a deployment
+    convenience slated for replacement by the storage redesign — do not build
+    new integrations on it.
+
     Accepts base64-encoded file data, stores it via the configured storage provider,
     and returns the pipelex-storage:// URI that pipelex resolves at runtime.
     """

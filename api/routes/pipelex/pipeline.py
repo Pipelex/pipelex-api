@@ -8,13 +8,12 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from kajson import kajson
 from kajson.exceptions import KajsonDecoderError
-from mthds.client.exceptions import PipelineRequestError
-from mthds.client.pipeline import PipelineRequest, PipelineState
+from mthds.protocol.exceptions import PipelineRequestError
 from pipelex.config import get_config
 from pipelex.pipe_run.delivery_assignment import DeliveryAssignment, StorageTarget, WebhookTarget
-from pipelex.pipeline.pipeline_response import PipelexPipelineExecuteResponse, PipelexPipelineStartResponse
+from pipelex.pipeline.pipeline_response import PipelexRunResultExecute, PipelexRunResultStart, RunState
 from pipelex.pipeline.pipeline_run_setup import pipeline_run_setup
-from pipelex.pipeline.runner import PipelexRunner
+from pipelex.pipeline.runner import PipelexMTHDSProtocol
 from pipelex.system.environment import get_required_env
 from pipelex.temporal.tprl_pipe.temporal_pipe_run import make_temporal_pipe_run
 from pydantic import ValidationError
@@ -24,18 +23,18 @@ from api.error_types import ErrorType
 from api.errors import raise_validation_error
 from api.logging_context import get_request_id
 from api.routes.pipelex.utils import get_current_iso_timestamp
-from api.schemas.models import PipelineApiExtras
+from api.schemas.models import PipelexApiStartRequest, PipelineApiExtras, RunRequest
 
 if TYPE_CHECKING:
-    from mthds.models.pipe_output import VariableMultiplicity
-    from mthds.models.pipeline_inputs import PipelineInputs
-    from mthds.models.working_memory import WorkingMemoryAbstract
+    from mthds.protocol.pipe_output import VariableMultiplicity
+    from mthds.protocol.pipeline_inputs import PipelineInputs
+    from mthds.protocol.working_memory import WorkingMemoryAbstract
     from pipelex.core.memory.working_memory import WorkingMemory
 
     from api.security import RequestUser
 
 
-router = APIRouter(tags=["pipeline"])
+router = APIRouter(tags=["run"])
 
 
 def _get_user_id(request: Request) -> str:
@@ -45,7 +44,7 @@ def _get_user_id(request: Request) -> str:
 
 
 def _completion_signature(pipeline_run_id: str) -> str:
-    """Compute the HMAC-SHA256 signature for an async pipeline completion callback.
+    """Compute the HMAC-SHA256 signature for an async completion callback.
 
     The signer (this server) and the verifier (your callback receiver) must
     share the same `COMPLETION_CALLBACK_SECRET`. The signature is per-run and
@@ -59,11 +58,11 @@ def _completion_signature(pipeline_run_id: str) -> str:
     ).hexdigest()
 
 
-class ApiRunner(PipelexRunner):
-    """API runner that extends PipelexRunner with start_pipeline support."""
+class ApiRunner(PipelexMTHDSProtocol):
+    """API runner that extends PipelexMTHDSProtocol with async `start` support (Temporal dispatch)."""
 
     @override
-    async def start_pipeline(
+    async def start(
         self,
         pipe_code: str | None = None,
         mthds_contents: list[str] | None = None,
@@ -71,15 +70,33 @@ class ApiRunner(PipelexRunner):
         output_name: str | None = None,
         output_multiplicity: VariableMultiplicity | None = None,
         dynamic_output_concept_ref: str | None = None,
+        extra: dict[str, Any] | None = None,
         pipeline_run_id: str | None = None,
         callback_urls: list[str] | None = None,
         request_id: str | None = None,
-    ) -> PipelexPipelineStartResponse:
-        """Start a pipeline execution asynchronously without waiting for completion."""
+    ) -> PipelexRunResultStart:
+        """Start a method execution asynchronously without waiting for completion.
+
+        `pipeline_run_id` is the client-supplied run identifier — this open-source runner
+        honors it (protocol: implementations MAY decline it, but then MUST 422;
+        we accept it, and `StartAck.pipeline_run_id` echoes it back as authoritative).
+        `callback_urls` is THIS server's extension (completion webhooks) — the wire
+        layer validates it (`PipelineApiExtras`) and passes it here by name.
+        `extra` is the protocol's generic extension slot; this runner's wire
+        extras are parsed by the route layer, so nothing reaches it — a
+        non-empty value is an in-process misuse and is rejected. `request_id`
+        is an API-layer extra threaded into `JobMetadata.request_id` for log
+        correlation.
+        """
+        if extra:
+            msg = f"ApiRunner defines no extension args beyond its named ones; got {sorted(extra)}."
+            raise PipelineRequestError(msg)
         created_at = get_current_iso_timestamp()
         pipelex_inputs: PipelineInputs | WorkingMemory | None = cast("PipelineInputs | WorkingMemory | None", inputs)
 
         execution_config = self.execution_config or get_config().pipelex.pipeline_execution_config
+        # Wire and runtime share the `pipeline_run_id` name (master D1 as
+        # revised — the id rename was reversed).
         pipe_job, resolved_pipeline_run_id, _ = await pipeline_run_setup(
             execution_config=execution_config,
             library_id=self.library_id,
@@ -100,6 +117,10 @@ class ApiRunner(PipelexRunner):
 
         delivery_assignment = DeliveryAssignment(
             storage=StorageTarget(key_prefix="results"),
+            # The completion payload's wire fields (`pipeline_run_id`/`state`,
+            # plus the transitional `status` alias) are written per delivery by
+            # pipelex's DeliveryExecutor — they are reserved keys on
+            # WebhookTarget.payload, so nothing is injected here.
             webhooks=[
                 WebhookTarget(
                     url=url,
@@ -117,10 +138,10 @@ class ApiRunner(PipelexRunner):
             delivery_assignment=delivery_assignment,
         )
 
-        return PipelexPipelineStartResponse(
+        return PipelexRunResultStart(
             pipeline_run_id=resolved_pipeline_run_id,
             created_at=created_at,
-            pipeline_state=PipelineState.STARTED,
+            state=RunState.STARTED,
             workflow_id=workflow_id,
         )
 
@@ -184,7 +205,7 @@ def _validate_extras(request_data: dict[str, Any]) -> PipelineApiExtras:
 
 # Per-field bound applied at the request.state binding site so an oversized
 # caller-supplied `pipe_code` cannot blow up downstream log-line size.
-# `PipelineRequest.pipe_code` carries no Pydantic `max_length`; this is the
+# `RunRequest.pipe_code` carries no Pydantic `max_length`; this is the
 # narrow cap that protects the structured error log without changing the
 # upstream type contract. 256 covers any realistic pipe code (kebab-case
 # identifier, typically tens of chars) with headroom.
@@ -208,11 +229,11 @@ def _coerce_correlation_field(value: Any) -> str | None:
     return value[:_MAX_CORRELATION_FIELD_LEN]
 
 
-async def _parse_request(request: Request) -> tuple[PipelineRequest, PipelineApiExtras]:
+async def _parse_request(request: Request) -> tuple[RunRequest, PipelineApiExtras]:
     """Parse and validate the request body.
 
     Splits the body into:
-      1. The upstream `PipelineRequest` (pipe_code, mthds_contents, inputs, …)
+      1. The upstream `RunRequest` (pipe_code, mthds_contents, inputs, …)
          decoded via `kajson` so structured inputs survive without re-parsing.
       2. `PipelineApiExtras` (pipeline_run_id, callback_urls) validated by
          Pydantic — callback_urls are checked for scheme + private/loopback
@@ -233,7 +254,7 @@ async def _parse_request(request: Request) -> tuple[PipelineRequest, PipelineApi
     request.state.pipeline_run_id = _coerce_correlation_field(request_data.get("pipeline_run_id"))
     extras = _validate_extras(request_data)
     try:
-        pipeline_request = PipelineRequest.from_body(request_data)
+        run_request = RunRequest.from_body(request_data)
     except (PipelineRequestError, ValidationError) as exc:
         # `from_body` rejects a body where neither `pipe_code` nor
         # `mthds_contents` is supplied (PipelineRequestError) and a body whose
@@ -241,50 +262,83 @@ async def _parse_request(request: Request) -> tuple[PipelineRequest, PipelineApi
         # mistakes, not server faults, so they map to a 422 rather than
         # escaping to the generic-500 fallback.
         raise_validation_error(message=str(exc))
-    return pipeline_request, extras
+    return run_request, extras
 
 
-@router.post("/pipeline/execute", response_model=PipelexPipelineExecuteResponse)
+@router.post(
+    "/execute",
+    response_model=PipelexRunResultExecute,
+    # The body is read through the raw Request (kajson decoding — see
+    # `_parse_request`), so FastAPI cannot infer a typed body parameter;
+    # document it explicitly so the committed OpenAPI artifact (and protocol
+    # conformance tooling) publishes the request schema.
+    openapi_extra={
+        "x-mthds-protocol": True,
+        "requestBody": {
+            "required": True,
+            "content": {"application/json": {"schema": RunRequest.model_json_schema()}},
+        },
+    },
+)
 async def execute(request: Request) -> JSONResponse:
-    """Execute a pipeline and wait for completion.
+    """Execute a method synchronously and return its full output (MTHDS Protocol `POST /execute`).
 
     Pipelex domain failures propagate untouched: the global `PipelexError`
     handler in `api.exception_handlers` turns them into an RFC 7807 problem response.
     """
-    pipeline_request, _extras = await _parse_request(request)
+    run_request, _extras = await _parse_request(request)
     runner = ApiRunner(user_id=_get_user_id(request))
-    response = await runner.execute_pipeline(
-        pipe_code=pipeline_request.pipe_code,
-        mthds_contents=pipeline_request.mthds_contents,
-        inputs=pipeline_request.inputs,
-        output_name=pipeline_request.output_name,
-        output_multiplicity=pipeline_request.output_multiplicity,
-        dynamic_output_concept_ref=pipeline_request.dynamic_output_concept_ref,
+    response = await runner.execute(
+        pipe_code=run_request.pipe_code,
+        mthds_contents=run_request.mthds_contents,
+        inputs=run_request.inputs,
+        output_name=run_request.output_name,
+        output_multiplicity=run_request.output_multiplicity,
+        dynamic_output_concept_ref=run_request.dynamic_output_concept_ref,
     )
     return JSONResponse(
         content=response.model_dump(mode="json", serialize_as_any=True, by_alias=True),
     )
 
 
-@router.post("/pipeline/start", response_model=PipelexPipelineStartResponse)
+@router.post(
+    "/start",
+    response_model=PipelexRunResultStart,
+    status_code=202,
+    # Documented body = the protocol's StartRequest plus THIS server's own
+    # extensions (callback_urls) — the protocol model no longer advertises
+    # implementation extensions, so the server documents what it implements.
+    # Raw-Request parsing prevents FastAPI from inferring it — see the
+    # /execute note.
+    openapi_extra={
+        "x-mthds-protocol": True,
+        "requestBody": {
+            "required": True,
+            "content": {"application/json": {"schema": PipelexApiStartRequest.model_json_schema()}},
+        },
+    },
+)
 async def start(
     request: Request,
-    parsed: Annotated[tuple[PipelineRequest, PipelineApiExtras], Depends(_parse_request)],
-) -> PipelexPipelineStartResponse:
-    """Start a pipeline execution asynchronously without waiting for completion.
+    parsed: Annotated[tuple[RunRequest, PipelineApiExtras], Depends(_parse_request)],
+) -> PipelexRunResultStart:
+    """Start a method asynchronously; returns its pipeline_run_id immediately (MTHDS Protocol `POST /start`).
 
-    Pipelex domain failures propagate untouched: the global `PipelexError`
-    handler in `api.exception_handlers` turns them into an RFC 7807 problem response.
+    Answers `202 Accepted` with a `StartAck`. A client-supplied `pipeline_run_id` is
+    honored (protocol D11: this runner accepts it; `StartAck.pipeline_run_id` is always
+    authoritative). Pipelex domain failures propagate untouched: the global
+    `PipelexError` handler in `api.exception_handlers` turns them into an
+    RFC 7807 problem response.
     """
-    pipeline_request, extras = parsed
+    run_request, extras = parsed
     runner = ApiRunner(user_id=_get_user_id(request))
-    return await runner.start_pipeline(
-        pipe_code=pipeline_request.pipe_code,
-        mthds_contents=pipeline_request.mthds_contents,
-        inputs=pipeline_request.inputs,
-        output_name=pipeline_request.output_name,
-        output_multiplicity=pipeline_request.output_multiplicity,
-        dynamic_output_concept_ref=pipeline_request.dynamic_output_concept_ref,
+    return await runner.start(
+        pipe_code=run_request.pipe_code,
+        mthds_contents=run_request.mthds_contents,
+        inputs=run_request.inputs,
+        output_name=run_request.output_name,
+        output_multiplicity=run_request.output_multiplicity,
+        dynamic_output_concept_ref=run_request.dynamic_output_concept_ref,
         pipeline_run_id=extras.pipeline_run_id,
         callback_urls=extras.callback_urls,
         request_id=get_request_id(),

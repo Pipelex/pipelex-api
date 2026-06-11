@@ -12,7 +12,7 @@ request).
 """
 
 import contextvars
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 _request_id_ctxvar: contextvars.ContextVar[str | None] = contextvars.ContextVar("pipelex_api_request_id", default=None)
@@ -30,7 +30,7 @@ def get_route_path() -> str | None:
 
 
 @contextmanager
-def bound_request_context(*, request_id: str, route_path: str) -> Iterator[None]:
+def bound_request_context(*, request_id: str, route_path: str) -> Generator[None]:
     """Bind the request-scoped logging contextvars for the duration of the `with` block.
 
     Resets both contextvars to their prior state on exit — including when the

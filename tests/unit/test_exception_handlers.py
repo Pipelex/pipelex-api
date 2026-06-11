@@ -23,6 +23,7 @@ from pipelex.base_exceptions import (
 from pipelex.cogt.inference.error_classification import ProviderErrorMetadata, UserAction, UserActionKind
 from pipelex.cogt.inference.provider_name import ProviderName
 from pipelex.pipe_run.exceptions import AsyncExecutionNotEnabledError
+from pipelex.pipeline.exceptions import PipelineManagerAlreadyExistsError
 from pipelex.system.exceptions import EnvVarNotFoundError
 from pipelex.temporal.exceptions import WorkflowExecutionError
 from pydantic import BaseModel, ConfigDict
@@ -228,6 +229,16 @@ async def async_execution_not_enabled_route() -> None:
     raise AsyncExecutionNotEnabledError(msg)
 
 
+@_router.get("/pipeline-run-id-conflict")
+async def pipeline_run_id_conflict_route() -> None:
+    # Pipelex raises this from ``add_new_pipeline`` when a submission reuses a
+    # ``pipeline_run_id`` that is still registered (a genuinely concurrent
+    # duplicate — completed/failed runs free their entry on the way out). The
+    # API maps it to 409 Conflict (see ``_ERROR_TYPE_STATUS_OVERRIDES``).
+    msg = "Pipeline some-run-id already exists"
+    raise PipelineManagerAlreadyExistsError(msg)
+
+
 @_router.get("/temporal-transport-error")
 async def temporal_transport_error_route() -> None:
     msg = "temporal cluster unreachable"
@@ -301,18 +312,18 @@ def _bind_test_user(request: Request) -> None:
 # `request.state` the same way `api.routes.pipelex.pipeline._parse_request`
 # binds them in production.
 _TEST_PIPE_CODE = "echo"
-_TEST_PIPELINE_RUN_ID = "run-00000000-0000-0000-0000-000000000099"
+_TEST_RUN_ID = "run-00000000-0000-0000-0000-000000000099"
 
 
-def _bind_test_pipeline_state(request: Request) -> None:
+def _bind_test_run_state(request: Request) -> None:
     """Set `request.state.pipe_code` / `pipeline_run_id` the same shape `_parse_request` would.
 
     Stand-in for "the body was parsed and the two identifiers were bound" so
     the error-log enrichment can be exercised against the handler functions
-    without driving a real `/pipeline/execute` body through `_parse_request`.
+    without driving a real `/execute` body through `_parse_request`.
     """
     request.state.pipe_code = _TEST_PIPE_CODE
-    request.state.pipeline_run_id = _TEST_PIPELINE_RUN_ID
+    request.state.pipeline_run_id = _TEST_RUN_ID
 
 
 @_router.get("/authenticated-config-error")
@@ -336,31 +347,31 @@ async def authenticated_unexpected_error_route(request: Request) -> None:
 
 
 @_router.get("/pipeline-state-pipelex-error")
-async def pipeline_state_pipelex_error_route(request: Request) -> None:
+async def run_state_pipelex_error_route(request: Request) -> None:
     # Stand-in for the production flow: a body went through `_parse_request`
     # (state bound), then pipelex raised a `PipelexError` further down the
     # stack. Exercises `_log_error_report`.
-    _bind_test_pipeline_state(request)
+    _bind_test_run_state(request)
     msg = "the gateway config is missing"
     raise PipelexConfigError(msg)
 
 
 @_router.get("/pipeline-state-api-input-error")
-async def pipeline_state_api_input_error_route(request: Request) -> None:
+async def run_state_api_input_error_route(request: Request) -> None:
     # An API-authored 4xx raised after `_parse_request` bound state — exercises
     # `_log_api_authored_error`.
-    _bind_test_pipeline_state(request)
+    _bind_test_run_state(request)
     raise_validation_error("a caller-side mistake")
 
 
 @_router.get("/pipeline-state-unexpected-error")
-async def pipeline_state_unexpected_error_route(request: Request) -> None:
+async def run_state_unexpected_error_route(request: Request) -> None:
     # An unclassified exception escaping after `_parse_request` bound state —
     # exercises the catch-all `handle_unexpected_error` log path. The most
     # operationally expensive case: by definition the failure was not
     # classifiable upstream, so carrying the pipe-state identifiers is what
     # gives the operator a starting point for debugging.
-    _bind_test_pipeline_state(request)
+    _bind_test_run_state(request)
     msg = "something nobody anticipated"
     raise RuntimeError(msg)
 
@@ -535,7 +546,7 @@ class TestExceptionHandlers:
 
     def test_api_authored_500_emits_structured_error_log(self, mocker: MockerFixture):
         # Without `handle_api_error` logging, an `ApiError`-shaped 500 produces
-        # zero operator output (`/pipelex_version`'s `PackageNotFoundError →
+        # zero operator output (`/version`'s `PackageNotFoundError →
         # raise_internal_server_error` is the canonical silent case). Assert
         # the handler emits one `event=api_error` line at `error` level with
         # the response fields — same shape `_log_error_report` emits for a
@@ -626,7 +637,7 @@ class TestExceptionHandlers:
         rendered = log_spy.error.call_args.args[0]
         assert "user_id=" not in rendered
 
-    def test_pipeline_state_rides_pipelex_error_log(self, mocker: MockerFixture):
+    def test_run_state_rides_pipelex_error_log(self, mocker: MockerFixture):
         # `_parse_request` binds `pipe_code` / `pipeline_run_id` on
         # `request.state` so a downstream pipelex failure is tied to the
         # specific pipe and run id without each backend frame having to forward
@@ -639,10 +650,10 @@ class TestExceptionHandlers:
         log_spy.error.assert_called_once()
         rendered = log_spy.error.call_args.args[0]
         assert f"pipe_code={_TEST_PIPE_CODE}" in rendered
-        assert f"pipeline_run_id={_TEST_PIPELINE_RUN_ID}" in rendered
+        assert f"pipeline_run_id={_TEST_RUN_ID}" in rendered
         assert "error_type=PipelexConfigError" in rendered
 
-    def test_pipeline_state_rides_api_authored_log(self, mocker: MockerFixture):
+    def test_run_state_rides_api_authored_log(self, mocker: MockerFixture):
         # API-authored 4xx surface: `raise_validation_error` raised from a
         # route that has already bound pipe state must ship the same fields,
         # so the operator log is uniform across the validation and the
@@ -653,10 +664,10 @@ class TestExceptionHandlers:
         log_spy.warning.assert_called_once()
         rendered = log_spy.warning.call_args.args[0]
         assert f"pipe_code={_TEST_PIPE_CODE}" in rendered
-        assert f"pipeline_run_id={_TEST_PIPELINE_RUN_ID}" in rendered
+        assert f"pipeline_run_id={_TEST_RUN_ID}" in rendered
         assert "error_type=ValidationError" in rendered
 
-    def test_pipeline_state_rides_unexpected_error_log(self, mocker: MockerFixture):
+    def test_run_state_rides_unexpected_error_log(self, mocker: MockerFixture):
         # The catch-all 500 is the most operationally expensive case for a
         # missing pipe-state field — by definition the failure was not
         # classifiable upstream, so the identifiers in the log are the
@@ -668,10 +679,10 @@ class TestExceptionHandlers:
         log_spy.error.assert_called_once()
         rendered = log_spy.error.call_args.args[0]
         assert f"pipe_code={_TEST_PIPE_CODE}" in rendered
-        assert f"pipeline_run_id={_TEST_PIPELINE_RUN_ID}" in rendered
+        assert f"pipeline_run_id={_TEST_RUN_ID}" in rendered
         assert "error_type=RuntimeError" in rendered
 
-    def test_pipeline_state_absent_when_parse_request_did_not_bind(self, mocker: MockerFixture):
+    def test_run_state_absent_when_parse_request_did_not_bind(self, mocker: MockerFixture):
         # A route that didn't go through `_parse_request` (here: `/config-error`,
         # a GET that never touches the body) has no `pipe_code` /
         # `pipeline_run_id` on `request.state`. The getters return `None` and
@@ -793,3 +804,39 @@ class TestExceptionHandlers:
         assert "status=501" in rendered
         assert "error_type=AsyncExecutionNotEnabledError" in rendered
         assert "error_domain=config" in rendered
+
+    def test_pipeline_run_id_conflict_maps_to_409(self):
+        # ``PipelineManagerAlreadyExistsError`` carries no ``error_domain``
+        # (-> 500 under the default mapping), but a duplicate ``pipeline_run_id``
+        # is a client-visible conflict, not a server fault: the API overrides it
+        # to 409 Conflict so callers can tell "this id is currently in use"
+        # (resubmit after the in-flight run finishes, or pick a fresh id) apart
+        # from a real internal failure.
+        response = _build_client().get("/pipeline-run-id-conflict")
+        assert response.status_code == 409
+        assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
+        body = response.json()
+        # The body's ``status`` member must agree with the HTTP status (same
+        # RFC 7807 agreement contract as the 501 override above).
+        assert body["status"] == 409
+        assert body["error_type"] == "PipelineManagerAlreadyExistsError"
+        assert body["title"] == "Pipeline manager already exists"
+        assert body["instance"] == "/pipeline-run-id-conflict"
+        assert body["type"].endswith("/pipeline-manager-already-exists-error/")
+        assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
+
+    def test_pipeline_run_id_conflict_logs_at_warning_post_override_status(self, mocker: MockerFixture):
+        # A duplicate pipeline_run_id is a client-visible 409 conflict, not a
+        # server fault: disposition is keyed off the final HTTP status, so it
+        # logs at `warning` without a traceback — never `error` (which would
+        # page or pollute error dashboards for a normal conflict). The line
+        # still agrees with the status the client saw.
+        log_spy = mocker.patch("api.exception_handlers.log")
+        response = _build_client().get("/pipeline-run-id-conflict")
+        assert response.status_code == 409
+        log_spy.warning.assert_called_once()
+        log_spy.error.assert_not_called()
+        rendered = log_spy.warning.call_args.args[0]
+        assert "event=api_error" in rendered
+        assert "status=409" in rendered
+        assert "error_type=PipelineManagerAlreadyExistsError" in rendered

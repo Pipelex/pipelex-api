@@ -2,6 +2,36 @@
 
 ## [v0.2.0] - 2026-06-08
 
+### Changed — extension args are this server's own (callback_urls)
+
+- The MTHDS Protocol no longer defines `callback_urls` (or any completion channel) — it is now formally THIS server's extension. The `/start` OpenAPI schema is published from the server's own `PipelexApiStartRequest` model (protocol `StartRequest` + the documented `callback_urls` extension) instead of relying on the protocol model to advertise it. `ApiRunner.start` drops the dead `method_id` compatibility param (the hosted platform handles `method_id` itself and never forwards it) and gains the protocol's generic `extra` slot. SDK clients pass server-specific args via `extra` — e.g. `client.start(..., extra={"callback_urls": [...]})`.
+
+### Breaking Changes — MTHDS Protocol alignment (master plan 05, Phase C1)
+
+This server is now the reference implementation of the **[MTHDS Protocol](https://mthds.ai)** (contract nesting: MTHDS Protocol ⊂ Pipelex API ⊂ Pipelex hosted API). Clients on the new SDKs (`mthds` Python/JS protocol releases) require a pipelex-api image carrying these changes — **the minimum image version for the `/v1` surface is this release**; an older image 404s on every `/v1/*` call.
+
+- **Base path: `/api/v1` → `/v1`, no aliases.** The API router now mounts at `/v1` (SDKs compose `{MTHDS_API_URL}/v1/{endpoint}`). Zero `/api/v1` routes remain.
+- **Run routes renamed:** `POST /api/v1/pipeline/execute` → `POST /v1/execute`, `POST /api/v1/pipeline/start` → `POST /v1/start`. `/start` now answers **202 Accepted** (protocol `StartAck`) instead of 200.
+- **Wire fields renamed (D1):** request extra `pipeline_run_id` → `pipeline_run_id` (client-supplied run ids on `/start` are still accepted — the protocol allows it and `StartAck.pipeline_run_id` is authoritative); responses serialize `pipeline_run_id` / `state` instead of `pipeline_run_id` / `pipeline_state`. The pipelex runtime internals keep `pipeline_run_id` — only the wire renames.
+- **`GET /version` replaces `GET /pipelex_version` + `GET /api_version` (both deleted, no alias).** Returns the protocol `VersionInfo`: `{protocol_version, implementation: "pipelex-api", implementation_version, runtime_version}`. PUBLIC — excluded from auth exactly like `/health` (it's the handshake clients use before they have credentials).
+- **Completion-callback payload now carries `pipeline_run_id`.** The webhook POSTed to `callback_urls` carries the protocol `pipeline_run_id` field alongside the runtime's existing `pipeline_run_id`/`status` keys; the `X-Completion-Signature` is `HMAC-SHA256(secret, pipeline_run_id)` (unchanged scheme, renamed input). The `status` → `state` key rename lives in the pipelex runtime's delivery executor and ships with a later pipelex release — receivers should read `pipeline_run_id` + `status` for now.
+- **Pipelex pinned to 0.33.0** (`PipelexMTHDSProtocol` — the renamed `PipelexRunner` — with protocol methods `execute`/`start`/`validate`/`models`/`version`; `PipelexRunResult`/`PipelexStartAck` response models).
+
+### Added — MTHDS Protocol alignment
+
+- **Committed OpenAPI artifact + drift gate.** `docs/openapi/pipelex-api.openapi.yaml` is the layer-2 contract, exported from the live app via `make openapi-export` and drift-checked in CI via `make openapi-check` (wired into the lint workflow and `make check`). The five protocol routes are tagged `x-mthds-protocol: true`; `/upload` and `/resolve-storage-url` are documented as NON-CONTRACT in their descriptions (kept in the schema for self-hosters' interactive docs).
+- **Protocol conformance suite.** `tests/unit/test_protocol_conformance.py` gates CI on: the five protocol paths under `/v1` (and zero legacy paths), the `RunRequest` anyOf rule (422 on empty body), the public `/version` handshake + shape, client-supplied `pipeline_run_id` acceptance, and the completion-callback E2E — a local in-test HTTP receiver verifies delivery, the `X-Completion-Signature` HMAC, and the payload's `pipeline_run_id`/status fields through the real `DeliveryExecutor` code path (Temporal dispatch faked in-process).
+
+### Changed — `/validate` fast path restored
+
+- **Temporal-enabled `/validate` dispatches one in-process activity again.** The earlier temporary regression (direct in-process `validate_bundle` + `dry_run_pipeline`) is undone now that the pinned pipelex ships `wf_dry_validate` / `act_dry_validate`. On a Temporal-enabled runner, `/validate` runs the whole sweep **+** graph dry-run as ONE `act_dry_validate` activity (a single worker round-trip) instead of dispatching the dry-run pipeline pipe-by-pipe through Temporal (one workflow + activities per pipe) — restoring the fast path first added in PR #12. Direct (Temporal-disabled) mode is unchanged. Same wire contract; the error contract and best-effort-graph semantics are identical across both backends.
+
+### Changed
+
+- **Duplicate `pipeline_run_id` now returns 409 Conflict instead of 500.** `PipelineManagerAlreadyExistsError` — raised when a submission reuses a `pipeline_run_id` that is still registered for an in-flight run — is mapped to 409 via `_ERROR_TYPE_STATUS_OVERRIDES`, so a genuinely concurrent duplicate is a client-visible conflict rather than an opaque internal error. Pairs with the pipelex-side fix that frees a run's registry entry when it completes or fails, making serial resubmission of the same id succeed (previously every resubmission of a used id 500'd until process restart). Documented in [`docs/error-responses.md`](https://github.com/Pipelex/pipelex-api/blob/main/docs/error-responses.md).
+- **Error-log disposition is now keyed off the final HTTP status, not the error domain.** A 4xx logs at `warning` (no traceback); a 5xx logs at `error` (with traceback). This keeps API-level 4xx overrides — the new 409 conflict, and the provider-429 passthrough — out of error dashboards instead of paging on a normal client conflict. The previous rule (only `INPUT`-domain → `warning`) left domain-less 4xx errors logging at `error`.
+- **Temporal-enabled `/validate` now runs as ONE worker round-trip.** When `temporal.is_enabled` is true, the route dispatches the whole job — validation sweep **+** graph dry-run — as the one-step wrapper workflow `wf_dry_validate` (→ the single in-process `act_dry_validate` activity) via pipelex's `dispatch_dry_validate`, instead of running `validate_bundle` API-side and `dry_run_pipeline` as a top-level worker workflow with a tracing-backend round-trip. The worker traces the graph in memory and returns `{status map, graph_spec}` on the activity result; the route re-parses the blueprints and builds `pipe_structures` from a local load-only library acquisition. The wire contract is unchanged on both backends: same 200 `ValidateResponse` envelope, same best-effort `graph_spec` (null when the graph dry-run fails), same RFC 7807 422 carrying `error_type=ValidationError` for the missing-`main_pipe` precondition and `error_type=ValidateBundleError` for validation failures — both with `error_domain=input` (the structured report crosses the activity boundary and the global handler renders it identically). Direct mode (Temporal disabled) is untouched. Requires a pipelex version that ships `act_dry_validate` (newer than v0.32.1).
+
 ### Breaking Changes
 
 - **Every error response is now [RFC 7807 `application/problem+json`](https://github.com/Pipelex/pipelex-api/blob/main/docs/error-responses.md).** Replaces the legacy `{"detail": {"error_type", "message"}}` envelope across pipelex domain errors, validation (422), auth (401/403), payload limits (413), and the catch-all 500. Standard members on the wire: `type` / `title` / `status` / `detail` / `instance`. Extension members: `error_type`, `error_domain`, `retryable`, `request_id`, and — when populated by pipelex — `error_category`, `user_action`, `provider_metadata`, `model`, `provider`. Content-Type is `application/problem+json`. Clients reading the legacy `data.detail.message` must read RFC 7807 `detail` (top-level string) instead.
@@ -12,6 +42,10 @@
 
 - **`ERROR_DISCLOSURE` env var.** `verbose` (default) renders the full `ErrorReport`; `strict` redacts `detail` for non-caller-facing errors and always strips `model` / `provider` / `provider_metadata`. Provenance-gated via pipelex's `_authors_caller_facing_message` ClassVar — `error_domain` no longer drives redaction. Server logs stay verbose regardless of disclosure mode.
 - **[`docs/error-responses.md`](https://github.com/Pipelex/pipelex-api/blob/main/docs/error-responses.md)** — public API error-contract page describing the envelope, status-code mapping (`input`→422, `config`/`runtime`→500), the `type` URI namespace, disclosure modes, request correlation, and worked examples. Linked from `docs/pipe-run.md` and `docs/pipe-validate.md`.
+- **`allow_signatures` API flag.** Opt-in boolean on `/validate`, `/build/inputs`, `/build/output`, and `/build/runner`. When `true`, the validation sweep tolerates unimplemented `PipeSignature` placeholders (dry-running them by minting a mock) instead of rejecting the bundle. Defaults to `false` (strict).
+- **Postman & `curl` bundle runner.** New `postman-run-bundle` Claude skill and `build_postman_query.py` script that turn a local MTHDS bundle into a Postman request, a `curl` command, or a direct API execution. Resolves the bundle exactly like `pipelex run bundle <path>` and targets `/api/v1/pipeline/execute`, `/start`, and `/api/v1/validate`.
+- **Bundle testing Make targets.** `make bundle-run`, `bundle-validate`, `bundle-curl`, `bundle-postman`, and `bundle-dry` exercise a bundle against the API from the CLI.
+- **Local Pipelex WIP support.** `make run-wip` / `install-wip-pipelex` run the API against a local, editable `pipelex` working tree without hand-editing `pyproject.toml`.
 
 ### Changed
 
@@ -21,6 +55,17 @@
   - **Native `request_id` wiring at dispatch.** `POST /pipeline/start` now reads the request-scoped `request_id` contextvar and passes it as `request_id=` to `pipeline_run_setup(...)`, so it lands on `JobMetadata.request_id` and rides every worker-side `WorkflowLog` record. No more `webhook.payload["request_id"]` piggyback needed (and `WebhookTarget.payload` would now reject it as a reserved key anyway).
   - **Cross-path consistency regression (T6).** New `tests/unit/test_webhook_recovery.py` pins the invariant: given the same source `ErrorReport`, the classification fields surface identically via the sync HTTP RFC 7807 response and via the webhook `error` payload (composed upstream by `DeliveryExecutor._notify_webhook`).
   - **STRICT-disclosure audit (no code change).** Confirmed `api/problem_document.py` delegates wholesale to `report.to_problem_document(disclosure_mode=...)`, so pipelex's provenance-gated keying flip (Decision D1) flows through untouched. The two `error_domain == INPUT` sites in `api/exception_handlers.py` are log-level switches, not wire-disclosure switches, and remain correct.
+- **Shared request validation.** Consolidated the MTHDS payload validation (the `mthds_contents` bound + per-file size guard) and the new `allow_signatures` flag into a shared `MthdsContentsRequest` Pydantic base model that `/validate` and the build routes subclass, so the validation routes can't drift.
+- **`/build/inputs` and `/build/output` reuse the validated library.** Both now read the requested pipe from the library `validate_bundle` already opened and left current, instead of opening and loading a second one — less work and memory per request — and scope the dry-run sweep to the requested pipe.
+- **Unit tests run with Temporal disabled.** `tests/unit/conftest.py` forces `temporal_enabled=False`, so the suite executes pipelines (including dry-run validation) in-process and hermetically.
+- **`pyproject.toml` tooling config.** Set pyright `venvPath` / `venv` and expanded the `exclude` lists to ignore `node_modules`, hidden files, and `.claude/`.
+
+### Fixed
+
+- **Library resource leak in `/validate`, `/build/inputs`, and `/build/output`.** The library `validate_bundle` opens and leaves current on success was never torn down, orphaning a library in the `LibraryManager` on every successful call. Each route now owns that teardown in a `finally`.
+- **`/build/runner` returned 500 on a failed dry-run.** A failed dry-run of a caller-submitted bundle now becomes a 422 `ValidateBundleError` (RFC 7807 problem response), matching `/validate`, `/build/inputs`, and `/build/output`. (The bare `DryRunError` carried no `error_domain`, so the global handler had been rendering it as a server fault.)
+- **`/build/runner` generated code for a `SKIPPED` pipe.** When the requested pipe was `SKIPPED` during validation (an unresolved cross-package dependency), the endpoint used to emit runner code for a pipeline that can't actually run; it now rejects the request with 422.
+- **Makefile `help` output.** `Makefile_basics.mk` no longer overrides the root `help` target, so the local and deployment help sections all compose.
 
 ### Known follow-ups (deferred, not in this set of changes)
 
