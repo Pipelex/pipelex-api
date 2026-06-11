@@ -1,6 +1,6 @@
 # Changelog
 
-## [v0.2.0] - 2026-06-08
+## [v0.2.0] - 2026-06-12
 
 ### Changed — extension args are this server's own (callback_urls)
 
