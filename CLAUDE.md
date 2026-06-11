@@ -6,23 +6,25 @@ Pipelex API is the official FastAPI REST server for [Pipelex](https://github.com
 
 ```
 api/
-  main.py              # FastAPI app init, middleware, router registration
+  main.py              # FastAPI app init, middleware, router registration (mounts at /v1)
   security.py          # Authentication (API Key + JWT)
   schemas/models.py    # Pydantic request/response models
   routes/
     health.py          # GET /health (no auth)
-    version.py         # GET /api/v1/pipelex_version, /api_version
-    uploader.py        # POST /api/v1/upload (auth-gated)
-    storage.py         # POST /api/v1/resolve-storage-url (auth-gated)
+    version.py         # GET /v1/version (no auth — MTHDS Protocol handshake)
+    uploader.py        # POST /v1/upload (auth-gated, non-contract)
+    storage.py         # POST /v1/resolve-storage-url (auth-gated, non-contract)
     pipelex/
-      pipeline.py      # POST /api/v1/pipeline/execute, /start
-      validate.py      # POST /api/v1/validate
-      build/           # POST /api/v1/build/{inputs,output,runner}
-      agent/           # POST /api/v1/build/{concept,pipe-spec}, GET /api/v1/models
+      pipeline.py      # POST /v1/execute, /v1/start (MTHDS Protocol run routes)
+      validate.py      # POST /v1/validate
+      build/           # POST /v1/build/{inputs,output,runner}
+      agent/           # POST /v1/build/{concept,pipe-spec}, GET /v1/models
 tests/
   unit/                # Unit tests
   e2e/                 # End-to-end tests
 ```
+
+This server is the reference implementation of the [MTHDS Protocol](https://mthds.ai): `POST /execute`, `POST /start`, `POST /validate`, `GET /models`, `GET /version` under the `/v1` base path, tagged `x-mthds-protocol: true` in the committed OpenAPI artifact (`docs/openapi/pipelex-api.openapi.yaml`, regenerated via `make openapi-export`, drift-checked via `make openapi-check`). Contract nesting: MTHDS Protocol ⊂ Pipelex API ⊂ Pipelex hosted API.
 
 ## Commands
 
@@ -144,30 +146,40 @@ except SomeSpecificError as exc:
 - Return `JSONResponse` with `model_dump(mode="json", serialize_as_any=True, by_alias=True)` for complex responses
 
 ```python
-@router.post("/execute", response_model=PipelexPipelineExecuteResponse)
+@router.post("/execute", response_model=PipelexRunResult)
 async def execute(
-    pipeline_request: Annotated[PipelineRequest, Depends(request_deserialization)],
-) -> PipelexPipelineExecuteResponse:
+    run_request: Annotated[RunRequest, Depends(request_deserialization)],
+) -> PipelexRunResult:
     ...
 ```
 
 ## Error Responses
 
-- Use `HTTPException` with structured `detail` dict containing `error_type` and `message`
-- Include `headers={"WWW-Authenticate": "Bearer"}` for auth errors
-- Log tracebacks for 500 errors
+Every error is rendered as RFC 7807 `application/problem+json` by the global handlers in `api/exception_handlers.py`. **Route handlers do not shape errors themselves** — they call into pipelex and let exceptions propagate. The wire contract is documented at `docs/error-responses.md`.
+
+- **Domain errors** (pipelex `PipelexError` subclasses) — raise from your code and let them propagate. The `PipelexError` global handler obtains an `ErrorReport` via `to_error_report()` and renders it into a problem document. Do not wrap, classify, or re-shape.
+- **API-authored 4xx/5xx** — use the helpers in `api/errors.py`: `raise_validation_error`, `raise_bad_request`, `raise_forbidden`, `raise_unauthenticated`, `raise_payload_too_large`, `raise_internal_server_error`. Each raises an `ApiError` carrying a pre-built problem document; the global handler emits it. **Do not raise `HTTPException` directly** — FastAPI's default handler wraps the body as `{"detail": <whatever>}` and cannot emit a flat RFC 7807 document.
+- **Auth errors** — the helpers set `WWW-Authenticate: Bearer` automatically on 401.
+- **Logging** — the global handlers emit one structured log line per error (`event=api_error`) with `request_id`, `route`, `error_type`, `error_domain`, `retryable`, `status`, and `user_id` when authenticated. Log disposition follows the final HTTP status: 4xx logs at `warning` (caller mistakes, the provider-429 passthrough, and API-level 4xx overrides like the 409 conflict); 5xx logs at `error` with traceback. Routes should not log error tracebacks themselves.
+
+Typical route:
 
 ```python
-except Exception as exc:
-    log.error("Pipeline execution error details:")
-    traceback.print_exc()
-    raise HTTPException(
-        status_code=500,
-        detail={
-            "error_type": type(exc).__name__,
-            "message": str(exc),
-        },
-    ) from exc
+@router.post("/start", response_model=PipelexStartAck, status_code=202)
+async def start(
+    request: Annotated[RunRequest, Depends(request_deserialization)],
+    user: Annotated[RequestUser | None, Depends(get_optional_user)],
+    request_id: Annotated[str, Depends(get_request_id)],
+) -> PipelexStartAck:
+    # Let PipelexError / EnvVarNotFoundError / etc. propagate to the global handler.
+    return await api_runner.start(request, user=user, request_id=request_id)
+```
+
+For an API-authored failure that has no `PipelexError`:
+
+```python
+if upload_size > MAX_UPLOAD_BYTES:
+    raise_payload_too_large(message=f"Upload exceeds {MAX_UPLOAD_BYTES} bytes.")
 ```
 
 ## Request/Response Models
@@ -193,5 +205,5 @@ except Exception as exc:
 ## Pipelex Integration
 
 - App initializes with `Pipelex.make(IntegrationMode.FASTAPI)`
-- Use `ApiRunner` (extends `PipelexRunner`) for pipeline execution
+- Use `ApiRunner` (extends `PipelexMTHDSProtocol`) for pipeline execution
 - Services are instantiated per-request, not as singletons

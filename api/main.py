@@ -1,21 +1,35 @@
-from collections.abc import AsyncIterator
+"""FastAPI app init, middleware, and router registration.
+
+App construction lives here; the failure → HTTP response mapping lives in
+`api.exception_handlers` (registered against this app below). Routes
+therefore no longer need to catch and shape errors themselves — anything
+they raise lands in the right handler by exception class.
+"""
+
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pipelex.pipelex import Pipelex
+from pipelex.pipeline.runner import MTHDS_PROTOCOL_VERSION
 from pipelex.system.environment import get_optional_env
 from pipelex.system.runtime import IntegrationMode
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from api.middleware import request_body_size_middleware
+from api.disclosure import resolve_disclosure_mode
+from api.exception_handlers import register_exception_handlers
+from api.middleware import RequestIdMiddleware, request_body_size_middleware
 from api.routes import router as api_router
 from api.routes.health import router as health_router
+from api.routes.version import router as version_router
 from api.security import get_auth_dependency
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     Pipelex.make(integration_mode=IntegrationMode.FASTAPI)
     try:
         yield
@@ -39,10 +53,54 @@ def _resolve_cors_origins() -> tuple[list[str], bool]:
     return origins, True
 
 
-app = FastAPI(redirect_slashes=False, lifespan=lifespan)
+# Resolve and validate ERROR_DISCLOSURE once, at module/startup: an unrecognized
+# value raises here and the production app fails to boot rather than silently
+# defaulting. Passed into `register_exception_handlers` below; the resolved
+# mode drives how much of an error report reaches a client. Kept module-level
+# so the production fail-fast lives on this single import path — only this
+# module triggers it, not `api.exception_handlers` (which lets tests register
+# the handlers without inheriting the env-validation crash).
+ERROR_DISCLOSURE_MODE = resolve_disclosure_mode()
+
+
+def _own_version() -> str:
+    """This server package's version — best-effort for app metadata."""
+    try:
+        return package_version("pipelex-api")
+    except PackageNotFoundError:
+        return "0.0.0"
+
+
+fastapi_app = FastAPI(
+    redirect_slashes=False,
+    lifespan=lifespan,
+    title="Pipelex API",
+    version=_own_version(),
+    summary=f"The open-source Pipelex runner — implements MTHDS Protocol v{MTHDS_PROTOCOL_VERSION}.",
+    description=(
+        f"This server implements the [MTHDS Protocol](https://mthds.ai) v{MTHDS_PROTOCOL_VERSION} "
+        "(`POST /execute`, `POST /start`, `POST /validate`, `GET /models`, `GET /version` — "
+        "marked `x-mthds-protocol: true`) plus the Pipelex build tooling extensions (`/build/*`). "
+        "Contract layering: MTHDS Protocol ⊂ Pipelex API (this server) ⊂ Pipelex hosted API. "
+        "Routes not in the published contract (`/upload`, `/resolve-storage-url`) are documented "
+        "as non-contract in their descriptions. All endpoints are served under the `/v1` base path; "
+        "errors are RFC 7807 `application/problem+json`."
+    ),
+    license_info={"name": "MIT", "identifier": "MIT"},
+)
+
+# Order matters: Starlette's `add_middleware` PREPENDS (see
+# `user_middleware.insert(0, ...)` in `starlette.applications`), so the LAST
+# `add_middleware` call becomes the OUTERMOST wrapper. Body-size is registered
+# first so CORS ends up wrapping it: a 413 short-circuit from the body-size
+# middleware still passes back through CORSMiddleware on the way out, so a
+# cross-origin browser POST sees the RFC 7807 413 with the
+# `Access-Control-Allow-Origin` header it needs — not a generic CORS error
+# that swallows the response.
+fastapi_app.add_middleware(BaseHTTPMiddleware, dispatch=request_body_size_middleware)
 
 cors_origins, cors_allow_credentials = _resolve_cors_origins()
-app.add_middleware(
+fastapi_app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=cors_allow_credentials,
@@ -50,15 +108,32 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
-app.add_middleware(BaseHTTPMiddleware, dispatch=request_body_size_middleware)
 
-app.include_router(health_router)
+fastapi_app.include_router(health_router)
 
-# Register all other routes WITH authentication (auto-selects based on AUTH_MODE env var: none/jwt/api_key)
+# `GET /v1/version` is the protocol handshake — ALWAYS public, mounted without
+# the auth dependency exactly like `/health` (clients call it for feature
+# detection before they have credentials).
+fastapi_app.include_router(version_router, prefix="/v1")
+
+# Register all other routes WITH authentication (auto-selects based on AUTH_MODE env var: none/jwt/api_key).
+# The API mounts at `/v1` — the SDKs compose `{MTHDS_API_URL}/v1/{endpoint}` (master D10); no `/api/v1`
+# mount and no alias remain.
 auth_dependency = get_auth_dependency()
-app.include_router(api_router, prefix="/api/v1", dependencies=[Depends(auth_dependency)])
+fastapi_app.include_router(api_router, prefix="/v1", dependencies=[Depends(auth_dependency)])
 
 
-@app.get("/")
+@fastapi_app.get("/")
 async def root() -> dict[str, str]:
     return {"message": "Pipelex API"}
+
+
+register_exception_handlers(fastapi_app, disclosure_mode=ERROR_DISCLOSURE_MODE)
+
+
+# RequestIdMiddleware wraps the *entire* FastAPI app — including Starlette's
+# ServerErrorMiddleware, which `add_middleware` could only ever nest inside.
+# This is what makes it genuinely outermost: the request-id contextvars are
+# bound, and `X-Request-ID` is echoed, on every response — the catch-all 500
+# included. `app` is the ASGI entrypoint (uvicorn loads `api.main:app`).
+app = RequestIdMiddleware(fastapi_app)

@@ -1,40 +1,44 @@
+"""`GET /version` — the MTHDS Protocol version handshake.
+
+Replaces the former `GET /pipelex_version` and `GET /api_version` routes with
+the single protocol route. ALWAYS PUBLIC: `api.main` mounts this router under
+`/v1` WITHOUT the auth dependency (exactly like `/health`), because clients use
+it for handshake / feature detection before they have credentials.
+"""
+
 from importlib.metadata import PackageNotFoundError, version
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter
+from pipelex.pipeline.runner import MTHDS_PROTOCOL_VERSION, PipelexVersionInfo
 
 from api.error_types import ErrorType
+from api.errors import raise_internal_server_error
 
-router = APIRouter(tags=["version"])
+router = APIRouter(tags=["discovery"])
+
+IMPLEMENTATION_NAME = "pipelex-api"
 
 
-class VersionResponse(BaseModel):
-    version: str = Field(..., description="Semantic version string")
+@router.get(
+    "/version",
+    openapi_extra={"x-mthds-protocol": True},
+)
+async def get_version() -> PipelexVersionInfo:
+    """Protocol and implementation versions (MTHDS Protocol `GET /version`).
 
-
-@router.get("/pipelex_version")
-async def pipelex_version() -> VersionResponse:
+    The handshake clients use for feature detection: `implementation`
+    identifies this runner, `implementation_version` is this server package's
+    version, and `runtime_version` is the underlying pipelex runtime version.
+    """
     try:
-        return VersionResponse(version=version("pipelex"))
+        implementation_version = version(IMPLEMENTATION_NAME)
+        runtime_version = version("pipelex")
     except PackageNotFoundError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error_type": ErrorType.PACKAGE_NOT_FOUND,
-                "message": "pipelex package metadata is not available",
-            },
-        ) from exc
-
-
-@router.get("/api_version")
-async def api_version() -> VersionResponse:
-    try:
-        return VersionResponse(version=version("pipelex-api"))
-    except PackageNotFoundError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error_type": ErrorType.PACKAGE_NOT_FOUND,
-                "message": "pipelex-api package metadata is not available",
-            },
-        ) from exc
+        raise_internal_server_error(f"Package metadata is not available: {exc}", error_type=ErrorType.PACKAGE_NOT_FOUND)
+    return PipelexVersionInfo(
+        protocol_version=MTHDS_PROTOCOL_VERSION,
+        runner_version=implementation_version,
+        implementation=IMPLEMENTATION_NAME,
+        implementation_version=implementation_version,
+        runtime_version=runtime_version,
+    )

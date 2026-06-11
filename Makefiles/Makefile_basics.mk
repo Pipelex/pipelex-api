@@ -91,6 +91,12 @@ make docs                     - Serve documentation locally with mkdocs
 make docs-check               - Check documentation build with mkdocs
 make docs-deploy              - Deploy documentation with mkdocs
 
+make openapi-export           - Export the FastAPI OpenAPI schema to docs/openapi/pipelex-api.openapi.yaml
+make openapi-check            - Fail if the committed OpenAPI artifact drifts from the app
+
+make agent-check              - Run check pipeline, silent on success (for AI agents)
+make agent-test               - Run unit tests, silent on success, output on failure (for AI agents)
+
 make check                    - Shorthand -> format lint mypy
 make c                        - Shorthand -> check
 make cc                       - Shorthand -> cleanderived check
@@ -103,6 +109,7 @@ export HELP
 	all help env lock install update build \
 	format lint pyright mypy pylint \
 	cleanderived cleanenv cleanall \
+	agent-check agent-test \
 	test test-xdist t test-quiet tq test-with-prints tp test-inference ti \
 	test-img-gen tg test-ocr to codex-tests gha-tests \
 	run-all-tests run-manual-trigger-gha-tests run-gha_disabled-tests \
@@ -110,9 +117,14 @@ export HELP
 	merge-check-ruff-lint merge-check-ruff-format merge-check-mypy merge-check-pyright \
 	li check-unused-imports fix-unused-imports check-uv check-TODOs docs docs-check docs-deploy \
 	config-template cft \
+	openapi-export openapi-check \
 	test-count check-test-badge
 
-all help:
+# `help` is owned by the root Makefile, which composes this $$HELP block with
+# $$HELP_LOCAL and $$HELP_DEPLOY_API. Defining `help` here too (this file is
+# `-include`d after the root target) would override it and hide those sections —
+# so this rule binds only `all`.
+all:
 	@echo "$$HELP"
 
 
@@ -409,13 +421,26 @@ check-TODOs: env
 ### SHORTHANDS
 ##########################################################################################
 
+agent-check: fix-unused-imports format lint pyright mypy
+	@echo "> done: agent-check"
+
+agent-test: env
+	@echo "• Running unit tests..."
+	@tmpfile=$$(mktemp); \
+	$(VENV_PYTEST) -n auto -m $(USUAL_PYTEST_MARKERS) -o log_level=WARNING --tb=short -q > "$$tmpfile" 2>&1; \
+	exit_code=$$?; \
+	if [ $$exit_code -ne 0 ]; then grep -vE '\[\s*[0-9]+%\]\s*$$' "$$tmpfile"; fi; \
+	rm -f "$$tmpfile"; \
+	if [ $$exit_code -eq 0 ]; then echo "• All tests passed."; fi; \
+	exit $$exit_code
+
 c: format lint pyright mypy
 	@echo "> done: c = check"
 
 cc: cleanderived c
 	@echo "> done: cc = cleanderived format lint pyright mypy"
 
-check: cc check-unused-imports pylint
+check: cc check-unused-imports pylint openapi-check
 	@echo "> done: check"
 
 v: validate
@@ -439,3 +464,17 @@ docs-check: env
 docs-deploy: env
 	$(call PRINT_TITLE,"Deploying documentation with mkdocs")
 	$(VENV_MKDOCS) gh-deploy --force --clean
+
+##########################################################################################
+### OPENAPI ARTIFACT
+##########################################################################################
+
+OPENAPI_ARTIFACT := docs/openapi/pipelex-api.openapi.yaml
+
+openapi-export: env
+	$(call PRINT_TITLE,"Exporting OpenAPI schema to $(OPENAPI_ARTIFACT)")
+	$(VENV_PYTHON) scripts/export_openapi.py $(OPENAPI_ARTIFACT)
+
+openapi-check: env
+	$(call PRINT_TITLE,"Checking committed OpenAPI artifact against the app")
+	$(VENV_PYTHON) scripts/export_openapi.py --check $(OPENAPI_ARTIFACT)

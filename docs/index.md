@@ -2,6 +2,21 @@
 
 Welcome to the Pipelex API documentation. The API provides programmatic access to the Pipelex system.
 
+## The three-layer contract
+
+This server is the open-source reference implementation of the **[MTHDS Protocol](https://mthds.ai)** — the minimal HTTP contract every MTHDS runner implements. The contracts nest:
+
+```
+MTHDS Protocol  ⊂  Pipelex API (this server)  ⊂  Pipelex hosted API
+(the standard)     (protocol + build tooling)    (+ durable runs, catalog, account)
+```
+
+- **MTHDS Protocol** — five routes: `POST /execute`, `POST /start`, `POST /validate`, `GET /models`, `GET /version`. Tagged `x-mthds-protocol: true` in the [committed OpenAPI artifact](openapi/pipelex-api.openapi.yaml).
+- **Pipelex API (this server)** — the protocol verbatim, plus the build tooling extensions (`/build/*`). `/upload` and `/resolve-storage-url` exist but are NOT part of the published contract.
+- **Pipelex hosted API** (`api.pipelex.com/v1`) — everything here, same shapes, plus durable runs, the method catalog, and account management.
+
+All routes are served under the `/v1` base path (clients compose `{base}/v1/{endpoint}`).
+
 ## What the API Offers
 
 The API currently allows you to:
@@ -40,10 +55,10 @@ curl http://localhost:8081/health
 
 ### 3. Run your first pipeline
 
-Send an inline MTHDS bundle and inputs to `/api/v1/pipeline/execute`:
+Send an inline MTHDS bundle and inputs to `/v1/execute`:
 
 ```bash
-curl -s http://localhost:8081/api/v1/pipeline/execute \
+curl -s http://localhost:8081/v1/execute \
   -H "Content-Type: application/json" \
   -d '{
     "pipe_code": "summarize",
@@ -52,7 +67,7 @@ curl -s http://localhost:8081/api/v1/pipeline/execute \
   }'
 ```
 
-The response contains `pipeline_state: "COMPLETED"` and the result under `pipe_output.working_memory.root.<main_stuff_name>.content`. See **[Pipe Run →](pipe-run.md)** for every input shape (text, structured objects, `Document`, `Image`, …) and the full `/execute` and `/start` reference.
+The response contains `state: "COMPLETED"` and the result under `pipe_output.working_memory.root.<main_stuff_name>.content`. See **[Pipe Run →](pipe-run.md)** for every input shape (text, structured objects, `Document`, `Image`, …) and the full `/execute` and `/start` reference.
 
 ### 4. Customize the configuration
 
@@ -63,7 +78,7 @@ Need to disable Temporal, point to a different storage backend, or ship your own
 Once deployed locally, the API is available at:
 
 ```
-http://localhost:8081/api/v1
+http://localhost:8081/v1
 ```
 
 ## Authentication
@@ -113,45 +128,44 @@ docker run --name pipelex-api -p 8081:8081 \
 ### Health & Version
 
 - `GET /health` — Health check (no auth required)
-- `GET /api/v1/pipelex_version` — Pipelex library version
-- `GET /api/v1/api_version` — API server version
+- `GET /v1/version` — MTHDS Protocol version handshake (no auth required): `{protocol_version, implementation, implementation_version, runtime_version}`. Replaces the former `/pipelex_version` and `/api_version` routes.
 
 ### Pipe Run
 Execute pipelines with flexible input formats, either synchronously or asynchronously.
 
-- `POST /api/v1/pipeline/execute` — Run a pipeline and wait for completion
-- `POST /api/v1/pipeline/start` — Start a pipeline execution without waiting
+- `POST /v1/execute` — Run a pipeline and wait for completion (200 + full result)
+- `POST /v1/start` — Start a pipeline execution without waiting (202 + `StartAck`)
 
 [Learn more →](pipe-run.md)
 
 ### Pipe Validate
 Validate MTHDS content to ensure pipelines are correctly defined before execution.
 
-- `POST /api/v1/validate` — Parse, validate, and dry-run pipelines
+- `POST /v1/validate` — Parse, validate, and dry-run pipelines
 
 [Learn more →](pipe-validate.md)
 
 ### Pipe Builder
 Generate input schemas, output representations, and runner code for pipelines.
 
-- `POST /api/v1/build/inputs` — Generate example input JSON for a pipe
-- `POST /api/v1/build/output` — Generate output representation (schema, JSON, or Python)
-- `POST /api/v1/build/runner` — Generate Python runner code for a pipe
+- `POST /v1/build/inputs` — Generate example input JSON for a pipe
+- `POST /v1/build/output` — Generate output representation (schema, JSON, or Python)
+- `POST /v1/build/runner` — Generate Python runner code for a pipe
 
 [Learn more →](pipe-builder.md)
 
 ### Agent
 Tools for AI agents building pipelines programmatically.
 
-- `POST /api/v1/build/concept` — Convert a JSON concept spec to TOML
-- `POST /api/v1/build/pipe-spec` — Convert a JSON pipe spec to TOML
-- `GET /api/v1/models` — List available model presets, aliases, and waterfalls
+- `POST /v1/build/concept` — Convert a JSON concept spec to TOML
+- `POST /v1/build/pipe-spec` — Convert a JSON pipe spec to TOML
+- `GET /v1/models` — List available model presets, aliases, and waterfalls
 
-### Uploader (auth-gated)
+### Uploader (auth-gated, NON-CONTRACT)
 
-These endpoints require `AUTH_MODE=api_key` or `AUTH_MODE=jwt` — they reject anonymous requests with 401. They're useful when a client wants to push a local file to the server instead of hosting it themselves.
+These endpoints exist in the server but are NOT part of the published Pipelex API contract — they are deployment conveniences slated for replacement by the storage redesign. They require `AUTH_MODE=api_key` or `AUTH_MODE=jwt` — they reject anonymous requests with 401.
 
-- `POST /api/v1/upload` — Upload a base64-encoded file. Returns a `pipelex-storage://…` URI you can pass back as a `Document`/`Image` `url` in subsequent pipeline calls.
-- `POST /api/v1/resolve-storage-url` — Resolve a `pipelex-storage://…` URI to a presigned HTTPS URL (when the storage backend supports it).
+- `POST /v1/upload` — Upload a base64-encoded file. Returns a `pipelex-storage://…` URI you can pass back as a `Document`/`Image` `url` in subsequent pipeline calls.
+- `POST /v1/resolve-storage-url` — Resolve a `pipelex-storage://…` URI to a presigned HTTPS URL (when the storage backend supports it).
 
 For most use cases you don't need either: pass any public HTTP(S) URL (or base64 data URL) directly as `Document.content.url` and skip the upload step entirely.

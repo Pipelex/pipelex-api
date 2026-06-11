@@ -2,7 +2,7 @@
 
 Validate MTHDS content by parsing, loading, and dry-running pipes without executing them.
 
-**Endpoint:** `POST /api/v1/validate`
+**Endpoint:** `POST /v1/validate`
 
 **Request Body:**
 
@@ -66,14 +66,31 @@ Validate MTHDS content by parsing, loading, and dry-running pipes without execut
 5. Builds per-pipe input/output structures with JSON Schema
 6. Returns validation results with blueprint, graph spec, and pipe structures
 
+**Execution Backends:**
+
+The endpoint behaves identically on both deployment backends; only where the work runs differs:
+
+- **Direct (Temporal disabled):** the validation sweep and the graph dry-run both run in-process in the API server.
+- **Temporal enabled:** the API dispatches the whole job — validation sweep **and** graph dry-run — to a worker as **one** in-process activity (`wf_dry_validate` → `act_dry_validate`) and awaits the result in a single round-trip. The activity traces the graph in an in-memory event log (no tracing-backend I/O) and returns the `graph_spec` on the activity result. Validation failures cross the boundary as structured error reports carrying the same `error_type=ValidateBundleError` / `error_domain=input` identity, so the 422 problem document is byte-for-byte the same contract as the direct path.
+
+The graph remains best-effort on both backends: a bundle that validates but whose graph dry-run fails still returns 200 with `graph_spec: null`.
+
 **Error Responses:**
 
-If the bundle is invalid, the endpoint returns HTTP 200 with `success: false`:
+If the bundle is invalid, the endpoint returns **HTTP 422** with an [RFC 7807 problem document](error-responses.md):
 
 ```json
 {
-  "success": false,
-  "mthds_contents": ["..."],
-  "message": "Bundle does not declare a main_pipe, which is required for validation"
+  "type": "https://docs.pipelex.com/latest/errors/validation-error/",
+  "title": "Validation error",
+  "status": 422,
+  "detail": "Bundle does not declare a main_pipe, which is required for validation",
+  "instance": "/v1/validate",
+  "error_type": "ValidationError",
+  "error_domain": "input",
+  "retryable": false,
+  "request_id": "9f2c1ab3-…"
 }
 ```
+
+The HTTP status code is the source of truth — a 200 always means success, and the success body never carries a `success: false` failure mode. See [Error Responses](error-responses.md) for the full envelope and disclosure modes.
