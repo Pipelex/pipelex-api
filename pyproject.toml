@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "5942376ac3d615796af118ddd8cfbf94b69ae4cf" }
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "8fe989649a5b7e089d91b524623e3c7cb65fe192" }
 
 [build-system]
 requires = ["hatchling"]

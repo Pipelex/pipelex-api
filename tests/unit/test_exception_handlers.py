@@ -820,18 +820,23 @@ class TestExceptionHandlers:
         # RFC 7807 agreement contract as the 501 override above).
         assert body["status"] == 409
         assert body["error_type"] == "PipelineManagerAlreadyExistsError"
+        assert body["title"] == "Pipeline manager already exists"
         assert body["instance"] == "/pipeline-run-id-conflict"
         assert body["type"].endswith("/pipeline-manager-already-exists-error/")
         assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
 
-    def test_pipeline_run_id_conflict_logs_post_override_status(self, mocker: MockerFixture):
-        # The operator log line must agree with the status the client saw —
-        # same alignment contract as the 501 override above.
+    def test_pipeline_run_id_conflict_logs_at_warning_post_override_status(self, mocker: MockerFixture):
+        # A duplicate pipeline_run_id is a client-visible 409 conflict, not a
+        # server fault: disposition is keyed off the final HTTP status, so it
+        # logs at `warning` without a traceback — never `error` (which would
+        # page or pollute error dashboards for a normal conflict). The line
+        # still agrees with the status the client saw.
         log_spy = mocker.patch("api.exception_handlers.log")
         response = _build_client().get("/pipeline-run-id-conflict")
         assert response.status_code == 409
-        log_spy.error.assert_called_once()
-        rendered = log_spy.error.call_args.args[0]
+        log_spy.warning.assert_called_once()
+        log_spy.error.assert_not_called()
+        rendered = log_spy.warning.call_args.args[0]
         assert "event=api_error" in rendered
         assert "status=409" in rendered
         assert "error_type=PipelineManagerAlreadyExistsError" in rendered
