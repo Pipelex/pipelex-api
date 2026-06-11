@@ -23,6 +23,7 @@ from pipelex.base_exceptions import (
 from pipelex.cogt.inference.error_classification import ProviderErrorMetadata, UserAction, UserActionKind
 from pipelex.cogt.inference.provider_name import ProviderName
 from pipelex.pipe_run.exceptions import AsyncExecutionNotEnabledError
+from pipelex.pipeline.exceptions import PipelineManagerAlreadyExistsError
 from pipelex.system.exceptions import EnvVarNotFoundError
 from pipelex.temporal.exceptions import WorkflowExecutionError
 from pydantic import BaseModel, ConfigDict
@@ -226,6 +227,16 @@ async def async_execution_not_enabled_route() -> None:
     # to 501 Not Implemented (see ``_ERROR_TYPE_STATUS_OVERRIDES``).
     msg = "Asynchronous pipeline execution is not enabled on this deployment."
     raise AsyncExecutionNotEnabledError(msg)
+
+
+@_router.get("/pipeline-run-id-conflict")
+async def pipeline_run_id_conflict_route() -> None:
+    # Pipelex raises this from ``add_new_pipeline`` when a submission reuses a
+    # ``pipeline_run_id`` that is still registered (a genuinely concurrent
+    # duplicate — completed/failed runs free their entry on the way out). The
+    # API maps it to 409 Conflict (see ``_ERROR_TYPE_STATUS_OVERRIDES``).
+    msg = "Pipeline some-run-id already exists"
+    raise PipelineManagerAlreadyExistsError(msg)
 
 
 @_router.get("/temporal-transport-error")
@@ -793,3 +804,39 @@ class TestExceptionHandlers:
         assert "status=501" in rendered
         assert "error_type=AsyncExecutionNotEnabledError" in rendered
         assert "error_domain=config" in rendered
+
+    def test_pipeline_run_id_conflict_maps_to_409(self):
+        # ``PipelineManagerAlreadyExistsError`` carries no ``error_domain``
+        # (-> 500 under the default mapping), but a duplicate ``pipeline_run_id``
+        # is a client-visible conflict, not a server fault: the API overrides it
+        # to 409 Conflict so callers can tell "this id is currently in use"
+        # (resubmit after the in-flight run finishes, or pick a fresh id) apart
+        # from a real internal failure.
+        response = _build_client().get("/pipeline-run-id-conflict")
+        assert response.status_code == 409
+        assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
+        body = response.json()
+        # The body's ``status`` member must agree with the HTTP status (same
+        # RFC 7807 agreement contract as the 501 override above).
+        assert body["status"] == 409
+        assert body["error_type"] == "PipelineManagerAlreadyExistsError"
+        assert body["title"] == "Pipeline manager already exists"
+        assert body["instance"] == "/pipeline-run-id-conflict"
+        assert body["type"].endswith("/pipeline-manager-already-exists-error/")
+        assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
+
+    def test_pipeline_run_id_conflict_logs_at_warning_post_override_status(self, mocker: MockerFixture):
+        # A duplicate pipeline_run_id is a client-visible 409 conflict, not a
+        # server fault: disposition is keyed off the final HTTP status, so it
+        # logs at `warning` without a traceback — never `error` (which would
+        # page or pollute error dashboards for a normal conflict). The line
+        # still agrees with the status the client saw.
+        log_spy = mocker.patch("api.exception_handlers.log")
+        response = _build_client().get("/pipeline-run-id-conflict")
+        assert response.status_code == 409
+        log_spy.warning.assert_called_once()
+        log_spy.error.assert_not_called()
+        rendered = log_spy.warning.call_args.args[0]
+        assert "event=api_error" in rendered
+        assert "status=409" in rendered
+        assert "error_type=PipelineManagerAlreadyExistsError" in rendered

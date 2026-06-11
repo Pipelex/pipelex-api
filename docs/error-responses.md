@@ -49,8 +49,10 @@ A few specific statuses bypass the domain mapping:
 
 - **401** — missing/invalid bearer token. `WWW-Authenticate: Bearer` is set.
 - **403** — authenticated but not authorized (storage-ownership mismatch).
+- **409** — `error_type = "PipelineManagerAlreadyExistsError"`: the submitted `pipeline_run_id` is already registered for a run that is still in flight on this server. Completed and failed runs free their id, so this only fires for genuinely concurrent duplicates — resubmit after the in-flight run finishes, or pick a fresh id.
 - **413** — request body exceeds the configured size limit.
 - **429** — set by `Retry-After` when an upstream provider rate-limits and the originating error carries `provider_metadata.retry_after_seconds`.
+- **501** — `error_type = "AsyncExecutionNotEnabledError"`: this deployment does not provide async pipeline execution (`/pipeline/start`). Permanent under the current deployment — do not retry.
 
 The HTTP status is the source of truth for success vs failure — there is no `success: true/false` field anywhere in the envelope.
 
