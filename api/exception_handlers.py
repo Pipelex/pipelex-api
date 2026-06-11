@@ -290,6 +290,13 @@ _ERROR_TYPE_STATUS_OVERRIDES: dict[str, int] = {
     # than the CONFIG-domain default of 500) tells clients "this server does
     # not provide this functionality" without inviting retries.
     "AsyncExecutionNotEnabledError": 501,
+    # A submission reusing a pipeline_run_id that is still registered (a
+    # genuinely concurrent duplicate — completed/failed runs free their entry
+    # on the way out) is a client-visible conflict, not a server fault.
+    # Mapping it to 409 Conflict (rather than the no-domain default of 500)
+    # tells clients "this id is currently in use": resubmit after the
+    # in-flight run finishes, or pick a fresh id.
+    "PipelineManagerAlreadyExistsError": 409,
 }
 
 
