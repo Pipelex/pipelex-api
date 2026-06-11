@@ -37,6 +37,11 @@ Changelog = "https://github.com/Pipelex/pipelex-api/blob/main/CHANGELOG.md"
 [project.optional-dependencies]
 dev = [
   "boto3-stubs>=1.35.24",
+  # starlette>=1.3 's TestClient imports `httpx2 as httpx` under TYPE_CHECKING and at
+  # runtime, falling back to httpx only with a deprecation warning. Installing httpx2
+  # lets pyright resolve the TestClient signatures (otherwise every `client.post(...)`
+  # is Unknown) and silences the runtime warning.
+  "httpx2>=2.4.0",
   "mypy>=1.11.2",
   "pyright>=1.1.405",
   "pandas-stubs>=2.2.3.241126",

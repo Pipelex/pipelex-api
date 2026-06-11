@@ -6,7 +6,7 @@ therefore no longer need to catch and shape errors themselves — anything
 they raise lands in the right handler by exception class.
 """
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
@@ -29,7 +29,7 @@ from api.security import get_auth_dependency
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     Pipelex.make(integration_mode=IntegrationMode.FASTAPI)
     try:
         yield
