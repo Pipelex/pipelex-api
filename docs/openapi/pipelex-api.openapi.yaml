@@ -407,17 +407,22 @@ paths:
       - validate
       summary: Validate Mthds
       description: "Validate MTHDS content by parsing, loading, and dry-running pipes (MTHDS Protocol `POST /validate`).\n\
-        \nRuns `validate_bundle` (sweep) + `dry_run_pipeline` (graph) in-process.\nWhen Temporal is enabled, the dry-run leg\
-        \ dispatches through the configured\npipe-run backend like any other execution.\n\nNOTE: the one-round-trip Temporal\
-        \ offload (`wf_dry_validate` →\n`act_dry_validate`, PR #12) is temporarily reverted — the pinned pipelex\n(0.33.0,\
-        \ MTHDS-protocol branch) does not ship `act_dry_validate`. Restore\nthe dispatch (see git history of this module)\
-        \ once a pipelex release\ncarries both the protocol surface and the dry-validate activity.\n\nResponse contract:\n\
-        - **Success (200):** the `ValidateResponse` envelope — the validated\n  `pipelex_bundle_blueprint`, the best-effort\
-        \ `graph_spec`, per-pipe\n  `pipe_structures`, plus the `success` / `message` flags clients use to\n  gate UI on a\
-        \ known-good bundle.\n- **Failure (422):** RFC 7807 `application/problem+json` — same shape as\n  every other API\
-        \ endpoint. `ValidateBundleError` is a `PipelexError`\n  (`error_domain = INPUT`) and propagates to the global handler\
-        \ in\n  `api.exception_handlers` unchanged. \"Bundle has no `main_pipe`\" is an\n  API-side semantic precondition\
-        \ for this endpoint and is raised via\n  `raise_validation_error`."
+        \nTwo backends, one contract:\n\n- **Direct (Temporal disabled):** runs `validate_bundle` (sweep) + `dry_run_pipeline`\n\
+        \  (graph) in-process.\n- **Temporal enabled:** dispatches the whole job — sweep **+** graph dry-run — to a worker\n\
+        \  as ONE in-process activity (`wf_dry_validate` → `act_dry_validate`) and awaits\n  `{status map, graph_spec}` in\
+        \ a single round-trip. The activity runs `validate_bundle`\n  itself and traces the graph in memory, so the error\
+        \ contract and the best-effort-graph\n  semantics are identical to the direct path. This avoids dispatching the dry-run\
+        \ pipeline\n  pipe-by-pipe through Temporal (one workflow + activities per pipe), which is what makes\n  the in-process\
+        \ activity the fast path on a Temporal-enabled runner.\n\nResponse contract:\n- **Success (200):** the `ValidateResponse`\
+        \ envelope — the validated\n  `pipelex_bundle_blueprint`, the best-effort `graph_spec`, per-pipe\n  `pipe_structures`,\
+        \ plus the `success` / `message` flags clients use to\n  gate UI on a known-good bundle.\n- **Failure (422):** RFC\
+        \ 7807 `application/problem+json` — same shape as\n  every other API endpoint. Direct mode: `ValidateBundleError`\
+        \ is a `PipelexError`\n  (`error_domain = INPUT`) and propagates to the global handler in\n  `api.exception_handlers`\
+        \ unchanged. Temporal mode: the same failure crosses the\n  activity boundary as a structured `ErrorReport` and surfaces\
+        \ as\n  `WorkflowExecutionError` — also a `PipelexError` — whose `to_error_report()`\n  returns the recovered original\
+        \ report (`error_type=ValidateBundleError`,\n  `error_domain=input`, caller-facing message), so the handler renders\
+        \ the SAME\n  problem document. \"Bundle has no `main_pipe`\" is an API-side semantic\n  precondition for this endpoint\
+        \ and is raised via `raise_validation_error`."
       operationId: validate_mthds_v1_validate_post
       requestBody:
         content:
