@@ -9,8 +9,7 @@ it for handshake / feature detection before they have credentials.
 from importlib.metadata import PackageNotFoundError, version
 
 from fastapi import APIRouter
-from mthds.client.protocol_models import VersionInfo
-from pipelex.pipeline.runner import MTHDS_PROTOCOL_VERSION
+from pipelex.pipeline.runner import MTHDS_PROTOCOL_VERSION, PipelexVersionInfo
 
 from api.error_types import ErrorType
 from api.errors import raise_internal_server_error
@@ -24,7 +23,7 @@ IMPLEMENTATION_NAME = "pipelex-api"
     "/version",
     openapi_extra={"x-mthds-protocol": True},
 )
-async def get_version() -> VersionInfo:
+async def get_version() -> PipelexVersionInfo:
     """Protocol and implementation versions (MTHDS Protocol `GET /version`).
 
     The handshake clients use for feature detection: `implementation`
@@ -36,8 +35,9 @@ async def get_version() -> VersionInfo:
         runtime_version = version("pipelex")
     except PackageNotFoundError as exc:
         raise_internal_server_error(f"Package metadata is not available: {exc}", error_type=ErrorType.PACKAGE_NOT_FOUND)
-    return VersionInfo(
+    return PipelexVersionInfo(
         protocol_version=MTHDS_PROTOCOL_VERSION,
+        runner_version=implementation_version,
         implementation=IMPLEMENTATION_NAME,
         implementation_version=implementation_version,
         runtime_version=runtime_version,

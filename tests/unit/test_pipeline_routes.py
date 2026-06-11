@@ -9,9 +9,8 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from mthds.client.pipeline import RunState
 from pipelex.base_exceptions import PipelexConfigError
-from pipelex.pipeline.pipeline_response import PipelexStartAck
+from pipelex.pipeline.pipeline_response import PipelexRunResultStart, RunState
 from pytest_mock import MockerFixture
 
 from api.exception_handlers import register_exception_handlers
@@ -41,7 +40,7 @@ def _build_client(mocker: MockerFixture, *, with_request_id_middleware: bool = F
         "pipe_output": {"working_memory": {"root": {}, "aliases": {}}},
     }
 
-    fake_start_response = PipelexStartAck(
+    fake_start_response = PipelexRunResultStart(
         pipeline_run_id="test-run-1",
         created_at="2026-01-15T12:00:00Z",
         state=RunState.STARTED,

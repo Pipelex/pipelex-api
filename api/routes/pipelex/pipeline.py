@@ -8,11 +8,10 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from kajson import kajson
 from kajson.exceptions import KajsonDecoderError
-from mthds.client.exceptions import PipelineRequestError
-from mthds.client.pipeline import RunRequest, RunState
+from mthds.protocol.exceptions import PipelineRequestError
 from pipelex.config import get_config
 from pipelex.pipe_run.delivery_assignment import DeliveryAssignment, StorageTarget, WebhookTarget
-from pipelex.pipeline.pipeline_response import PipelexRunResult, PipelexStartAck
+from pipelex.pipeline.pipeline_response import PipelexRunResultExecute, PipelexRunResultStart, RunState
 from pipelex.pipeline.pipeline_run_setup import pipeline_run_setup
 from pipelex.pipeline.runner import PipelexMTHDSProtocol
 from pipelex.system.environment import get_required_env
@@ -24,12 +23,12 @@ from api.error_types import ErrorType
 from api.errors import raise_validation_error
 from api.logging_context import get_request_id
 from api.routes.pipelex.utils import get_current_iso_timestamp
-from api.schemas.models import PipelexApiStartRequest, PipelineApiExtras
+from api.schemas.models import PipelexApiStartRequest, PipelineApiExtras, RunRequest
 
 if TYPE_CHECKING:
-    from mthds.models.pipe_output import VariableMultiplicity
-    from mthds.models.pipeline_inputs import PipelineInputs
-    from mthds.models.working_memory import WorkingMemoryAbstract
+    from mthds.protocol.pipe_output import VariableMultiplicity
+    from mthds.protocol.pipeline_inputs import PipelineInputs
+    from mthds.protocol.working_memory import WorkingMemoryAbstract
     from pipelex.core.memory.working_memory import WorkingMemory
 
     from api.security import RequestUser
@@ -71,11 +70,11 @@ class ApiRunner(PipelexMTHDSProtocol):
         output_name: str | None = None,
         output_multiplicity: VariableMultiplicity | None = None,
         dynamic_output_concept_ref: str | None = None,
-        pipeline_run_id: str | None = None,
         extra: dict[str, Any] | None = None,
+        pipeline_run_id: str | None = None,
         callback_urls: list[str] | None = None,
         request_id: str | None = None,
-    ) -> PipelexStartAck:
+    ) -> PipelexRunResultStart:
         """Start a method execution asynchronously without waiting for completion.
 
         `pipeline_run_id` is the client-supplied run identifier — this open-source runner
@@ -139,7 +138,7 @@ class ApiRunner(PipelexMTHDSProtocol):
             delivery_assignment=delivery_assignment,
         )
 
-        return PipelexStartAck(
+        return PipelexRunResultStart(
             pipeline_run_id=resolved_pipeline_run_id,
             created_at=created_at,
             state=RunState.STARTED,
@@ -268,7 +267,7 @@ async def _parse_request(request: Request) -> tuple[RunRequest, PipelineApiExtra
 
 @router.post(
     "/execute",
-    response_model=PipelexRunResult,
+    response_model=PipelexRunResultExecute,
     # The body is read through the raw Request (kajson decoding — see
     # `_parse_request`), so FastAPI cannot infer a typed body parameter;
     # document it explicitly so the committed OpenAPI artifact (and protocol
@@ -304,7 +303,7 @@ async def execute(request: Request) -> JSONResponse:
 
 @router.post(
     "/start",
-    response_model=PipelexStartAck,
+    response_model=PipelexRunResultStart,
     status_code=202,
     # Documented body = the protocol's StartRequest plus THIS server's own
     # extensions (callback_urls) — the protocol model no longer advertises
@@ -322,7 +321,7 @@ async def execute(request: Request) -> JSONResponse:
 async def start(
     request: Request,
     parsed: Annotated[tuple[RunRequest, PipelineApiExtras], Depends(_parse_request)],
-) -> PipelexStartAck:
+) -> PipelexRunResultStart:
     """Start a method asynchronously; returns its pipeline_run_id immediately (MTHDS Protocol `POST /start`).
 
     Answers `202 Accepted` with a `StartAck`. A client-supplied `pipeline_run_id` is

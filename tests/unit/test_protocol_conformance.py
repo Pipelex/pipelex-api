@@ -32,9 +32,9 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
-from mthds.client.pipeline import RunState
 from pipelex.pipe_run.delivery_assignment import DeliveryAssignment, DeliveryStatus
 from pipelex.pipe_run.delivery_executor import DeliveryExecutor
+from pipelex.pipeline.pipeline_response import RunState
 from pipelex.pipeline.runner import MTHDS_PROTOCOL_VERSION
 from typing_extensions import override
 

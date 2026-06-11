@@ -328,6 +328,13 @@ ignore = [
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.ruff.lint.flake8-type-checking]
+# Pydantic resolves field annotations at runtime (model build / validation), so
+# imports used only in annotations on a BaseModel subclass must stay at module
+# scope — TC001/TC002/TC003 would otherwise push them into a TYPE_CHECKING block
+# and break model construction.
+runtime-evaluated-base-classes = ["pydantic.BaseModel"]
+
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = [
   "T201",   # Allow print statements in test files

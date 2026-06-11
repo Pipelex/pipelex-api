@@ -48,7 +48,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VersionInfo'
+                $ref: '#/components/schemas/PipelexVersionInfo'
       x-mthds-protocol: true
   /v1/build/inputs:
     post:
@@ -190,19 +190,6 @@ paths:
           application/json:
             schema:
               $defs:
-                DictStuffAbstract:
-                  properties:
-                    concept:
-                      type: string
-                      title: Concept
-                    content:
-                      title: Content
-                  additionalProperties: false
-                  type: object
-                  required:
-                  - concept
-                  - content
-                  title: DictStuffAbstract
                 StuffContentAbstract:
                   properties: {}
                   type: object
@@ -248,7 +235,6 @@ paths:
                         type: array
                       - additionalProperties: true
                         type: object
-                      - $ref: '#/$defs/DictStuffAbstract'
                     type: object
                   - $ref: '#/$defs/WorkingMemoryAbstract_Any_'
                   - type: 'null'
@@ -272,16 +258,16 @@ paths:
               additionalProperties: true
               type: object
               title: RunRequest
-              description: "Body of the protocol's `POST /execute` — mirrors `RunRequest` in\n`mthds-protocol.openapi.yaml`.\n\
-                \nThe declared fields are the protocol's **basic** arguments. The model is\ndeliberately open (`extra=\"allow\"\
-                `): an implementation may accept extra\nrequest properties, and any extension arg given to the constructor\
-                \ is kept\nand serialized to the wire instead of being silently dropped.\n\nAttributes:\n    pipe_code (str\
-                \ | None): Code of the pipe to execute\n    mthds_contents (list[str] | None): List of MTHDS bundle contents\
-                \ to load\n    inputs (PipelineInputs | WorkingMemory | None): Inputs in PipelineInputs format - Pydantic\
-                \ validation is skipped\n        to preserve the flexible format (dicts, strings, StuffContent objects, etc.)\n\
-                \    output_name (str | None): Name of the output slot to write to\n    output_multiplicity (VariableMultiplicity\
-                \ | None): Output multiplicity setting\n    dynamic_output_concept_ref (str | None): Override for the dynamic\
-                \ output concept ref"
+              description: "Body of `POST /execute` — this server's typed request model.\n\nThe MTHDS Protocol has no request\
+                \ model (`mthds` deleted `RunRequest`: the\nrequest body is just the basic args the runner already takes as\
+                \ named\nparameters). pipelex-api keeps a typed model so it can publish the request\nschema in its OpenAPI\
+                \ artifact and parse the body once.\n\nThe declared fields are the protocol's **basic** arguments. The model\
+                \ is\ndeliberately open (`extra=\"allow\"`): a caller may send extra request\nproperties (an extension may\
+                \ carry the method selector), and they are kept\nrather than silently dropped.\n\nAttributes:\n    pipe_code:\
+                \ Code of the pipe to execute.\n    mthds_contents: List of MTHDS bundle contents to load.\n    inputs: Inputs\
+                \ in PipelineInputs format — Pydantic validation is skipped\n        to preserve the flexible format (dicts,\
+                \ strings, StuffContent objects, etc.).\n    output_name: Name of the output slot to write to.\n    output_multiplicity:\
+                \ Output multiplicity setting.\n    dynamic_output_concept_ref: Override for the dynamic output concept ref."
         required: true
       responses:
         '200':
@@ -289,7 +275,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PipelexRunResult'
+                $ref: '#/components/schemas/PipelexRunResultExecute'
       x-mthds-protocol: true
   /v1/start:
     post:
@@ -314,19 +300,6 @@ paths:
           application/json:
             schema:
               $defs:
-                DictStuffAbstract:
-                  properties:
-                    concept:
-                      type: string
-                      title: Concept
-                    content:
-                      title: Content
-                  additionalProperties: false
-                  type: object
-                  required:
-                  - concept
-                  - content
-                  title: DictStuffAbstract
                 StuffContentAbstract:
                   properties: {}
                   type: object
@@ -372,7 +345,6 @@ paths:
                         type: array
                       - additionalProperties: true
                         type: object
-                      - $ref: '#/$defs/DictStuffAbstract'
                     type: object
                   - $ref: '#/$defs/WorkingMemoryAbstract_Any_'
                   - type: 'null'
@@ -427,7 +399,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PipelexStartAck'
+                $ref: '#/components/schemas/PipelexRunResultStart'
       x-mthds-protocol: true
   /v1/validate:
     post:
@@ -1540,10 +1512,6 @@ components:
           anyOf:
           - $ref: '#/components/schemas/JobCategory'
           - type: 'null'
-        is_mock_inference:
-          type: boolean
-          title: Is Mock Inference
-          default: false
         started_at:
           anyOf:
           - type: string
@@ -2600,11 +2568,13 @@ components:
       required:
       - domain
       title: PipelexBundleBlueprint
-    PipelexRunResult:
+    PipelexRunResultExecute:
       properties:
         pipeline_run_id:
           type: string
           title: Pipeline Run Id
+        pipe_output:
+          $ref: '#/components/schemas/PipeOutput'
         created_at:
           type: string
           title: Created At
@@ -2620,16 +2590,25 @@ components:
           - type: string
           - type: 'null'
           title: Main Stuff Name
-        pipe_output:
-          $ref: '#/components/schemas/PipeOutput'
+      additionalProperties: true
       type: object
       required:
       - pipeline_run_id
+      - pipe_output
       - created_at
       - state
-      - pipe_output
-      title: PipelexRunResult
-    PipelexStartAck:
+      title: PipelexRunResultExecute
+      description: 'Pipelex''s `/execute` response — the completed run.
+
+
+        The protocol''s `RunResultExecute` carries `pipeline_run_id` + `pipe_output`
+
+        (both always present); `state`, `created_at`, `finished_at`, and
+
+        `main_stuff_name` are pipelex extension fields, documented by this
+
+        implementation''s own API schema.'
+    PipelexRunResultStart:
       properties:
         pipeline_run_id:
           type: string
@@ -2644,26 +2623,55 @@ components:
           - type: string
           - type: 'null'
           title: Finished At
-        main_stuff_name:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Main Stuff Name
-        pipe_output:
-          anyOf:
-          - $ref: '#/components/schemas/PipeOutput'
-          - type: 'null'
         workflow_id:
           anyOf:
           - type: string
           - type: 'null'
           title: Workflow Id
+      additionalProperties: true
       type: object
       required:
       - pipeline_run_id
       - created_at
       - state
-      title: PipelexStartAck
+      title: PipelexRunResultStart
+      description: 'Pipelex''s `/start` response — just the authoritative `pipeline_run_id`.
+
+
+        The protocol''s `RunResultStart` carries `pipeline_run_id` only; `state`,
+
+        `created_at`, `finished_at`, and `workflow_id` are pipelex extension fields.'
+    PipelexVersionInfo:
+      properties:
+        protocol_version:
+          type: string
+          title: Protocol Version
+        runner_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Runner Version
+        implementation:
+          type: string
+          title: Implementation
+        implementation_version:
+          type: string
+          title: Implementation Version
+        runtime_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Runtime Version
+      additionalProperties: true
+      type: object
+      required:
+      - protocol_version
+      - implementation
+      - implementation_version
+      title: PipelexVersionInfo
+      description: 'Pipelex''s version handshake — the protocol base plus this
+
+        implementation''s identification.'
     PipelineRef:
       properties:
         domain:
@@ -2763,7 +2771,7 @@ components:
       - CANCELLED
       - ERROR
       title: RunState
-      description: Run lifecycle state — mirrors the protocol's `RunState` enum.
+      description: Run lifecycle state — a pipelex extension field on run responses (the protocol defines none).
     SearchSetting:
       properties:
         model:
@@ -3202,36 +3210,6 @@ components:
       - msg
       - type
       title: ValidationError
-    VersionInfo:
-      properties:
-        protocol_version:
-          type: string
-          title: Protocol Version
-        implementation:
-          type: string
-          title: Implementation
-        implementation_version:
-          type: string
-          title: Implementation Version
-        runtime_version:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Runtime Version
-      type: object
-      required:
-      - protocol_version
-      - implementation
-      - implementation_version
-      title: VersionInfo
-      description: 'Protocol + implementation versions — `GET /version` (always public).
-
-
-        The handshake clients use for feature detection: `implementation`
-
-        identifies the runner, and hosted extensions (e.g. durable runs)
-
-        light up based on what the server advertises.'
     WorkingMemory:
       properties:
         root:
