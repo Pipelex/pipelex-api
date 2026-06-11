@@ -29,7 +29,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pipelex import log
-from pipelex.base_exceptions import DisclosureMode, ErrorDomain, ErrorReport, PipelexError, error_domain_is_input
+from pipelex.base_exceptions import DisclosureMode, ErrorDomain, ErrorReport, PipelexError
 from temporalio.exceptions import TemporalError
 
 from api.error_types import ErrorType
@@ -184,12 +184,28 @@ def emit_error_log(*, fields: dict[str, Any], as_error: bool) -> None:
         log.warning(rendered)
 
 
+def _emit_at_error_level(status: int) -> bool:
+    """Decide the log disposition from the final HTTP status, not the error domain.
+
+    A 5xx is a server fault — log at `error` with a traceback. A 4xx is
+    client-facing (a caller mistake or a benign conflict) — log at `warning`
+    without a traceback. Keying off the post-override status (see
+    ``_ERROR_TYPE_STATUS_OVERRIDES``) is what keeps an API-level 4xx override —
+    e.g. ``PipelineManagerAlreadyExistsError`` mapped to 409 — out of the error
+    dashboards, while still covering the `INPUT`-domain 422 caller mistakes and
+    the provider-429 passthrough without a second per-error-type registry.
+    """
+    return status >= 500
+
+
 def _log_error_report(report: ErrorReport, *, request: Request, request_id: str | None, status: int | None = None) -> None:
     """Emit the structured log entry for a handled `ErrorReport`.
 
-    `INPUT`-domain errors are the caller's mistake, not the operator's — they
-    log at `warning` without a traceback. Everything else logs at `error` with
-    the traceback. The fields mirror the response so the two never drift.
+    Disposition follows the final HTTP status (see ``_emit_at_error_level``):
+    a 4xx is client-facing and logs at `warning` without a traceback (caller
+    mistakes, the provider-429 passthrough, and API-level 4xx overrides like
+    the 409 conflict), a 5xx logs at `error` with the traceback. The fields
+    mirror the response so the two never drift.
     `user_id` rides every line when auth bound a caller — without it, the
     storage / pipeline-backend leg of a failure carries only `request_id` and
     `route`, and tying the failure to the caller requires correlating the
@@ -201,7 +217,7 @@ def _log_error_report(report: ErrorReport, *, request: Request, request_id: str 
     log line then agrees with the HTTP status actually sent rather than the
     domain default.
     """
-    is_caller_error = error_domain_is_input(report.error_domain)
+    effective_status = status if status is not None else report.http_status
     fields: dict[str, Any] = {
         "event": "api_error",
         "request_id": request_id,
@@ -211,7 +227,7 @@ def _log_error_report(report: ErrorReport, *, request: Request, request_id: str 
         "error_category": report.error_category,
         "error_domain": report.error_domain,
         "retryable": report.retryable,
-        "status": status if status is not None else report.http_status,
+        "status": effective_status,
         "provider": report.provider,
         "model": report.model,
     }
@@ -219,7 +235,7 @@ def _log_error_report(report: ErrorReport, *, request: Request, request_id: str 
     if metadata is not None:
         fields["provider_status_code"] = metadata.status_code
         fields["provider_request_id"] = metadata.request_id
-    emit_error_log(fields=fields, as_error=not is_caller_error)
+    emit_error_log(fields=fields, as_error=_emit_at_error_level(effective_status))
 
 
 def _log_api_authored_error(*, document: dict[str, Any], status: int, request: Request, request_id: str | None) -> None:
@@ -245,12 +261,12 @@ def _log_api_authored_error(*, document: dict[str, Any], status: int, request: R
       `provider_metadata.*` — those are inference-domain classifiers pipelex
       sets only on classifiable failures and the API never authors itself.
 
-    `INPUT`-domain caller mistakes log at `warning` without a traceback;
-    everything else logs at `error` with the traceback — same disposition rule
-    `_log_error_report` uses, so a sink dedup'ing by level sees one shape.
+    A 4xx logs at `warning` without a traceback; a 5xx logs at `error` with
+    the traceback — same status-keyed disposition rule `_log_error_report`
+    uses (see ``_emit_at_error_level``), so a sink dedup'ing by level sees one
+    shape.
     """
     error_domain = document.get("error_domain")
-    is_caller_error = error_domain_is_input(error_domain)
     fields: dict[str, Any] = {
         "event": "api_error",
         "request_id": request_id,
@@ -262,7 +278,7 @@ def _log_api_authored_error(*, document: dict[str, Any], status: int, request: R
         "status": status,
         "detail": document.get("detail"),
     }
-    emit_error_log(fields=fields, as_error=not is_caller_error)
+    emit_error_log(fields=fields, as_error=_emit_at_error_level(status))
 
 
 def _json_safe_report(report: ErrorReport) -> ErrorReport:
@@ -290,6 +306,13 @@ _ERROR_TYPE_STATUS_OVERRIDES: dict[str, int] = {
     # than the CONFIG-domain default of 500) tells clients "this server does
     # not provide this functionality" without inviting retries.
     "AsyncExecutionNotEnabledError": 501,
+    # A submission reusing a pipeline_run_id that is still registered (a
+    # genuinely concurrent duplicate — completed/failed runs free their entry
+    # on the way out) is a client-visible conflict, not a server fault.
+    # Mapping it to 409 Conflict (rather than the no-domain default of 500)
+    # tells clients "this id is currently in use": resubmit after the
+    # in-flight run finishes, or pick a fresh id.
+    "PipelineManagerAlreadyExistsError": 409,
 }
 
 
