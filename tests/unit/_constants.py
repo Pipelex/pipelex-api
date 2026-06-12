@@ -46,6 +46,75 @@ output = "Text"
 prompt = "@text"
 """
 
+# Multi-file batches mirroring pipelex's additive-multi-file-library E2E fixtures
+# (`tests/e2e/pipelex/pipes/additive_multi_file_library/` in the pipelex repo) — the same
+# scenarios the protocol-alignment baseline snapshots were captured from. Copied, not read
+# from the pipelex checkout: the suite must stay self-contained once the editable pin is
+# replaced by the PyPI pin (whose wheel ships no tests).
+
+# signature_only/: concepts + a PipeSignature header referenced by a sibling controller —
+# valid only in lenient mode (`allow_signatures=True`), reports the pending signature.
+SIGNATURE_ONLY_BATCH: list[str] = [
+    """\
+domain      = "research"
+description = "Research method domain"
+
+[concept]
+KeyFinding = "A key finding extracted from a source document"
+""",
+    """\
+domain      = "research"
+description = "Research method headers"
+
+[pipe.find_key_findings]
+type        = "PipeSignature"
+description = "Find the key findings in a document (contract only)."
+inputs      = { doc = "Text" }
+output      = "KeyFinding"
+
+[pipe.research_brief]
+type        = "PipeSequence"
+description = "Produce a research brief from a document."
+inputs      = { doc = "Text" }
+output      = "KeyFinding"
+steps       = [{ pipe = "find_key_findings", result = "findings" }]
+""",
+]
+
+# header_and_definition/: the same header plus a concrete definition satisfying it —
+# valid in strict mode, nothing pending.
+HEADER_AND_DEFINITION_BATCH: list[str] = [
+    """\
+domain      = "research"
+description = "Research method domain"
+
+[concept]
+KeyFinding = "A key finding extracted from a source document"
+""",
+    """\
+domain      = "research"
+description = "Research method headers"
+
+[pipe.find_key_findings]
+type        = "PipeSignature"
+description = "Find the key findings in a document (contract only)."
+inputs      = { doc = "Text" }
+output      = "KeyFinding"
+""",
+    """\
+domain      = "research"
+description = "Research method definitions"
+
+[pipe.find_key_findings]
+type        = "PipeLLM"
+description = "Find the key findings in a document."
+inputs      = { doc = "native.Text" }
+output      = "research.KeyFinding"
+model       = "$quick-reasoning"
+prompt      = "List the key findings in $doc."
+""",
+]
+
 # A bundle whose PipeSequence references an unimplemented PipeSignature step. It loads and wires
 # cleanly, so the only thing that rejects it in strict mode is the signature pre-pass — isolating
 # the `allow_signatures` behavior from any other validation failure.
