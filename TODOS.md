@@ -263,6 +263,8 @@ Docs match reality. The breaking-change RFC 7807 shape is now disclosed in CHANG
 
 ### Cross-repo `/validate` consumer updates (companion PRs)
 
+> **SUPERSEDED (2026-06-12)** by the MTHDS protocol surface alignment — plan at workspace root `wip/mthds-protocol-surface-alignment.md`, execution tracker at workspace root `TODOS.md`. Phase 3b of that plan did the real consumer updates (pipelex-app rename + `pipe_ref` lookups, mthds-js audit). The file named below (`mthds-js/src/runners/api-runner.ts`) no longer exists. Kept for history only.
+
 The `/validate` failure envelope change (Q11) breaks consumers that read the old `{success: false, mthds_contents, message}` shape on a 200 response. Companion PRs:
 
 - **`pipelex-app`** — `src/actions/mthds-validator.ts` had dead legacy-envelope code at the 200-success branch; cleanup PR removes it. The non-200 path was already RFC 7807-aware (top-level `detail` extraction).
