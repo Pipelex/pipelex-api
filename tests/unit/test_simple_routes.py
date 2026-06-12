@@ -5,7 +5,7 @@ from importlib.metadata import version as package_version
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pipelex.pipeline.runner import MTHDS_PROTOCOL_VERSION
+from mthds.protocol.protocol import PROTOCOL_VERSION
 from pytest_mock import MockerFixture
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -37,7 +37,7 @@ class TestSimpleRoutes:
         response = client.get("/v1/version")
         assert response.status_code == 200
         body = response.json()
-        assert body["protocol_version"] == MTHDS_PROTOCOL_VERSION
+        assert body["protocol_version"] == PROTOCOL_VERSION
         assert body["implementation"] == "pipelex-api"
         assert body["implementation_version"] == package_version("pipelex-api")
         assert body["runtime_version"] == package_version("pipelex")

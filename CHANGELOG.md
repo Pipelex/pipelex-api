@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.3.0] - 2026-06-12
+
+### Breaking Changes — `/validate` and `/models` rewired through the protocol runner (MTHDS Protocol surface alignment, Phase 2)
+
+`/validate` and `/models` now route through `ApiRunner` (extending `PipelexMTHDSProtocol`) exactly like `/execute` and `/start` already did — the runner owns backend selection (in-process vs ONE dispatched Temporal activity), the runtime owns the canonical artifact shapes, and the routes only add wire extras. Hosted and local runners now answer the protocol operations with identical artifacts. Requires an unreleased pipelex (> 0.33.0) carrying the canonical `PipelexValidationReport` / `build_validation_report` / `DryValidateResult` surfaces.
+
+- **`/validate` success envelope is the canonical validation report.** `pipelex_bundle_blueprint` → **`bundle_blueprint`** (primary blueprint — first file declaring `main_pipe`, else first). `pipe_structures` is keyed by **namespaced `pipe_ref`** (`domain.code`, was bare pipe code) with typed entries. New fields: `validated_pipes` (per-pipe sweep outcomes, `{pipe_ref, status}`), `pending_signatures` (refs of unimplemented `PipeSignature` declarations) and `is_runnable` — the runnability verdict finally crosses the HTTP surface. The wire extras (`mthds_contents` echo, `success`, `message`) are unchanged.
+- **The `main_pipe` precondition on `/validate` is deleted (both backends).** A bundle that declares no `main_pipe` now validates with **200** and `graph_spec: null` (was a 422), matching the local protocol and recursive-build library batches.
+- **Temporal mode is pure dispatch + map.** The worker computes everything library-dependent (`pipe_structures`, `pending_signatures`, `graph_spec`, status map) inside its single library load and ships it on the activity result; the API side no longer re-acquires a library to build response artifacts.
+- **`/models` returns the protocol `ModelDeck`.** The flat `models` list (`{name, type}` entries — the old raw per-category payload parsed into a silently EMPTY deck in the `mthds` SDK) plus this implementation's `aliases`/`waterfalls` routing extensions. The old raw keys (`presets` keyed by category, `success`) are **dropped** — no verified consumer reads them. The `type` query param is now a **single** value matching the protocol arity: repeated `?type=` values are a 422 (the old multi-category extension is dropped), unknown categories remain a 422.
+- **Protocol version constant comes from the SDK.** `/version` and the OpenAPI metadata import `PROTOCOL_VERSION` from `mthds.protocol.protocol`; the `pipelex.pipeline.runner.MTHDS_PROTOCOL_VERSION` alias is deleted upstream.
+
 ## [v0.2.0] - 2026-06-12
 
 ### Changed — extension args are this server's own (callback_urls)

@@ -69,28 +69,9 @@ class TestBuildAndAgentRoutes:
         assert "mthds_contents" not in body
         assert "message" not in body
 
-    def test_validate_missing_main_pipe_returns_rfc7807(self):
-        # Regression for TODOS.md Q11: a bundle that parses cleanly but does
-        # not declare a `main_pipe` is an API-side semantic precondition —
-        # raised via `raise_validation_error` so it lands as RFC 7807 422
-        # with `error_type = "ValidationError"`, not the legacy 400 envelope.
-        bundle_without_main_pipe = (
-            'domain = "smoke"\n\n[pipe.echo]\ntype = "PipeLLM"\ndescription = "Echo"\ninputs = { text = "Text" }\noutput = "Text"\nprompt = "@text"\n'
-        )
-        client = _build_client()
-        response = client.post(
-            "/v1/validate",
-            json={"mthds_contents": [bundle_without_main_pipe]},
-        )
-        assert response.status_code == 422
-        assert response.headers["content-type"] == "application/problem+json"
-        body = response.json()
-        assert body["error_type"] == "ValidationError"
-        assert body["error_domain"] == "input"
-        # 422 (not the legacy 400): the body is syntactically valid; the
-        # bundle fails this endpoint's content rule.
-        assert body["status"] == 422
-        assert "main_pipe" in body["detail"]
+    # NOTE: the former `main_pipe` precondition on /validate is deleted (protocol alignment
+    # D2) — a bundle without `main_pipe` now answers 200 with `graph_spec=null`. The
+    # regression pin for that behavior (both backends) lives in `test_validate_envelope.py`.
 
     def test_build_inputs_rejects_oversized_pipe_code(self):
         client = _build_client()
@@ -127,15 +108,48 @@ class TestBuildAndAgentRoutes:
         assert body["error_type"] == "ValidationError"
         assert "NotARealPipeType" in body["detail"]
 
-    def test_models_rejects_invalid_category(self, mocker: MockerFixture):
+    def test_models_rejects_invalid_category(self):
         client = _build_client()
-        # Patch list_models so we don't depend on real Pipelex setup if the
-        # validation passes — but here we expect 422 before list_models is called.
-        mocker.patch("api.routes.pipelex.agent.models.list_models")
         response = client.get("/v1/models?type=not-a-real-category")
         assert response.status_code == 422
         assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "InvalidModelCategory"
+
+    def test_models_rejects_repeated_type_param(self):
+        # D11: the protocol's `type` filter is a single plain value. The old route accepted
+        # repeated `?type=` values (list[str] Query) — that extension is dropped, and FastAPI
+        # would otherwise silently keep one of the values, so the rejection is explicit.
+        client = _build_client()
+        response = client.get("/v1/models?type=llm&type=extract")
+        assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "InvalidModelCategory"
+
+    def test_models_returns_protocol_deck(self):
+        # The deck is the protocol `ModelDeck` shape produced by `PipelexMTHDSProtocol.models`:
+        # a non-empty flat `models` list (regression for the silently-empty deck the old raw
+        # per-category payload caused in the SDK — F2) plus this implementation's routing
+        # extensions. The old raw keys (`presets` by category, `success`) are gone.
+        client = _build_client()
+        response = client.get("/v1/models")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["models"], "the protocol deck must carry a non-empty models list"
+        first_model = body["models"][0]
+        assert first_model["name"]
+        assert first_model["type"]
+        assert "aliases" in body
+        assert "waterfalls" in body
+        assert "presets" not in body
+        assert "success" not in body
+
+    def test_models_single_type_filter(self):
+        client = _build_client()
+        response = client.get("/v1/models?type=llm")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["models"]
+        assert {model["type"] for model in body["models"]} == {"llm"}
 
     @pytest.mark.parametrize(
         ("path", "payload"),

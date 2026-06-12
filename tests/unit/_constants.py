@@ -33,6 +33,19 @@ output = "Text"
 prompt = "@text"
 """
 
+# A valid single-pipe bundle that declares NO main_pipe — validates fine (D2: no main-pipe
+# precondition on /validate) and simply yields no graph.
+NO_MAIN_PIPE_MTHDS = """\
+domain = "nomain"
+
+[pipe.echo]
+type = "PipeLLM"
+description = "Echo"
+inputs = { text = "Text" }
+output = "Text"
+prompt = "@text"
+"""
+
 # A bundle whose PipeSequence references an unimplemented PipeSignature step. It loads and wires
 # cleanly, so the only thing that rejects it in strict mode is the signature pre-pass — isolating
 # the `allow_signatures` behavior from any other validation failure.

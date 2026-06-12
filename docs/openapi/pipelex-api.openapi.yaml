@@ -407,22 +407,18 @@ paths:
       - validate
       summary: Validate Mthds
       description: "Validate MTHDS content by parsing, loading, and dry-running pipes (MTHDS Protocol `POST /validate`).\n\
-        \nTwo backends, one contract:\n\n- **Direct (Temporal disabled):** runs `validate_bundle` (sweep) + `dry_run_pipeline`\n\
-        \  (graph) in-process.\n- **Temporal enabled:** dispatches the whole job — sweep **+** graph dry-run — to a worker\n\
-        \  as ONE in-process activity (`wf_dry_validate` → `act_dry_validate`) and awaits\n  `{status map, graph_spec}` in\
-        \ a single round-trip. The activity runs `validate_bundle`\n  itself and traces the graph in memory, so the error\
-        \ contract and the best-effort-graph\n  semantics are identical to the direct path. This avoids dispatching the dry-run\
-        \ pipeline\n  pipe-by-pipe through Temporal (one workflow + activities per pipe), which is what makes\n  the in-process\
-        \ activity the fast path on a Temporal-enabled runner.\n\nResponse contract:\n- **Success (200):** the `ValidateResponse`\
-        \ envelope — the validated\n  `pipelex_bundle_blueprint`, the best-effort `graph_spec`, per-pipe\n  `pipe_structures`,\
-        \ plus the `success` / `message` flags clients use to\n  gate UI on a known-good bundle.\n- **Failure (422):** RFC\
-        \ 7807 `application/problem+json` — same shape as\n  every other API endpoint. Direct mode: `ValidateBundleError`\
-        \ is a `PipelexError`\n  (`error_domain = INPUT`) and propagates to the global handler in\n  `api.exception_handlers`\
-        \ unchanged. Temporal mode: the same failure crosses the\n  activity boundary as a structured `ErrorReport` and surfaces\
-        \ as\n  `WorkflowExecutionError` — also a `PipelexError` — whose `to_error_report()`\n  returns the recovered original\
-        \ report (`error_type=ValidateBundleError`,\n  `error_domain=input`, caller-facing message), so the handler renders\
-        \ the SAME\n  problem document. \"Bundle has no `main_pipe`\" is an API-side semantic\n  precondition for this endpoint\
-        \ and is raised via `raise_validation_error`."
+        \nThin wrapper over `ApiRunner.validate` — the runner owns backend selection\n(in-process when Temporal is disabled,\
+        \ ONE dispatched worker activity when enabled)\nand always answers with the canonical `PipelexValidationReport`; this\
+        \ route only\nadds the wire extras (`mthds_contents` echo, `success`, `message`).\n\nResponse contract:\n\n- **Success\
+        \ (200):** the `ValidateResponse` envelope — the canonical report\n  (primary `bundle_blueprint`, `pipe_structures`\
+        \ keyed by namespaced `pipe_ref`,\n  per-pipe `validated_pipes` sweep outcomes, `pending_signatures` + `is_runnable`\n\
+        \  runnability verdict, best-effort `graph_spec`) plus the wire extras. A bundle\n  that declares no `main_pipe` validates\
+        \ fine and carries `graph_spec=null` —\n  there is no main-pipe precondition.\n- **Failure (422):** RFC 7807 `application/problem+json`\
+        \ — same shape as every\n  other API endpoint. Direct mode: `ValidateBundleError` is a `PipelexError`\n  (`error_domain\
+        \ = INPUT`) and propagates to the global handler in\n  `api.exception_handlers` unchanged. Temporal mode: the same\
+        \ failure crosses the\n  activity boundary as a structured `ErrorReport` and surfaces as\n  `WorkflowExecutionError`\
+        \ — also a `PipelexError` — whose `to_error_report()`\n  returns the recovered original report (`error_type=ValidateBundleError`,\n\
+        \  `error_domain=input`, caller-facing message), so the handler renders the SAME\n  problem document."
       operationId: validate_mthds_v1_validate_post
       requestBody:
         content:
@@ -449,7 +445,18 @@ paths:
       tags:
       - agent
       summary: Get Models
-      description: List available model presets, aliases, waterfalls, and talent mappings (MTHDS Protocol `GET /models`).
+      description: 'List the model deck this runner can route to (MTHDS Protocol `GET /models`).
+
+
+        Answers the protocol `ModelDeck` as produced by `PipelexMTHDSProtocol.models` —
+
+        the flat `models` list (`{name, type}` entries) plus this implementation''s routing
+
+        extensions (`aliases`, `waterfalls`). The `type` query param is a SINGLE protocol
+
+        `ModelCategory` value: repeated `?type=` values and unknown categories are both
+
+        422s (RFC 7807).'
       operationId: get_models_v1_models_get
       parameters:
       - name: type
@@ -457,22 +464,18 @@ paths:
         required: false
         schema:
           anyOf:
-          - type: array
-            items:
-              type: string
+          - type: string
           - type: 'null'
-          description: 'Filter by model category: llm, extract, img_gen, search'
+          description: 'Filter by model category: llm, extract, img_gen, search. Single value (protocol arity).'
           title: Type
-        description: 'Filter by model category: llm, extract, img_gen, search'
+        description: 'Filter by model category: llm, extract, img_gen, search. Single value (protocol arity).'
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
-                title: Response Get Models V1 Models Get
+                $ref: '#/components/schemas/PipelexModelDeck'
         '422':
           description: Validation Error
           content:
@@ -1085,6 +1088,13 @@ components:
       - pipe_and_concept_registry
       title: DataInclusionConfig
       description: Controls which data is included in graph outputs.
+    DryRunStatus:
+      type: string
+      enum:
+      - SUCCESS
+      - FAILURE
+      - SKIPPED
+      title: DryRunStatus
     EdgeKind:
       type: string
       enum:
@@ -1296,6 +1306,18 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    IOMultiplicity:
+      type: string
+      enum:
+      - single
+      - variable
+      title: IOMultiplicity
+      description: 'Wire value for an output''s multiplicity: one item, or a list of them.
+
+
+        Any multiple output — variable-length or fixed-count — reports `variable`; the
+
+        distinction the contract carries is "one vs many", not the exact count.'
     IOSpec:
       properties:
         name:
@@ -1617,6 +1639,30 @@ components:
       - inference_model_id
       - nb_tokens_by_category
       title: LLMTokensUsage
+    ModelCategory:
+      type: string
+      enum:
+      - llm
+      - extract
+      - img_gen
+      - search
+      title: ModelCategory
+      description: Model categories accepted by the protocol's `GET /models?type=` filter.
+    ModelInfo:
+      properties:
+        name:
+          type: string
+          title: Name
+        type:
+          anyOf:
+          - $ref: '#/components/schemas/ModelCategory'
+          - type: 'null'
+      additionalProperties: true
+      type: object
+      required:
+      - name
+      title: ModelInfo
+      description: One entry of the model deck (`ModelDeck.models[]`) — base fields + extensions.
     ModelReference:
       type: string
     ModelReferenceKind:
@@ -2029,6 +2075,20 @@ components:
       - output
       - function_name
       title: PipeFuncBlueprint
+    PipeIOContract:
+      properties:
+        inputs:
+          additionalProperties:
+            $ref: '#/components/schemas/PipeInputContract'
+          type: object
+          title: Inputs
+        output:
+          $ref: '#/components/schemas/PipeOutputContract'
+      type: object
+      required:
+      - output
+      title: PipeIOContract
+      description: The input/output contract of one pipe — a `pipe_structures` entry.
     PipeImgGenBlueprint:
       properties:
         source:
@@ -2105,6 +2165,20 @@ components:
       - output
       - prompt
       title: PipeImgGenBlueprint
+    PipeInputContract:
+      properties:
+        concept_code:
+          type: string
+          title: Concept Code
+        json_schema:
+          additionalProperties: true
+          type: object
+          title: Json Schema
+      type: object
+      required:
+      - concept_code
+      title: PipeInputContract
+      description: 'One declared input: the concept it expects and the JSON Schema of its content.'
     PipeLLMBlueprint:
       properties:
         source:
@@ -2218,6 +2292,19 @@ components:
       additionalProperties: false
       type: object
       title: PipeOutput
+    PipeOutputContract:
+      properties:
+        concept_code:
+          type: string
+          title: Concept Code
+        multiplicity:
+          $ref: '#/components/schemas/IOMultiplicity'
+      type: object
+      required:
+      - concept_code
+      - multiplicity
+      title: PipeOutputContract
+      description: 'The pipe''s output: the concept it produces and whether it is one item or a list.'
     PipeParallelBlueprint:
       properties:
         source:
@@ -2399,11 +2486,6 @@ components:
           - type: string
           - type: 'null'
           title: Source
-        pipe_category:
-          type: string
-          const: PipeSignature
-          title: Pipe Category
-          default: PipeSignature
         type:
           type: string
           const: PipeSignature
@@ -2498,7 +2580,6 @@ components:
       - PipeCondition
       - PipeParallel
       - PipeSequence
-      - PipeSignature
       title: PipeType
     PipelexBundleBlueprint:
       properties:
@@ -2573,6 +2654,31 @@ components:
       required:
       - domain
       title: PipelexBundleBlueprint
+    PipelexModelDeck:
+      properties:
+        models:
+          items:
+            $ref: '#/components/schemas/ModelInfo'
+          type: array
+          title: Models
+        aliases:
+          additionalProperties:
+            type: string
+          type: object
+          title: Aliases
+        waterfalls:
+          additionalProperties:
+            items:
+              type: string
+            type: array
+          type: object
+          title: Waterfalls
+      additionalProperties: true
+      type: object
+      title: PipelexModelDeck
+      description: 'Pipelex''s model deck — the protocol base plus this implementation''s
+
+        routing metadata (aliases, waterfalls).'
     PipelexRunResultExecute:
       properties:
         pipeline_run_id:
@@ -3155,25 +3261,37 @@ components:
       description: '`/validate` needs nothing beyond the shared `mthds_contents` + `allow_signatures` payload.'
     ValidateResponse:
       properties:
+        bundle_blueprint:
+          $ref: '#/components/schemas/PipelexBundleBlueprint'
+        pipe_structures:
+          additionalProperties:
+            $ref: '#/components/schemas/PipeIOContract'
+          type: object
+          title: Pipe Structures
+        graph_spec:
+          anyOf:
+          - $ref: '#/components/schemas/GraphSpec'
+          - type: 'null'
+        validated_pipes:
+          items:
+            $ref: '#/components/schemas/ValidatedPipeEntry'
+          type: array
+          title: Validated Pipes
+        pending_signatures:
+          items:
+            type: string
+          type: array
+          title: Pending Signatures
+        is_runnable:
+          type: boolean
+          title: Is Runnable
+          default: true
         mthds_contents:
           items:
             type: string
           type: array
           title: Mthds Contents
-          description: The MTHDS contents that were validated
-        pipelex_bundle_blueprint:
-          $ref: '#/components/schemas/PipelexBundleBlueprint'
-          description: Generated pipelex bundle blueprint
-        graph_spec:
-          anyOf:
-          - $ref: '#/components/schemas/GraphSpec'
-          - type: 'null'
-          description: Graph spec from the dry run
-        pipe_structures:
-          additionalProperties: true
-          type: object
-          title: Pipe Structures
-          description: Per-pipe input/output JSON Schema structures
+          description: The MTHDS contents that were validated (echo of the request)
         success:
           type: boolean
           title: Success
@@ -3184,11 +3302,41 @@ components:
           title: Message
           description: Status message
           default: MTHDS content validated successfully
+      additionalProperties: true
       type: object
       required:
+      - bundle_blueprint
       - mthds_contents
-      - pipelex_bundle_blueprint
       title: ValidateResponse
+      description: 'The canonical `PipelexValidationReport` plus this server''s wire-only extras.
+
+
+        The report fields are inherited — typed models, identical to what the local runtime
+
+        returns for the same bundle. The extras exist for HTTP clients only (the webapp gates
+
+        UI on `success` and reads back `mthds_contents`); they are NOT part of the canonical
+
+        report and no in-process consumer should depend on them.'
+    ValidatedPipeEntry:
+      properties:
+        pipe_ref:
+          type: string
+          title: Pipe Ref
+        status:
+          $ref: '#/components/schemas/DryRunStatus'
+      additionalProperties: true
+      type: object
+      required:
+      - pipe_ref
+      - status
+      title: ValidatedPipeEntry
+      description: 'One entry in the ``validated_pipes`` JSON envelope returned by the validate surfaces.
+
+
+        The ``pipe_ref`` key carries the namespaced ``pipe_ref`` (``domain.code``) — never the bare code.
+
+        ``status`` is a ``DryRunStatus`` (a ``StrEnum``), so it serializes to its plain string value.'
     ValidationError:
       properties:
         loc:
