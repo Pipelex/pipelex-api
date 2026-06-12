@@ -450,13 +450,15 @@ paths:
 
         Answers the protocol `ModelDeck` as produced by `PipelexMTHDSProtocol.models` —
 
-        the flat `models` list (`{name, type}` entries) plus this implementation''s routing
+        the flat `models` list (`{name, type}` entries) plus this implementation''s
 
-        extensions (`aliases`, `waterfalls`). The `type` query param is a SINGLE protocol
+        category-keyed routing extensions (`aliases`, `waterfalls`). The `type` query
 
-        `ModelCategory` value: repeated `?type=` values and unknown categories are both
+        param is a SINGLE protocol `ModelCategory` value: repeated `?type=` values
 
-        422s (RFC 7807).'
+        (arity, `ValidationError`) and unknown categories (`InvalidModelCategory`) are
+
+        both 422s (RFC 7807).'
       operationId: get_models_v1_models_get
       parameters:
       - name: type
@@ -2663,14 +2665,18 @@ components:
           title: Models
         aliases:
           additionalProperties:
-            type: string
+            additionalProperties:
+              type: string
+            type: object
           type: object
           title: Aliases
         waterfalls:
           additionalProperties:
-            items:
-              type: string
-            type: array
+            additionalProperties:
+              items:
+                type: string
+              type: array
+            type: object
           type: object
           title: Waterfalls
       additionalProperties: true
@@ -2678,7 +2684,14 @@ components:
       title: PipelexModelDeck
       description: 'Pipelex''s model deck — the protocol base plus this implementation''s
 
-        routing metadata (aliases, waterfalls).'
+        routing metadata (aliases, waterfalls), keyed by model category.
+
+
+        The routing extensions are category-scoped on purpose: the same alias name
+
+        (e.g. `default-small`) legitimately exists in several categories pointing at
+
+        different models, so a flat map would silently lose entries on collision.'
     PipelexRunResultExecute:
       properties:
         pipeline_run_id:

@@ -24,20 +24,20 @@ async def get_models(
     """List the model deck this runner can route to (MTHDS Protocol `GET /models`).
 
     Answers the protocol `ModelDeck` as produced by `PipelexMTHDSProtocol.models` —
-    the flat `models` list (`{name, type}` entries) plus this implementation's routing
-    extensions (`aliases`, `waterfalls`). The `type` query param is a SINGLE protocol
-    `ModelCategory` value: repeated `?type=` values and unknown categories are both
-    422s (RFC 7807).
+    the flat `models` list (`{name, type}` entries) plus this implementation's
+    category-keyed routing extensions (`aliases`, `waterfalls`). The `type` query
+    param is a SINGLE protocol `ModelCategory` value: repeated `?type=` values
+    (arity, `ValidationError`) and unknown categories (`InvalidModelCategory`) are
+    both 422s (RFC 7807).
     """
     # Protocol arity: `type` is a plain single-value enum. FastAPI silently keeps one of
     # several repeated scalar query params, so the multi-value rejection must be explicit.
+    # Generic ValidationError, not InvalidModelCategory: the values may all be valid —
+    # what's wrong is the arity.
     if len(request.query_params.getlist("type")) > 1:
-        raise_validation_error(
-            message="The `type` query parameter accepts a single value",
-            error_type=ErrorType.INVALID_MODEL_CATEGORY,
-        )
+        raise_validation_error(message="The `type` query parameter accepts a single value")
     category: ModelCategory | None = None
-    if model_type:
+    if model_type is not None:
         try:
             category = ModelCategory(model_type)
         except ValueError:

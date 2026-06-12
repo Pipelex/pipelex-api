@@ -108,9 +108,13 @@ class TestBuildAndAgentRoutes:
         assert body["error_type"] == "ValidationError"
         assert "NotARealPipeType" in body["detail"]
 
-    def test_models_rejects_invalid_category(self):
+    @pytest.mark.parametrize("bad_type", ["not-a-real-category", ""])
+    def test_models_rejects_invalid_category(self, bad_type: str):
+        # The empty string is an explicitly-supplied (invalid) filter value, not an absent
+        # param — it must fail loudly like any other unknown category, not silently return
+        # the unfiltered deck.
         client = _build_client()
-        response = client.get("/v1/models?type=not-a-real-category")
+        response = client.get(f"/v1/models?type={bad_type}")
         assert response.status_code == 422
         assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "InvalidModelCategory"
@@ -119,17 +123,21 @@ class TestBuildAndAgentRoutes:
         # D11: the protocol's `type` filter is a single plain value. The old route accepted
         # repeated `?type=` values (list[str] Query) — that extension is dropped, and FastAPI
         # would otherwise silently keep one of the values, so the rejection is explicit.
+        # Generic ValidationError (not InvalidModelCategory): both values are valid
+        # categories — what's wrong is the arity.
         client = _build_client()
         response = client.get("/v1/models?type=llm&type=extract")
         assert response.status_code == 422
         assert response.headers["content-type"] == "application/problem+json"
-        assert response.json()["error_type"] == "InvalidModelCategory"
+        assert response.json()["error_type"] == "ValidationError"
 
     def test_models_returns_protocol_deck(self):
         # The deck is the protocol `ModelDeck` shape produced by `PipelexMTHDSProtocol.models`:
         # a non-empty flat `models` list (regression for the silently-empty deck the old raw
         # per-category payload caused in the SDK — F2) plus this implementation's routing
-        # extensions. The old raw keys (`presets` by category, `success`) are gone.
+        # extensions, keyed by category (the same alias name exists in several categories —
+        # a flat map would silently drop entries on collision). The old raw keys (`presets`
+        # by category, `success`) are gone.
         client = _build_client()
         response = client.get("/v1/models")
         assert response.status_code == 200, response.text
@@ -138,8 +146,10 @@ class TestBuildAndAgentRoutes:
         first_model = body["models"][0]
         assert first_model["name"]
         assert first_model["type"]
-        assert "aliases" in body
-        assert "waterfalls" in body
+        valid_categories = {"llm", "extract", "img_gen", "search"}
+        assert set(body["aliases"]) <= valid_categories
+        assert all(isinstance(category_aliases, dict) for category_aliases in body["aliases"].values())
+        assert set(body["waterfalls"]) <= valid_categories
         assert "presets" not in body
         assert "success" not in body
 
@@ -150,6 +160,7 @@ class TestBuildAndAgentRoutes:
         body = response.json()
         assert body["models"]
         assert {model["type"] for model in body["models"]} == {"llm"}
+        assert set(body["aliases"]) <= {"llm"}
 
     @pytest.mark.parametrize(
         ("path", "payload"),
