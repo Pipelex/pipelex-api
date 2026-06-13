@@ -11,7 +11,7 @@ info:
   license:
     name: MIT
     identifier: MIT
-  version: 0.2.0
+  version: 0.3.0
 paths:
   /health:
     get:
@@ -410,7 +410,7 @@ paths:
         \nThin wrapper over `ApiRunner.validate` — the runner owns backend selection\n(in-process when Temporal is disabled,\
         \ ONE dispatched worker activity when enabled)\nand always answers with the canonical `PipelexValidationReport`; this\
         \ route only\nadds the wire extras (`mthds_contents` echo, `success`, `message`).\n\nResponse contract:\n\n- **Success\
-        \ (200):** the `ValidateResponse` envelope — the canonical report\n  (primary `bundle_blueprint`, `pipe_structures`\
+        \ (200):** the `ValidateResponse` envelope — the canonical report\n  (primary `bundle_blueprint`, `pipe_io_contracts`\
         \ keyed by namespaced `pipe_ref`,\n  per-pipe `validated_pipes` sweep outcomes, `pending_signatures` + `is_runnable`\n\
         \  runnability verdict, best-effort `graph_spec`) plus the wire extras. A bundle\n  that declares no `main_pipe` validates\
         \ fine and carries `graph_spec=null` —\n  there is no main-pipe precondition.\n- **Failure (422):** RFC 7807 `application/problem+json`\
@@ -2090,7 +2090,7 @@ components:
       required:
       - output
       title: PipeIOContract
-      description: The input/output contract of one pipe — a `pipe_structures` entry.
+      description: The input/output contract of one pipe — a `pipe_io_contracts` entry.
     PipeImgGenBlueprint:
       properties:
         source:
@@ -3276,11 +3276,11 @@ components:
       properties:
         bundle_blueprint:
           $ref: '#/components/schemas/PipelexBundleBlueprint'
-        pipe_structures:
+        pipe_io_contracts:
           additionalProperties:
             $ref: '#/components/schemas/PipeIOContract'
           type: object
-          title: Pipe Structures
+          title: Pipe Io Contracts
         graph_spec:
           anyOf:
           - $ref: '#/components/schemas/GraphSpec'

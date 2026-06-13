@@ -30,7 +30,7 @@ The success envelope is the canonical Pipelex validation report — the exact sa
     "concept": { ... },
     "pipe": { ... }
   },
-  "pipe_structures": {
+  "pipe_io_contracts": {
     "my_domain.my_pipe": {
       "inputs": {
         "text": {
@@ -59,7 +59,7 @@ The success envelope is the canonical Pipelex validation report — the exact sa
 **Response Fields (canonical report):**
 
 - `bundle_blueprint` (object): the batch's primary blueprint — the first file declaring `main_pipe`, else the first file
-- `pipe_structures` (object): per-pipe input/output contracts, keyed by the namespaced `pipe_ref` (`domain.code`); each entry carries the JSON Schema of every declared input and the output's concept + multiplicity (`single` | `variable`)
+- `pipe_io_contracts` (object): per-pipe input/output contracts, keyed by the namespaced `pipe_ref` (`domain.code`); each entry carries the JSON Schema of every declared input and the output's concept + multiplicity (`single` | `variable`)
 - `graph_spec` (object | null): best-effort execution graph of the declared `main_pipe`, dry-run against the validated library; `null` when the batch declares no `main_pipe` or the graph dry-run degrades
 - `validated_pipes` (list): per-pipe sweep outcomes — `{pipe_ref, status}` entries with status `SUCCESS` | `FAILURE` | `SKIPPED`
 - `pending_signatures` (list[str]): namespaced refs of pipes still declared as `PipeSignature` in the assembled library — what remains to implement
@@ -80,7 +80,7 @@ The route is a thin wrapper over the runtime's protocol `validate`: parse → lo
 The endpoint behaves identically on both deployment backends; only where the work runs differs:
 
 - **Direct (Temporal disabled):** the whole job runs in-process in the API server, one library load.
-- **Temporal enabled:** the API dispatches the whole job — validation sweep, graph dry-run, and the worker-side artifacts (`pipe_structures`, `pending_signatures`) — to a worker as **one** in-process activity (`wf_dry_validate` → `act_dry_validate`) and awaits the result in a single round-trip. The API side only parses the blueprints and assembles the same report; it never loads a library. Validation failures cross the boundary as structured error reports carrying the same `error_type=ValidateBundleError` / `error_domain=input` identity, so the 422 problem document is byte-for-byte the same contract as the direct path.
+- **Temporal enabled:** the API dispatches the whole job — validation sweep, graph dry-run, and the worker-side artifacts (`pipe_io_contracts`, `pending_signatures`) — to a worker as **one** in-process activity (`wf_dry_validate` → `act_dry_validate`) and awaits the result in a single round-trip. The API side only parses the blueprints and assembles the same report; it never loads a library. Validation failures cross the boundary as structured error reports carrying the same `error_type=ValidateBundleError` / `error_domain=input` identity, so the 422 problem document is byte-for-byte the same contract as the direct path.
 
 The graph remains best-effort on both backends: a bundle that validates but whose graph dry-run fails still returns 200 with `graph_spec: null`.
 

@@ -167,7 +167,7 @@ class ApiRunner(PipelexMTHDSProtocol):
 
         Temporal enabled: pure dispatch + map (D10) — the whole job (validation sweep,
         graph dry-run, and every worker-side artifact: status map, `pending_signatures`,
-        `pipe_structures`) runs as ONE in-process activity on a worker; this side parses
+        `pipe_io_contracts`) runs as ONE in-process activity on a worker; this side parses
         the blueprints (cheap, no library) and assembles the SAME canonical report via
         `build_validation_report` (D14). No API-side library acquisition.
 
@@ -190,7 +190,7 @@ class ApiRunner(PipelexMTHDSProtocol):
         blueprints = [PipelexInterpreter.make_pipelex_bundle_blueprint(mthds_content=content) for content in mthds_contents]
         return build_validation_report(
             blueprints=blueprints,
-            pipe_structures=dry_validate_result.pipe_structures,
+            pipe_io_contracts=dry_validate_result.pipe_io_contracts,
             dry_run_result=dry_validate_result.dry_run_outputs,
             pending_signatures=dry_validate_result.pending_signatures,
             graph_spec=dry_validate_result.graph_spec,

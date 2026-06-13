@@ -2,7 +2,7 @@
 
 Phase 2 of the MTHDS Protocol surface alignment: `/validate` routes through
 `ApiRunner.validate`, so the HTTP envelope is the canonical `PipelexValidationReport`
-(`bundle_blueprint`, `pipe_structures` keyed by namespaced `pipe_ref`, `validated_pipes`,
+(`bundle_blueprint`, `pipe_io_contracts` keyed by namespaced `pipe_ref`, `validated_pipes`,
 `pending_signatures` + `is_runnable`, best-effort `graph_spec`) plus this server's
 wire-only extras (`mthds_contents` echo, `success`, `message`). The direct backend runs the
 real in-process validation; the Temporal backend is exercised by faking the dispatch with a
@@ -19,7 +19,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pipelex.hub import get_library_manager
 from pipelex.pipeline.bundle_validator import DryRunOutput, DryRunStatus
-from pipelex.pipeline.pipe_structures import IOMultiplicity, PipeInputContract, PipeIOContract, PipeOutputContract
+from pipelex.pipeline.pipe_io_contracts import IOMultiplicity, PipeInputContract, PipeIOContract, PipeOutputContract
 from pipelex.temporal.tprl_pipe.act_dry_validate import DryValidateResult
 from pytest_mock import MockerFixture
 
@@ -60,12 +60,12 @@ class TestValidateEnvelope:
         assert body["bundle_blueprint"]["domain"] == "smoke"
         assert body["bundle_blueprint"]["main_pipe"] == "echo"
 
-        # `pipe_structures` keyed by namespaced pipe_ref with typed IO contracts.
-        structure = body["pipe_structures"]["smoke.echo"]
-        assert structure["output"]["multiplicity"] == "single"
-        assert structure["output"]["concept_code"]
-        assert "text" in structure["inputs"]
-        assert structure["inputs"]["text"]["concept_code"]
+        # `pipe_io_contracts` keyed by namespaced pipe_ref with typed IO contracts.
+        io_contract = body["pipe_io_contracts"]["smoke.echo"]
+        assert io_contract["output"]["multiplicity"] == "single"
+        assert io_contract["output"]["concept_code"]
+        assert "text" in io_contract["inputs"]
+        assert io_contract["inputs"]["text"]["concept_code"]
 
         # Per-pipe sweep outcomes, entries keyed `pipe_ref` (D7) — never `pipe_code`.
         assert body["validated_pipes"] == [{"pipe_ref": "smoke.echo", "status": DryRunStatus.SUCCESS}]
@@ -89,7 +89,7 @@ class TestValidateEnvelope:
         assert body["pending_signatures"] == ["sig_api.summary_sig"]
         assert body["is_runnable"] is False
         # The signature placeholder is a first-class pipe on every artifact.
-        assert set(body["pipe_structures"]) == {"sig_api.caller_seq", "sig_api.summary_sig"}
+        assert set(body["pipe_io_contracts"]) == {"sig_api.caller_seq", "sig_api.summary_sig"}
         validated_refs = {entry["pipe_ref"] for entry in body["validated_pipes"]}
         assert validated_refs == {"sig_api.caller_seq", "sig_api.summary_sig"}
 
@@ -101,7 +101,7 @@ class TestValidateEnvelope:
         body = response.json()
         assert body["graph_spec"] is None
         assert body["bundle_blueprint"]["domain"] == "nomain"
-        assert body["pipe_structures"]["nomain.echo"]["output"]["multiplicity"] == "single"
+        assert body["pipe_io_contracts"]["nomain.echo"]["output"]["multiplicity"] == "single"
         assert body["validated_pipes"] == [{"pipe_ref": "nomain.echo", "status": DryRunStatus.SUCCESS}]
         assert body["is_runnable"] is True
         assert body["success"] is True
@@ -115,7 +115,7 @@ class TestValidateEnvelope:
             dry_run_outputs={"nomain.echo": DryRunOutput(pipe_code="echo", pipe_ref="nomain.echo", status=DryRunStatus.SUCCESS)},
             graph_spec=None,
             pending_signatures=[],
-            pipe_structures={
+            pipe_io_contracts={
                 "nomain.echo": PipeIOContract(
                     inputs={"text": PipeInputContract(concept_code="native.Text", json_schema={"type": "string"})},
                     output=PipeOutputContract(concept_code="native.Text", multiplicity=IOMultiplicity.SINGLE),
@@ -132,7 +132,7 @@ class TestValidateEnvelope:
         body = response.json()
         # Same canonical envelope as the direct backend, fed by the worker's artifacts.
         assert body["bundle_blueprint"]["domain"] == "nomain"
-        assert body["pipe_structures"]["nomain.echo"]["inputs"]["text"]["json_schema"] == {"type": "string"}
+        assert body["pipe_io_contracts"]["nomain.echo"]["inputs"]["text"]["json_schema"] == {"type": "string"}
         assert body["validated_pipes"] == [{"pipe_ref": "nomain.echo", "status": DryRunStatus.SUCCESS}]
         assert body["pending_signatures"] == []
         assert body["is_runnable"] is True

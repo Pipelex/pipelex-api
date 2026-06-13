@@ -39,7 +39,7 @@ async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
     Response contract:
 
     - **Success (200):** the `ValidateResponse` envelope — the canonical report
-      (primary `bundle_blueprint`, `pipe_structures` keyed by namespaced `pipe_ref`,
+      (primary `bundle_blueprint`, `pipe_io_contracts` keyed by namespaced `pipe_ref`,
       per-pipe `validated_pipes` sweep outcomes, `pending_signatures` + `is_runnable`
       runnability verdict, best-effort `graph_spec`) plus the wire extras. A bundle
       that declares no `main_pipe` validates fine and carries `graph_spec=null` —
