@@ -1423,9 +1423,10 @@ components:
           - type: 'null'
           title: Guidance Scale
         is_moderated:
-          type: boolean
+          anyOf:
+          - type: boolean
+          - type: 'null'
           title: Is Moderated
-          default: false
         safety_tolerance:
           anyOf:
           - type: integer
