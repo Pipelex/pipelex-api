@@ -255,13 +255,15 @@ Docs match reality. The breaking-change RFC 7807 shape is now disclosed in CHANG
 ### What landed
 
 - **[`docs/error-responses.md`](docs/error-responses.md)** — new public docs page covering the RFC 7807 envelope, standard members + the pipelex extension set, the `error_domain → HTTP status` mapping (`input → 422`, `config`/`runtime` → 500, plus 401/403/413/429 carve-outs), the `type` URI namespace (`https://docs.pipelex.com/latest/errors/<kebab>/`), disclosure modes (verbose vs strict, provenance-gated on `_authors_caller_facing_message`), request correlation (`X-Request-ID` → `JobMetadata.request_id` → worker logs), and worked examples (422 input, 500 config, 401 auth). Cross-links to `docs/pipe-run.md` for the async webhook payload note.
-- **`docs/pipe-validate.md`** — "Error Responses" section rewritten: the legacy `HTTP 200 + success: false` envelope is gone; failures are now `HTTP 422` RFC 7807. The success-path body (200 `ValidateResponse` with `success: true`, `mthds_contents`, `pipelex_bundle_blueprint`, `graph_spec`, `pipe_structures`) is unchanged.
+- **`docs/pipe-validate.md`** — "Error Responses" section rewritten: the legacy `HTTP 200 + success: false` envelope is gone; failures are now `HTTP 422` RFC 7807. The success-path body (200 `ValidateResponse` with `success: true`, `mthds_contents`, `pipelex_bundle_blueprint`, `graph_spec`, `pipe_io_contracts`) is unchanged.
 - **`docs/pipe-run.md`** — the two `{"detail": {error_type, message}}` references on `/execute` and `/start` now point at `error-responses.md`.
 - **`mkdocs.yml`** — `Error Responses: error-responses.md` added to the API nav between `Pipe Validate` and `Contribute`.
 - **`CHANGELOG.md`** — new `### Breaking Changes` block at the top of `[Unreleased]` discloses the RFC 7807 migration, the `/validate` envelope removal, and the `X-Request-ID` echo. A `### Added` block records the `ERROR_DISCLOSURE` env var and the new docs page.
 - **`CLAUDE.md`** — "Error Responses" section (lines 154-171) rewritten: the legacy `HTTPException` + `{"detail": {error_type, message}}` pattern is gone. The section now teaches: routes let `PipelexError` propagate to the global handler; API-authored 4xx/5xx use the `raise_*` helpers in `api/errors.py` (which raise `ApiError`, never `HTTPException`); auth helpers set `WWW-Authenticate: Bearer` automatically; the global handlers emit structured `event=api_error` / `event=pipelex_error` / `event=unexpected_error` logs.
 
 ### Cross-repo `/validate` consumer updates (companion PRs)
+
+> **SUPERSEDED (2026-06-12)** by the MTHDS protocol surface alignment — plan at workspace root `wip/mthds-protocol-surface-alignment.md`, execution tracker at workspace root `TODOS.md`. Phase 3b of that plan did the real consumer updates (pipelex-app rename + `pipe_ref` lookups, mthds-js audit). The file named below (`mthds-js/src/runners/api-runner.ts`) no longer exists. Kept for history only.
 
 The `/validate` failure envelope change (Q11) breaks consumers that read the old `{success: false, mthds_contents, message}` shape on a 200 response. Companion PRs:
 

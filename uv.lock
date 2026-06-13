@@ -2325,7 +2325,7 @@ wheels = [
 [[package]]
 name = "pipelex"
 version = "0.33.0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/Pipelex/pipelex.git?rev=4f999776cb630257f05538f20660e6199c37fe72#4f999776cb630257f05538f20660e6199c37fe72" }
 dependencies = [
     { name = "aiofiles" },
     { name = "datamodel-code-generator" },
@@ -2364,10 +2364,6 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/46/3e/e9456296add194192a2308f2e768d36607bc0f62b25cf5c207036c56906f/pipelex-0.33.0.tar.gz", hash = "sha256:a1b1494378be1b94f3b215f60f997463423c39f453ab532770a5ad9f6b0f6cb5", size = 996997, upload-time = "2026-06-11T22:06:39.854Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b1/ad/e72f3c3a9a78117dc3c99a6af6b237a090e9eaa3e94189217780afeee1f0/pipelex-0.33.0-py3-none-any.whl", hash = "sha256:c80354dcb0e1028b5eb48d9b6a0d22434e3f684c376e3ec2f54802e3154689a8", size = 1422428, upload-time = "2026-06-11T22:06:37.832Z" },
-]
 
 [package.optional-dependencies]
 anthropic = [
@@ -2399,7 +2395,7 @@ temporal = [
 
 [[package]]
 name = "pipelex-api"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -2451,7 +2447,7 @@ requires-dist = [
     { name = "mkdocs-meta-manager", marker = "extra == 'docs'", specifier = "==1.1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.2" },
     { name = "pandas-stubs", marker = "extra == 'dev'", specifier = ">=2.2.3.241126" },
-    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal", "temporal"], specifier = "==0.33.0" },
+    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal", "temporal"], git = "https://github.com/Pipelex/pipelex.git?rev=4f999776cb630257f05538f20660e6199c37fe72" },
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.3.8" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.405" },

@@ -13,8 +13,8 @@ from importlib.metadata import version as package_version
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from mthds.protocol.protocol import PROTOCOL_VERSION
 from pipelex.pipelex import Pipelex
-from pipelex.pipeline.runner import MTHDS_PROTOCOL_VERSION
 from pipelex.system.environment import get_optional_env
 from pipelex.system.runtime import IntegrationMode
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -76,9 +76,9 @@ fastapi_app = FastAPI(
     lifespan=lifespan,
     title="Pipelex API",
     version=_own_version(),
-    summary=f"The open-source Pipelex runner — implements MTHDS Protocol v{MTHDS_PROTOCOL_VERSION}.",
+    summary=f"The open-source Pipelex runner — implements MTHDS Protocol v{PROTOCOL_VERSION}.",
     description=(
-        f"This server implements the [MTHDS Protocol](https://mthds.ai) v{MTHDS_PROTOCOL_VERSION} "
+        f"This server implements the [MTHDS Protocol](https://mthds.ai) v{PROTOCOL_VERSION} "
         "(`POST /execute`, `POST /start`, `POST /validate`, `GET /models`, `GET /version` — "
         "marked `x-mthds-protocol: true`) plus the Pipelex build tooling extensions (`/build/*`). "
         "Contract layering: MTHDS Protocol ⊂ Pipelex API (this server) ⊂ Pipelex hosted API. "

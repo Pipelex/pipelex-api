@@ -8,12 +8,12 @@ A failure response looks like this:
 
 ```json
 {
-  "type": "https://docs.pipelex.com/latest/errors/validation-error/",
-  "title": "Validation error",
+  "type": "https://docs.pipelex.com/latest/errors/validate-bundle-error/",
+  "title": "Validate bundle",
   "status": 422,
-  "detail": "Bundle does not declare a main_pipe, which is required for validation",
+  "detail": "TOML syntax error at line 1, column 6: Expected '=' after a key in a key/value pair",
   "instance": "/v1/validate",
-  "error_type": "ValidationError",
+  "error_type": "ValidateBundleError",
   "error_domain": "input",
   "retryable": false,
   "request_id": "9f2c1ab3-…"
@@ -92,7 +92,7 @@ When opening an issue, include the `request_id` from the response (or response h
 
 ```http
 POST /v1/validate
-{"mthds_contents": ["domain = \"x\"\ndescription = \"x\"\n"]}
+{"mthds_contents": ["this is not valid TOML !!!"]}
 ```
 
 ```http
@@ -101,12 +101,12 @@ Content-Type: application/problem+json
 X-Request-ID: 9f2c1ab3-…
 
 {
-  "type": "https://docs.pipelex.com/latest/errors/validation-error/",
-  "title": "Validation error",
+  "type": "https://docs.pipelex.com/latest/errors/validate-bundle-error/",
+  "title": "Validate bundle",
   "status": 422,
-  "detail": "Bundle does not declare a main_pipe, which is required for validation",
+  "detail": "TOML syntax error at line 1, column 6: Expected '=' after a key in a key/value pair",
   "instance": "/v1/validate",
-  "error_type": "ValidationError",
+  "error_type": "ValidateBundleError",
   "error_domain": "input",
   "retryable": false,
   "request_id": "9f2c1ab3-…"
