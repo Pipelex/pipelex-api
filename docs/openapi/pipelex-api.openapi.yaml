@@ -2170,16 +2170,16 @@ components:
       title: PipeImgGenBlueprint
     PipeInputContract:
       properties:
-        concept_code:
+        concept_ref:
           type: string
-          title: Concept Code
+          title: Concept Ref
         json_schema:
           additionalProperties: true
           type: object
           title: Json Schema
       type: object
       required:
-      - concept_code
+      - concept_ref
       title: PipeInputContract
       description: 'One declared input: the concept it expects and the JSON Schema of its content.'
     PipeLLMBlueprint:
@@ -2297,14 +2297,14 @@ components:
       title: PipeOutput
     PipeOutputContract:
       properties:
-        concept_code:
+        concept_ref:
           type: string
-          title: Concept Code
+          title: Concept Ref
         multiplicity:
           $ref: '#/components/schemas/IOMultiplicity'
       type: object
       required:
-      - concept_code
+      - concept_ref
       - multiplicity
       title: PipeOutputContract
       description: 'The pipe''s output: the concept it produces and whether it is one item or a list.'
