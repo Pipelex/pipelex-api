@@ -63,9 +63,9 @@ class TestValidateEnvelope:
         # `pipe_io_contracts` keyed by namespaced pipe_ref with typed IO contracts.
         io_contract = body["pipe_io_contracts"]["smoke.echo"]
         assert io_contract["output"]["multiplicity"] == "single"
-        assert io_contract["output"]["concept_code"]
+        assert io_contract["output"]["concept_ref"]
         assert "text" in io_contract["inputs"]
-        assert io_contract["inputs"]["text"]["concept_code"]
+        assert io_contract["inputs"]["text"]["concept_ref"]
 
         # Per-pipe sweep outcomes, entries keyed `pipe_ref` (D7) — never `pipe_code`.
         assert body["validated_pipes"] == [{"pipe_ref": "smoke.echo", "status": DryRunStatus.SUCCESS}]
@@ -117,8 +117,8 @@ class TestValidateEnvelope:
             pending_signatures=[],
             pipe_io_contracts={
                 "nomain.echo": PipeIOContract(
-                    inputs={"text": PipeInputContract(concept_code="native.Text", json_schema={"type": "string"})},
-                    output=PipeOutputContract(concept_code="native.Text", multiplicity=IOMultiplicity.SINGLE),
+                    inputs={"text": PipeInputContract(concept_ref="native.Text", json_schema={"type": "string"})},
+                    output=PipeOutputContract(concept_ref="native.Text", multiplicity=IOMultiplicity.SINGLE),
                 )
             },
         )

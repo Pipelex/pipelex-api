@@ -34,12 +34,12 @@ The success envelope is the canonical Pipelex validation report — the exact sa
     "my_domain.my_pipe": {
       "inputs": {
         "text": {
-          "concept_code": "native.Text",
+          "concept_ref": "native.Text",
           "json_schema": { ... }
         }
       },
       "output": {
-        "concept_code": "MyResult",
+        "concept_ref": "MyResult",
         "multiplicity": "single"
       }
     }
