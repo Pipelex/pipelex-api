@@ -5,7 +5,7 @@
 ### Changed — track pipelex keyword-only-arguments refactor
 
 - Bumped the pinned `pipelex` git rev to the keyword-only-arguments refactor branch, where non-subject function parameters across the `pipelex/` public surface are now keyword-only.
-- Updated the `parse_pipe_spec` call site to pass `spec_data` by keyword (`parse_pipe_spec(pipe_type, spec_data=...)`), matching the now keyword-only signature.
+- Updated the `parse_pipe_spec` call site to the reversed signature — the spec data is now the positional subject and `pipe_type` is keyword-only (`parse_pipe_spec(spec, pipe_type=...)`).
 
 ## [v0.3.0] - 2026-06-12
 
