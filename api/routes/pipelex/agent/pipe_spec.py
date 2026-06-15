@@ -45,7 +45,7 @@ async def build_pipe_spec(request_data: BuildPipeSpecRequest) -> BuildPipeSpecRe
     global `PipelexError` handler in `api.exception_handlers`.
     """
     try:
-        pipe_spec = parse_pipe_spec(request_data.pipe_type, request_data.spec)
+        pipe_spec = parse_pipe_spec(request_data.pipe_type, spec_data=request_data.spec)
         toml_content = pipe_spec_to_toml(pipe_spec)
 
         return BuildPipeSpecResponse(

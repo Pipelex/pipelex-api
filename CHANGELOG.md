@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed — track pipelex keyword-only-arguments refactor
+
+- Bumped the pinned `pipelex` git rev to the keyword-only-arguments refactor branch, where non-subject function parameters across the `pipelex/` public surface are now keyword-only.
+- Updated the `parse_pipe_spec` call site to pass `spec_data` by keyword (`parse_pipe_spec(pipe_type, spec_data=...)`), matching the now keyword-only signature.
+
 ## [v0.3.0] - 2026-06-12
 
 ### Breaking Changes — `/validate` and `/models` rewired through the protocol runner (MTHDS Protocol surface alignment, Phase 2)
