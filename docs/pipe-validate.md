@@ -16,6 +16,7 @@ Validate MTHDS content by parsing, loading, and dry-running pipes without execut
 
 - `mthds_contents` (list[str], required): MTHDS contents to validate (always an array, even for a single file)
 - `allow_signatures` (boolean, optional, default `false`): when true, the validation sweep tolerates unimplemented `PipeSignature` declarations instead of rejecting the bundle — the lenient mode used during top-down builds
+- `mthds_names` (list[str] | null, optional): per-file logical names, parallel to `mthds_contents` — see [Naming submitted files](#naming-submitted-files). When present it must match `mthds_contents` in length (a mismatch is a 422 request error)
 
 **Response:**
 
@@ -75,6 +76,10 @@ The success envelope is the canonical Pipelex validation report — the exact sa
 
 The route is a thin wrapper over the runtime's protocol `validate`: parse → load → dry-run-sweep every pipe → build the per-pipe IO contracts → best-effort graph of the `main_pipe` → assemble the canonical report. A bundle that declares no `main_pipe` validates normally and simply carries `graph_spec: null` — there is no main-pipe precondition.
 
+**Naming submitted files:**
+
+The submit path carries bundle text, not file paths, so by default the runtime cannot tell the client which file an error belongs to — `source` comes back `null`. Send `mthds_names` parallel to `mthds_contents` to fix this: each name is the logical identity of that content (e.g. the file's path relative to the submitted directory), and the runtime threads it onto the corresponding `blueprint.source`. The name then rides back on both paths — `bundle_blueprint.source` in the success report, and `validation_errors[].source` on a 422 — so a multi-file editor client can map a cross-file diagnostic to the file that owns it. Omit `mthds_names` (or send `null`) and behavior is exactly as before. The list, when present, must be the same length as `mthds_contents`; a mismatch is a request-shape 422 (it is the caller's wiring bug, caught before the validation sweep runs).
+
 **Execution Backends:**
 
 The endpoint behaves identically on both deployment backends; only where the work runs differs:
@@ -86,20 +91,28 @@ The graph remains best-effort on both backends: a bundle that validates but whos
 
 **Error Responses:**
 
-If the bundle is invalid, the endpoint returns **HTTP 422** with an [RFC 7807 problem document](error-responses.md):
+If the bundle is invalid, the endpoint returns **HTTP 422** with an [RFC 7807 problem document](error-responses.md). Alongside the single human-readable `detail`, the body carries a structured `validation_errors[]` list — the per-error diagnostics a client maps to per-line problems, each with a `category`, a `message`, and (for pipe/concept and blueprint errors) the owning `source`:
 
 ```json
 {
   "type": "https://docs.pipelex.com/latest/errors/validate-bundle-error/",
   "title": "Validate bundle",
   "status": 422,
-  "detail": "TOML syntax error at line 1, column 6: Expected '=' after a key in a key/value pair",
+  "detail": "Invalid main_pipe 'Not A Valid Pipe Code!' in bundle 'broken.mthds'",
   "instance": "/v1/validate",
   "error_type": "ValidateBundleError",
   "error_domain": "input",
   "retryable": false,
-  "request_id": "9f2c1ab3-…"
+  "request_id": "9f2c1ab3-…",
+  "validation_errors": [
+    {
+      "category": "bundle_blueprint_validation",
+      "message": "Invalid main_pipe 'Not A Valid Pipe Code!'",
+      "source": "broken.mthds",
+      "domain_code": "broken"
+    }
+  ]
 }
 ```
 
-The HTTP status code is the source of truth — a 200 always means success, and the success body never carries a `success: false` failure mode. See [Error Responses](error-responses.md) for the full envelope and disclosure modes.
+The HTTP status code is the source of truth — a 200 always means success, and the success body never carries a `success: false` failure mode. See [Error Responses → Structured validation errors](error-responses.md#structured-validation-errors) for every per-error field and the disclosure modes.

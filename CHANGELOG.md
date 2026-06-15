@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added — structured validation errors + per-file `source` on `/validate`
+
+- **`/validate` 422 now carries a structured `validation_errors[]` list.** On an invalid bundle the RFC 7807 `application/problem+json` body gains a per-error array — each item carries `category`, `message`, the pipelex classification (`error_type`, `pipe_code`, `concept_code`, `domain_code`), and the field/source locators (`source`, `field_path`, `field_name`, plus `variable_names` / `missing_concept_code` / `declared_concepts` where applicable). Previously the 422 exposed only a single `detail` string; the per-error diagnostics existed on the runtime error but were dropped at the exception→problem boundary, so HTTP clients could not place per-line diagnostics. Surfaced under STRICT disclosure too — they describe the caller's own submitted bundle, not server internals.
+- **New optional `mthds_names` on `POST /v1/validate`.** A per-file logical-name list, parallel to `mthds_contents`. When provided, each name is threaded onto the corresponding `blueprint.source`, so the structured errors — and the success report's `bundle_blueprint.source` — name the owning file. This is the mechanism a multi-file editor client uses to map cross-file diagnostics back to their source. Additive: nameless callers are unchanged. A length mismatch against `mthds_contents` is a request-shape 422 (caught at request validation, before the runtime would treat it as an internal error).
+
+### Changed — track pipelex validation-errors source-threading rev
+
+- Bumped the pinned `pipelex` git rev to carry the structured-error contract (`ValidationErrorItem`, `ErrorReport.validation_errors`) and the `validate_bundles_in_process` in-process orchestrator with per-content `mthds_names` source threading. `ApiRunner.validate` calls that orchestrator directly on the in-process backend (threading `mthds_names`) and threads names through `DryValidateArg` + the blueprint parse on the Temporal backend.
+
 ### Changed — track pipelex keyword-only-arguments refactor
 
 - Bumped the pinned `pipelex` git rev to the keyword-only-arguments refactor branch, where non-subject function parameters across the `pipelex/` public surface are now keyword-only.

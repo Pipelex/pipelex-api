@@ -35,6 +35,23 @@ A failure response looks like this:
 - `error_category` — finer classification when the originating error provides one (currently used by inference errors — see [`InferenceErrorCategory`](https://docs.pipelex.com/latest/errors/) upstream).
 - `user_action` — structured suggestion of what the caller should do next, when the error can author one.
 - `model`, `provider`, `provider_metadata` — populated when the failure originated in an upstream inference call. **Stripped under STRICT disclosure** (see [Disclosure modes](#disclosure-modes)).
+- `validation_errors` — structured per-error list on a `ValidateBundleError` 422. See [Structured validation errors](#structured-validation-errors).
+
+## Structured validation errors
+
+When `/validate` rejects a bundle, the `ValidateBundleError` 422 carries a `validation_errors` array alongside the single human-readable `detail` — the per-error diagnostics an editor maps to per-line problems. Each item is one categorized validation failure:
+
+| Field | Meaning |
+|---|---|
+| `category` | The failure family — one of `bundle_blueprint_validation`, `pipe_factory`, `pipes_and_concept_validation`. |
+| `message` | Human-readable description of this specific error. |
+| `error_type` | Finer error subtype within the category, when the source error provides one. |
+| `source` | The owning file of the error — populated for `pipes_and_concept_validation` and `bundle_blueprint_validation` errors. On the in-memory submit path it is the matching `mthds_names[i]` (see [Naming submitted files](pipe-validate.md)); `null` when the caller sent no names. Absent for `pipe_factory` errors. |
+| `pipe_code`, `concept_code`, `domain_code` | The pipe / concept / domain the error is about, when applicable. |
+| `field_path`, `field_name` | The offending field within the bundle, when the error localizes to one. |
+| `variable_names`, `missing_concept_code`, `declared_concepts` | Extra context for specific failure shapes (undefined variables, an unresolved concept reference, the set of concepts that were declared). |
+
+Items carry only the fields that apply to their category — absent fields are omitted, not null. `validation_errors` is **retained under STRICT disclosure** (it describes the caller's own submitted bundle, not server internals). It is present only on `ValidateBundleError`; other error types omit it.
 
 ## Status codes
 
@@ -92,7 +109,10 @@ When opening an issue, include the `request_id` from the response (or response h
 
 ```http
 POST /v1/validate
-{"mthds_contents": ["this is not valid TOML !!!"]}
+{
+  "mthds_contents": ["domain = \"broken\"\nmain_pipe = \"Not A Valid Pipe Code!\"\n"],
+  "mthds_names": ["broken.mthds"]
+}
 ```
 
 ```http
@@ -104,14 +124,24 @@ X-Request-ID: 9f2c1ab3-…
   "type": "https://docs.pipelex.com/latest/errors/validate-bundle-error/",
   "title": "Validate bundle",
   "status": 422,
-  "detail": "TOML syntax error at line 1, column 6: Expected '=' after a key in a key/value pair",
+  "detail": "Invalid main_pipe 'Not A Valid Pipe Code!' in bundle 'broken.mthds'",
   "instance": "/v1/validate",
   "error_type": "ValidateBundleError",
   "error_domain": "input",
   "retryable": false,
-  "request_id": "9f2c1ab3-…"
+  "request_id": "9f2c1ab3-…",
+  "validation_errors": [
+    {
+      "category": "bundle_blueprint_validation",
+      "message": "Invalid main_pipe 'Not A Valid Pipe Code!'",
+      "source": "broken.mthds",
+      "domain_code": "broken"
+    }
+  ]
 }
 ```
+
+The single `detail` is the human summary; `validation_errors` is the machine-readable list a client maps to per-line diagnostics. `source` echoes the `mthds_names` entry the caller paired with that content — see [Structured validation errors](#structured-validation-errors) and [Naming submitted files](pipe-validate.md).
 
 ### 500 — deployment configuration fault
 

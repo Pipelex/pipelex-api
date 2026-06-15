@@ -11,7 +11,7 @@ info:
   license:
     name: MIT
     identifier: MIT
-  version: 0.3.0
+  version: 0.4.0
 paths:
   /health:
     get:
@@ -414,11 +414,13 @@ paths:
         \ keyed by namespaced `pipe_ref`,\n  per-pipe `validated_pipes` sweep outcomes, `pending_signatures` + `is_runnable`\n\
         \  runnability verdict, best-effort `graph_spec`) plus the wire extras. A bundle\n  that declares no `main_pipe` validates\
         \ fine and carries `graph_spec=null` —\n  there is no main-pipe precondition.\n- **Failure (422):** RFC 7807 `application/problem+json`\
-        \ — same shape as every\n  other API endpoint. Direct mode: `ValidateBundleError` is a `PipelexError`\n  (`error_domain\
-        \ = INPUT`) and propagates to the global handler in\n  `api.exception_handlers` unchanged. Temporal mode: the same\
-        \ failure crosses the\n  activity boundary as a structured `ErrorReport` and surfaces as\n  `WorkflowExecutionError`\
-        \ — also a `PipelexError` — whose `to_error_report()`\n  returns the recovered original report (`error_type=ValidateBundleError`,\n\
-        \  `error_domain=input`, caller-facing message), so the handler renders the SAME\n  problem document."
+        \ — same shape as every\n  other API endpoint, carrying a structured `validation_errors[]` list (per-error\n  `category`,\
+        \ `message`, and — for pipe/concept and blueprint errors — the owning\n  `source`, populated from `mthds_names` when\
+        \ the caller supplied them). Direct mode:\n  `ValidateBundleError` is a `PipelexError` (`error_domain = INPUT`) and\
+        \ propagates to\n  the global handler in `api.exception_handlers` unchanged. Temporal mode: the same failure crosses\
+        \ the\n  activity boundary as a structured `ErrorReport` and surfaces as\n  `WorkflowExecutionError` — also a `PipelexError`\
+        \ — whose `to_error_report()`\n  returns the recovered original report (`error_type=ValidateBundleError`,\n  `error_domain=input`,\
+        \ caller-facing message), so the handler renders the SAME\n  problem document."
       operationId: validate_mthds_v1_validate_post
       requestBody:
         content:
@@ -3268,11 +3270,32 @@ components:
           description: When true, the validation sweep tolerates unimplemented pipe signatures instead of rejecting the bundle
             (signatures dry-run trivially by minting a mock). Defaults to false (strict).
           default: false
+        mthds_names:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Mthds Names
+          description: Optional per-file logical names, parallel to `mthds_contents`. When provided, names each bundle so
+            server-side validation errors carry a `source` pointing at the owning file. Must match `mthds_contents` in length
+            when present.
       type: object
       required:
       - mthds_contents
       title: ValidateRequest
-      description: '`/validate` needs nothing beyond the shared `mthds_contents` + `allow_signatures` payload.'
+      description: 'The shared `mthds_contents` + `allow_signatures` payload, plus optional per-file names.
+
+
+        `mthds_names`, when provided, pairs each `mthds_contents[i]` with a logical name (e.g. the
+
+        file''s path relative to the submitted directory). The runner threads it onto
+
+        `blueprint.source`, so the structured `validation_errors` on a 422 carry a real `source`
+
+        the client maps back to the owning file — without it the in-memory load path leaves
+
+        `source` null and cross-file diagnostics misfire. Omit it and behavior is unchanged.'
     ValidateResponse:
       properties:
         bundle_blueprint:

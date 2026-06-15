@@ -46,6 +46,19 @@ output = "Text"
 prompt = "@text"
 """
 
+# An invalid `main_pipe` deterministically fails blueprint validation, producing a categorized
+# BLUEPRINT_VALIDATION error that carries the blueprint's `source` — the cheapest way to exercise
+# the structured `validation_errors` 422 and its `source` threading. (Mirrors the pipelex
+# integration fixture in `tests/integration/pipelex/pipeline/test_validate_bundle_source_threading.py`.)
+INVALID_MAIN_PIPE_MTHDS = """\
+domain = "broken"
+description = "Invalid main_pipe"
+main_pipe = "Not A Valid Pipe Code!"
+
+[concept.Customer]
+description = "A customer"
+"""
+
 # Multi-file batches mirroring pipelex's additive-multi-file-library E2E fixtures
 # (`tests/e2e/pipelex/pipes/additive_multi_file_library/` in the pipelex repo) — the same
 # scenarios the protocol-alignment baseline snapshots were captured from. Copied, not read
