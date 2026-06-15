@@ -6,6 +6,7 @@
 
 - Bumped the pinned `pipelex` git rev to the keyword-only-arguments refactor branch, where non-subject function parameters across the `pipelex/` public surface are now keyword-only.
 - Updated the `parse_pipe_spec` call site to the reversed signature — the spec data is now the positional subject and `pipe_type` is keyword-only (`parse_pipe_spec(spec, pipe_type=...)`).
+- Updated the `tests/unit/conftest.py` `Pipelex.make(...)` call to pass `integration_mode` by keyword — `Pipelex.make` is now fully keyword-only after the positional-subject consolidation.
 
 ## [v0.3.0] - 2026-06-12
 
