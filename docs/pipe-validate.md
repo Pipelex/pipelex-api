@@ -91,25 +91,29 @@ The graph remains best-effort on both backends: a bundle that validates but whos
 
 **Error Responses:**
 
-If the bundle is invalid, the endpoint returns **HTTP 422** with an [RFC 7807 problem document](error-responses.md). Alongside the single human-readable `detail`, the body carries a structured `validation_errors[]` list — the per-error diagnostics a client maps to per-line problems, each with a `category`, a `message`, and (for pipe/concept and blueprint errors) the owning `source`:
+If the bundle is invalid, the endpoint returns **HTTP 422** with an [RFC 7807 problem document](error-responses.md). Alongside the single human-readable `detail`, the body carries a best-effort structured `validation_errors[]` list — the per-error diagnostics a client maps to per-line problems, each with a `category`, a `message`, and (for the pipe/concept and blueprint errors the runtime can attribute to a file) the owning `source`:
 
 ```json
 {
   "type": "https://docs.pipelex.com/latest/errors/validate-bundle-error/",
   "title": "Validate bundle",
   "status": 422,
-  "detail": "Invalid main_pipe 'Not A Valid Pipe Code!' in bundle 'broken.mthds'",
+  "detail": "Validation error(s):\n\nValue errors: 'main_pipe': Value error, Invalid main pipe syntax 'Not A Valid Pipe Code!'. Must be in snake_case.",
   "instance": "/v1/validate",
   "error_type": "ValidateBundleError",
   "error_domain": "input",
-  "retryable": false,
+  "user_action": {
+    "kind": "change_input",
+    "detail": "Check the validation_errors array for specific issues"
+  },
   "request_id": "9f2c1ab3-…",
   "validation_errors": [
     {
-      "category": "bundle_blueprint_validation",
-      "message": "Invalid main_pipe 'Not A Valid Pipe Code!'",
-      "source": "broken.mthds",
-      "domain_code": "broken"
+      "category": "blueprint_validation",
+      "message": "Value error, Invalid main pipe syntax 'Not A Valid Pipe Code!'. Must be in snake_case.",
+      "error_type": "invalid_pipe_code_syntax",
+      "domain_code": "broken",
+      "source": "broken.mthds"
     }
   ]
 }

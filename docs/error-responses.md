@@ -43,15 +43,17 @@ When `/validate` rejects a bundle, the `ValidateBundleError` 422 carries a `vali
 
 | Field | Meaning |
 |---|---|
-| `category` | The failure family — one of `bundle_blueprint_validation`, `pipe_factory`, `pipes_and_concept_validation`. |
+| `category` | The failure family — one of `blueprint_validation`, `pipe_factory`, `pipe_validation`. |
 | `message` | Human-readable description of this specific error. |
 | `error_type` | Finer error subtype within the category, when the source error provides one. |
-| `source` | The owning file of the error — populated for `pipes_and_concept_validation` and `bundle_blueprint_validation` errors. On the in-memory submit path it is the matching `mthds_names[i]` (see [Naming submitted files](pipe-validate.md)); `null` when the caller sent no names. Absent for `pipe_factory` errors. |
+| `source` | The owning file of the error — present on `pipe_validation` and `blueprint_validation` items that the runtime could attribute to a file. On the in-memory submit path it is the matching `mthds_names[i]` (see [Naming submitted files](pipe-validate.md)); `null` when the caller sent no names. Absent for `pipe_factory` errors, and absent on any blueprint error the runtime could not attribute (those are summarized in `detail` only — see the note below). |
 | `pipe_code`, `concept_code`, `domain_code` | The pipe / concept / domain the error is about, when applicable. |
 | `field_path`, `field_name` | The offending field within the bundle, when the error localizes to one. |
 | `variable_names`, `missing_concept_code`, `declared_concepts` | Extra context for specific failure shapes (undefined variables, an unresolved concept reference, the set of concepts that were declared). |
 
 Items carry only the fields that apply to their category — absent fields are omitted, not null. `validation_errors` is **retained under STRICT disclosure** (it describes the caller's own submitted bundle, not server internals). It is present only on `ValidateBundleError`; other error types omit it.
+
+Not every failure becomes a structured item. A blueprint-validation failure the runtime cannot attribute to a known pipe/concept/field is reported in the human-readable `detail` only and does not produce a `validation_errors` entry — so `validation_errors` is a best-effort per-error breakdown, and `detail` remains the authoritative summary. Treat the array as possibly shorter than the set of problems implied by `detail`.
 
 ## Status codes
 
@@ -124,18 +126,22 @@ X-Request-ID: 9f2c1ab3-…
   "type": "https://docs.pipelex.com/latest/errors/validate-bundle-error/",
   "title": "Validate bundle",
   "status": 422,
-  "detail": "Invalid main_pipe 'Not A Valid Pipe Code!' in bundle 'broken.mthds'",
+  "detail": "Validation error(s):\n\nValue errors: 'main_pipe': Value error, Invalid main pipe syntax 'Not A Valid Pipe Code!'. Must be in snake_case.",
   "instance": "/v1/validate",
   "error_type": "ValidateBundleError",
   "error_domain": "input",
-  "retryable": false,
+  "user_action": {
+    "kind": "change_input",
+    "detail": "Check the validation_errors array for specific issues"
+  },
   "request_id": "9f2c1ab3-…",
   "validation_errors": [
     {
-      "category": "bundle_blueprint_validation",
-      "message": "Invalid main_pipe 'Not A Valid Pipe Code!'",
-      "source": "broken.mthds",
-      "domain_code": "broken"
+      "category": "blueprint_validation",
+      "message": "Value error, Invalid main pipe syntax 'Not A Valid Pipe Code!'. Must be in snake_case.",
+      "error_type": "invalid_pipe_code_syntax",
+      "domain_code": "broken",
+      "source": "broken.mthds"
     }
   ]
 }
