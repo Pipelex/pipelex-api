@@ -21,12 +21,13 @@ dependencies = [
   "uvicorn>=0.37.0",
 ]
 
-# COMMITTED FORM — git-rev pin (reproducible/CI). rev must be a pushed commit on the pipelex
-# validation-errors branch carrying `validate_bundles_in_process` + the structured-error contract.
-# For a tight local iteration loop, swap to the editable path form below and re-`uv lock`:
-#   pipelex = { path = "../_calls", editable = true }
+# EDITABLE PATH FORM — local iteration against the sibling pipelex checkout. Active while the
+# 200-diagnostic adapter (Phase 3 of the validate-surface plan) is built against Phase-2 pipelex,
+# which is not yet pushed. Swap back to the committed git-rev form below — and re-`uv lock` — once
+# Phase 2 lands on a pushed pipelex commit (the release-LAST train re-pins to `==<version>`).
+#   pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "<pushed-rev>" }
 [tool.uv.sources]
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "0b03e6b00a2bf6db75a497521a68f44e0171634c" }
+pipelex = { path = "../_calls", editable = true }
 
 [build-system]
 requires = ["hatchling"]

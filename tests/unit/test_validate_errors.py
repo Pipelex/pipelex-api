@@ -1,17 +1,20 @@
-"""`/validate` structured error envelope + per-file `source` threading (Issue 5 / Phase 2).
+"""`/validate` 200-diagnostic verdict + structured error envelope + per-file `source` threading.
 
-On an invalid bundle the route answers 422 RFC 7807 `application/problem+json` carrying a
-structured `validation_errors[]` list — the per-error diagnostics the VS Code extension maps to
-per-line problems. When the caller sends `mthds_sources` parallel to `mthds_contents`, each name is
-threaded onto `blueprint.source`, so pipe/concept and blueprint errors name the owning file on
-BOTH the failure path (`validation_errors[].source`) and the success path
-(`bundle_blueprint.source`). A caller-supplied `mthds_sources`/`mthds_contents` length mismatch is a
-request-shape error (422) caught before the runtime — which would otherwise treat the mismatch as
-an internal 500.
+`/validate` is a **diagnostic endpoint**: a produced verdict — valid or invalid — always rides a
+**200**, discriminated in the body on `is_valid`. An invalid bundle answers a 200 `InvalidReport`
+carrying a structured `validation_errors[]` list (the per-error diagnostics the VS Code extension
+maps to per-line problems), built by pipelex's one shared builder; the structural artifacts
+(`bundle_blueprint`, `pipe_io_contracts`, `graph_spec`, `validated_pipes`) are absent on the invalid
+arm. Non-2xx is reserved for *no-verdict* conditions: a malformed body or an
+`mthds_sources`/`mthds_contents` length mismatch is a request-shape **422**; a genuine Temporal
+workflow fault is a **5xx**.
 
-Asserts the REAL wire response: the conformance suite is CLI-only and never spawns the HTTP server
-(decision D5), so this is the executable verification the spec's Error-contract `<!-- unverified -->`
-marker points at.
+When the caller sends `mthds_sources` parallel to `mthds_contents`, each name is threaded onto
+`blueprint.source`, so pipe/concept and blueprint errors name the owning file on BOTH the invalid
+arm (`validation_errors[].source`) and the valid arm (`bundle_blueprint.source`).
+
+Asserts the in-process wire response via `TestClient`; the conformance HTTP arm asserts the same
+200-diagnostic contract on the REAL wire (the spec's `<!-- unverified -->` markers point there).
 """
 
 from typing import Any
@@ -19,14 +22,23 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pipelex.base_exceptions import ValidationErrorCategory
+from pipelex.core.bundles.exceptions import PipelexBundleBlueprintValidationErrorData
+from pipelex.core.exceptions import PipeFactoryErrorData, PipesAndConceptValidationErrorData
+from pipelex.core.pipes.exceptions import PipeFactoryErrorType, PipeValidationErrorType
 from pipelex.pipeline.bundle_validator import DryRunOutput, DryRunStatus
+from pipelex.pipeline.exceptions import ValidateBundleError
 from pipelex.pipeline.pipe_io_contracts import IOMultiplicity, PipeInputContract, PipeIOContract, PipeOutputContract
+from pipelex.temporal.exceptions import WorkflowExecutionError
 from pipelex.temporal.tprl_pipe.act_dry_validate import DryValidateResult
 from pytest_mock import MockerFixture
 
 from api.exception_handlers import register_exception_handlers
 from api.routes import router as api_router
+from api.routes.pipelex.pipeline import ApiRunner
 from tests.unit._constants import INVALID_MAIN_PIPE_MTHDS, NO_MAIN_PIPE_MTHDS, VALID_MTHDS
+
+# Structural artifacts that exist only on the valid arm — the invalid arm must NOT carry them.
+_STRUCTURAL_FIELDS = ("bundle_blueprint", "pipe_io_contracts", "graph_spec", "validated_pipes")
 
 
 def _build_client() -> TestClient:
@@ -36,22 +48,73 @@ def _build_client() -> TestClient:
     return TestClient(app)
 
 
+def _multi_category_error() -> ValidateBundleError:
+    """A `ValidateBundleError` carrying one item per structured category, fields fully populated.
+
+    The shared builder projects these onto `validation_errors[]`; collectively the three items
+    exercise every field of `ValidationErrorItem` (the blueprint item carries `variable_names`,
+    the factory item `missing_concept_code` / `declared_concepts`, the pipe item
+    `field_path` / `field_name`). Mocked rather than provoked from a crafted bundle so the
+    envelope projection is asserted independently of which bundle happens to trip which category.
+    """
+    return ValidateBundleError(
+        message="Bundle has multiple validation problems.",
+        pipelex_bundle_blueprint_validation_errors=[
+            PipelexBundleBlueprintValidationErrorData(
+                error_type=PipeValidationErrorType.MISSING_INPUT_VARIABLE,
+                domain_code="legal",
+                source="blueprint.mthds",
+                pipe_code="summarize",
+                concept_code="Contract",
+                message="Blueprint validation failed.",
+                variable_names=["contract"],
+            )
+        ],
+        pipe_factory_errors=[
+            PipeFactoryErrorData(
+                error_type=PipeFactoryErrorType.UNKNOWN_CONCEPT,
+                domain_code="legal",
+                pipe_code="summarize",
+                missing_concept_code="Summari",
+                declared_concepts=["Contract", "Summary"],
+                message="Pipe references an unknown concept.",
+            )
+        ],
+        pipe_validation_errors=[
+            PipesAndConceptValidationErrorData(
+                error_type=PipeValidationErrorType.INADEQUATE_OUTPUT_CONCEPT,
+                domain_code="legal",
+                source="pipe.mthds",
+                pipe_code="summarize",
+                concept_code="Summary",
+                field_name="output",
+                field_path="pipe.summarize.output",
+                message="Output concept is inadequate.",
+            )
+        ],
+    )
+
+
 class TestValidateErrors:
-    def test_invalid_bundle_returns_422_with_structured_validation_errors(self):
+    def test_invalid_bundle_returns_200_invalid_report(self):
         client = _build_client()
         response = client.post("/v1/validate", json={"mthds_contents": [INVALID_MAIN_PIPE_MTHDS]})
 
-        assert response.status_code == 422, response.text
-        assert response.headers["content-type"].startswith("application/problem+json")
+        # A produced "invalid" verdict is a 200 InvalidReport, not a transport failure (422).
+        assert response.status_code == 200, response.text
+        assert response.headers["content-type"].startswith("application/json")
         body = response.json()
-        # RFC 7807 slots + the pipelex classification extension the spec documents.
-        assert body["error_type"] == "ValidateBundleError"
-        # The structured per-error list the extension maps to per-line diagnostics — the field
-        # that regressed (dropped at the exception->ErrorReport boundary) before Phase 1.
+        assert body["is_valid"] is False
+        assert body["is_runnable"] is False
+        # The discriminated invalid arm carries diagnostics, not the valid arm's structural artifacts.
+        for field in _STRUCTURAL_FIELDS:
+            assert field not in body, f"invalid arm leaked structural field {field!r}: {body}"
+        # The retired wire extra is gone — the verdict is `is_valid`, never `success`.
+        assert "success" not in body
         items: list[dict[str, Any]] = body["validation_errors"]
         assert isinstance(items, list)
         assert items, body
-        assert all("category" in item and "message" in item for item in items)
+        assert all(item["category"] in set(ValidationErrorCategory) and "message" in item for item in items)
 
     def test_validation_errors_carry_threaded_source(self):
         client = _build_client()
@@ -60,13 +123,99 @@ class TestValidateErrors:
             json={"mthds_contents": [INVALID_MAIN_PIPE_MTHDS], "mthds_sources": ["broken.mthds"]},
         )
 
-        assert response.status_code == 422, response.text
-        items: list[dict[str, Any]] = response.json()["validation_errors"]
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["is_valid"] is False
+        items: list[dict[str, Any]] = body["validation_errors"]
         # Pins that the dict-seeded blueprint-validation item carries the threaded name (not some
         # coincidental other item): a regression that stopped seeding `source` would fail here.
         sourced = [item for item in items if item.get("source") == "broken.mthds"]
         assert sourced, f"no validation_errors item carried the threaded source: {items}"
         assert any(item["category"] == ValidationErrorCategory.BLUEPRINT_VALIDATION for item in sourced)
+
+    def test_all_categories_project_onto_invalid_report(self, mocker: MockerFixture):
+        # Every structured category lands on the 200 InvalidReport, and collectively the items cover
+        # the full ValidationErrorItem field set (so a dropped field would fail here, not silently
+        # vanish at the exception->wire boundary).
+        mocker.patch.object(ApiRunner, "validate", new=mocker.AsyncMock(side_effect=_multi_category_error()))
+        client = _build_client()
+        response = client.post("/v1/validate", json={"mthds_contents": [VALID_MTHDS]})
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["is_valid"] is False
+        assert body["is_runnable"] is False
+        items: list[dict[str, Any]] = body["validation_errors"]
+        categories = {item["category"] for item in items}
+        assert categories == {
+            ValidationErrorCategory.BLUEPRINT_VALIDATION,
+            ValidationErrorCategory.PIPE_FACTORY,
+            ValidationErrorCategory.PIPE_VALIDATION,
+        }
+        # The union of populated fields across the items covers every ValidationErrorItem field.
+        populated = {key for item in items for key, value in item.items() if value is not None}
+        assert populated.issuperset(
+            {
+                "category",
+                "message",
+                "error_type",
+                "pipe_code",
+                "concept_code",
+                "domain_code",
+                "source",
+                "field_path",
+                "field_name",
+                "variable_names",
+                "missing_concept_code",
+                "declared_concepts",
+            }
+        ), f"missing fields: {populated}"
+
+    def test_dry_run_residual_becomes_single_dry_run_item(self, mocker: MockerFixture):
+        # A dry-run failure with no structured locator becomes ONE `dry_run` item carrying the
+        # message — the structured-info invariant (never a bare detail with an empty list). It is
+        # graph-level, so it carries no `source`.
+        residual = ValidateBundleError(message="Dry run failed: boom.", dry_run_error_message="Dry run failed: boom.")
+        mocker.patch.object(ApiRunner, "validate", new=mocker.AsyncMock(side_effect=residual))
+        client = _build_client()
+        response = client.post("/v1/validate", json={"mthds_contents": [VALID_MTHDS]})
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["is_valid"] is False
+        items: list[dict[str, Any]] = body["validation_errors"]
+        assert len(items) == 1, items
+        dry_run_item = items[0]
+        assert dry_run_item["category"] == ValidationErrorCategory.DRY_RUN
+        assert dry_run_item["error_type"] == "DryRunError"
+        assert dry_run_item["message"] == "Dry run failed: boom."
+        assert "source" not in dry_run_item
+
+    def test_temporal_recovered_validation_error_is_200_invalid_report(self, mocker: MockerFixture):
+        # On the Temporal arm a content verdict crosses the activity boundary as a
+        # WorkflowExecutionError that recovers the original ValidateBundleError report. The route
+        # detects the recovered verdict and answers 200 InvalidReport — never a 422/5xx.
+        recovered_report = _multi_category_error().to_error_report()
+        workflow_error = WorkflowExecutionError("workflow failed", error_report=recovered_report)
+        mocker.patch.object(ApiRunner, "validate", new=mocker.AsyncMock(side_effect=workflow_error))
+        client = _build_client()
+        response = client.post("/v1/validate", json={"mthds_contents": [VALID_MTHDS]})
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["is_valid"] is False
+        assert {item["category"] for item in body["validation_errors"]}
+
+    def test_genuine_workflow_fault_is_not_a_verdict(self, mocker: MockerFixture):
+        # A WorkflowExecutionError that recovers NO ValidateBundleError report is a server fault, not
+        # a verdict the client submitted — it must propagate to the global problem+json handler
+        # (non-2xx), never masquerade as a 200 InvalidReport.
+        mocker.patch.object(ApiRunner, "validate", new=mocker.AsyncMock(side_effect=WorkflowExecutionError("cluster unreachable")))
+        client = _build_client()
+        response = client.post("/v1/validate", json={"mthds_contents": [VALID_MTHDS]})
+
+        assert response.status_code >= 500, response.text
+        assert response.headers["content-type"].startswith("application/problem+json")
 
     def test_valid_bundle_threads_source_onto_blueprint(self):
         client = _build_client()
@@ -76,9 +225,11 @@ class TestValidateErrors:
         )
 
         assert response.status_code == 200, response.text
-        # Success path threads the same name, so a client can correlate the report's primary
-        # blueprint to its file exactly as it would a failure's `validation_errors[].source`.
-        assert response.json()["bundle_blueprint"]["source"] == "api://smoke.mthds"
+        body = response.json()
+        assert body["is_valid"] is True
+        # Valid arm threads the same name, so a client can correlate the report's primary blueprint to
+        # its file exactly as it would a failure's `validation_errors[].source`.
+        assert body["bundle_blueprint"]["source"] == "api://smoke.mthds"
 
     def test_length_mismatch_is_a_request_error(self):
         client = _build_client()
@@ -87,8 +238,9 @@ class TestValidateErrors:
             json={"mthds_contents": [VALID_MTHDS], "mthds_sources": ["a.mthds", "b.mthds"]},
         )
 
-        # Caught at request validation as a 422 — never reaches the runtime (which would 500 on
-        # the mismatch). The validator message rides the problem `detail`.
+        # Caught at request validation as a 422 — never reaches the runtime (which would 500 on the
+        # mismatch). The validator message rides the problem `detail`. This is a no-verdict
+        # request-shape condition, NOT a content verdict.
         assert response.status_code == 422, response.text
         assert response.headers["content-type"].startswith("application/problem+json")
         assert "mthds_sources" in response.text
@@ -122,7 +274,9 @@ class TestValidateErrors:
         )
 
         assert response.status_code == 200, response.text
-        assert response.json()["bundle_blueprint"]["source"] == "api://nomain.mthds"
+        body = response.json()
+        assert body["is_valid"] is True
+        assert body["bundle_blueprint"]["source"] == "api://nomain.mthds"
         dispatch_mock.assert_awaited_once()
         dispatched_arg = dispatch_mock.await_args.args[0]
         assert dispatched_arg.mthds_sources == ["api://nomain.mthds"]

@@ -1,10 +1,15 @@
-"""`allow_signatures` opt-in across the build/validate routes.
+"""`allow_signatures` is sweep-mechanics, not a gate (D-B: signatures-as-data).
 
-A bundle containing an unimplemented `PipeSignature` is rejected by default (strict mode) and
-accepted when the request opts in via `allow_signatures: true`. The strict rejection is a 422 RFC
-7807 `application/problem+json` — a caller-fixable `INPUT` error — surfaced as `SignaturesNotAllowedError`
-on `/build/runner` (which validates the pipes directly via `BundleValidator.validate_pipes`) and as
-`ValidateBundleError` on the routes that wrap validation through `validate_bundle`.
+After the signatures-as-data reframe, an unimplemented `PipeSignature` is **never** a validation
+error — it is a *runnability fact*. `allow_signatures` no longer gates acceptance; it only controls
+whether signature pipes are mock-run during the dry-run sweep (and therefore listed in
+`validated_pipes`). So a bundle containing a signature is accepted in BOTH modes across the
+validate/build routes. On `/validate` the outstanding signature surfaces as `pending_signatures` +
+`is_runnable: false` (a 200 `ValidReport`, since the verdict is "sound but not runnable"), and the
+only mode difference is whether the signature pipe appears in `validated_pipes`.
+
+(`SignaturesNotAllowedError` — the strict-mode rejection this module used to assert — was removed
+with the de-raise; the build routes no longer reject a signature bundle.)
 """
 
 import pytest
@@ -25,48 +30,54 @@ def _build_client() -> TestClient:
 
 class TestAllowSignatures:
     @pytest.mark.parametrize(
-        ("path", "payload", "expected_error_type"),
+        ("path", "payload_base"),
         [
-            ("/v1/validate", {"mthds_contents": [SIGNATURE_MTHDS]}, "ValidateBundleError"),
-            ("/v1/build/runner", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq"}, "SignaturesNotAllowedError"),
-            ("/v1/build/inputs", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq"}, "ValidateBundleError"),
-            ("/v1/build/output", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq"}, "ValidateBundleError"),
+            ("/v1/validate", {"mthds_contents": [SIGNATURE_MTHDS]}),
+            ("/v1/build/runner", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq"}),
+            ("/v1/build/inputs", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq"}),
+            ("/v1/build/output", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq"}),
         ],
     )
-    def test_signatures_rejected_by_default(self, path: str, payload: dict[str, object], expected_error_type: str):
+    @pytest.mark.parametrize("allow_signatures", [False, True], ids=["strict", "lenient"])
+    def test_signature_bundle_accepted_in_both_modes(self, path: str, payload_base: dict[str, object], allow_signatures: bool):
+        # An unimplemented signature is never a rejection (D-B): both modes answer 200 on every
+        # validate/build route. Strict no longer differs from lenient on acceptance.
         client = _build_client()
-        response = client.post(path, json=payload)
-        # Strict mode (the default): an unimplemented signature is a caller-fixable input error, so it
-        # renders as a 422 RFC 7807 — not a 500. `SignaturesNotAllowedError` carries
-        # `error_domain = INPUT` (class-level), which is what maps it to 422 on the runner route.
-        assert response.status_code == 422, response.text
-        assert response.headers["content-type"] == "application/problem+json"
-        body = response.json()
-        assert body["error_type"] == expected_error_type
-        assert body["error_domain"] == "input"
-        # The message names the offending construct so the caller knows what to fix (not a
-        # tautological "allow" OR "signature" — assert the actual subject of the rejection).
-        assert "signature" in body["detail"].lower()
-
-    @pytest.mark.parametrize(
-        ("path", "payload"),
-        [
-            ("/v1/validate", {"mthds_contents": [SIGNATURE_MTHDS], "allow_signatures": True}),
-            ("/v1/build/runner", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq", "allow_signatures": True}),
-            ("/v1/build/inputs", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq", "allow_signatures": True}),
-            ("/v1/build/output", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq", "allow_signatures": True}),
-        ],
-    )
-    def test_signatures_accepted_when_opted_in(self, path: str, payload: dict[str, object]):
-        client = _build_client()
-        response = client.post(path, json=payload)
-        # allow_signatures=true: the signature dry-runs trivially (mock mint), so validation passes
-        # and the route returns its normal 200 payload.
+        response = client.post(path, json={**payload_base, "allow_signatures": allow_signatures})
         assert response.status_code == 200, response.text
+
+    @pytest.mark.parametrize("allow_signatures", [False, True], ids=["strict", "lenient"])
+    def test_validate_reports_pending_signature_in_both_modes(self, allow_signatures: bool):
+        # The verdict is "valid but not runnable" regardless of the flag: the outstanding signature
+        # rides `pending_signatures` + `is_runnable: false` on a 200 `ValidReport` (is_valid: true).
+        client = _build_client()
+        response = client.post("/v1/validate", json={"mthds_contents": [SIGNATURE_MTHDS], "allow_signatures": allow_signatures})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["is_valid"] is True
+        assert body["is_runnable"] is False
+        assert body["pending_signatures"] == ["sig_api.summary_sig"]
+
+    def test_allow_signatures_only_changes_validated_pipes_inclusion(self):
+        # The single behavioral effect of the flag (D-B): the signature pipe is mock-run and listed in
+        # `validated_pipes` only in lenient mode. The verdict (`pending_signatures`, `is_runnable`) is
+        # identical either way — `allow_signatures` is sweep-mechanics, not a verdict knob.
+        client = _build_client()
+        strict = client.post("/v1/validate", json={"mthds_contents": [SIGNATURE_MTHDS]}).json()
+        lenient = client.post("/v1/validate", json={"mthds_contents": [SIGNATURE_MTHDS], "allow_signatures": True}).json()
+
+        strict_refs = {entry["pipe_ref"] for entry in strict["validated_pipes"]}
+        lenient_refs = {entry["pipe_ref"] for entry in lenient["validated_pipes"]}
+        assert strict_refs == {"sig_api.caller_seq"}
+        assert lenient_refs == {"sig_api.caller_seq", "sig_api.summary_sig"}
+        # The verdict is the same in both modes.
+        assert strict["pending_signatures"] == lenient["pending_signatures"] == ["sig_api.summary_sig"]
+        assert strict["is_runnable"] is False
+        assert lenient["is_runnable"] is False
 
     def test_build_runner_generates_code_for_bundle_with_signatures_when_opted_in(self):
         # The most concrete proof the flag threads through to the runner build: with allow_signatures
-        # the dry-run sweep tolerates the signature, the library stays open, and runner code is
+        # the dry-run sweep mock-runs the signature, the library stays open, and runner code is
         # generated for the caller pipe.
         client = _build_client()
         response = client.post(
