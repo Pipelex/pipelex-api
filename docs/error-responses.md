@@ -46,7 +46,7 @@ When `/validate` rejects a bundle, the `ValidateBundleError` 422 carries a `vali
 | `category` | The failure family — one of `blueprint_validation`, `pipe_factory`, `pipe_validation`. |
 | `message` | Human-readable description of this specific error. |
 | `error_type` | Finer error subtype within the category, when the source error provides one. |
-| `source` | The owning file of the error — present on `pipe_validation` and `blueprint_validation` items that the runtime could attribute to a file. On the in-memory submit path it is the matching `mthds_names[i]` (see [Naming submitted files](pipe-validate.md)); `null` when the caller sent no names. Absent for `pipe_factory` errors, and absent on any blueprint error the runtime could not attribute (those are summarized in `detail` only — see the note below). |
+| `source` | The owning file of the error — present on `pipe_validation` and `blueprint_validation` items that the runtime could attribute to a file. On the in-memory submit path it is the matching `mthds_sources[i]` (see [Sourcing submitted files](pipe-validate.md)); `null` when the caller sent no sources. Absent for `pipe_factory` errors, and absent on any blueprint error the runtime could not attribute (those are summarized in `detail` only — see the note below). |
 | `pipe_code`, `concept_code`, `domain_code` | The pipe / concept / domain the error is about, when applicable. |
 | `field_path`, `field_name` | The offending field within the bundle, when the error localizes to one. |
 | `variable_names`, `missing_concept_code`, `declared_concepts` | Extra context for specific failure shapes (undefined variables, an unresolved concept reference, the set of concepts that were declared). |
@@ -113,7 +113,7 @@ When opening an issue, include the `request_id` from the response (or response h
 POST /v1/validate
 {
   "mthds_contents": ["domain = \"broken\"\nmain_pipe = \"Not A Valid Pipe Code!\"\n"],
-  "mthds_names": ["broken.mthds"]
+  "mthds_sources": ["broken.mthds"]
 }
 ```
 
@@ -147,7 +147,7 @@ X-Request-ID: 9f2c1ab3-…
 }
 ```
 
-The single `detail` is the human summary; `validation_errors` is the machine-readable list a client maps to per-line diagnostics. `source` echoes the `mthds_names` entry the caller paired with that content — see [Structured validation errors](#structured-validation-errors) and [Naming submitted files](pipe-validate.md).
+The single `detail` is the human summary; `validation_errors` is the machine-readable list a client maps to per-line diagnostics. `source` echoes the `mthds_sources` entry the caller paired with that content — see [Structured validation errors](#structured-validation-errors) and [Sourcing submitted files](pipe-validate.md).
 
 ### 500 — deployment configuration fault
 

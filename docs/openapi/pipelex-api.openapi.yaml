@@ -415,7 +415,7 @@ paths:
         \  runnability verdict, best-effort `graph_spec`) plus the wire extras. A bundle\n  that declares no `main_pipe` validates\
         \ fine and carries `graph_spec=null` —\n  there is no main-pipe precondition.\n- **Failure (422):** RFC 7807 `application/problem+json`\
         \ — same shape as every\n  other API endpoint, carrying a structured `validation_errors[]` list (per-error\n  `category`,\
-        \ `message`, and — for pipe/concept and blueprint errors — the owning\n  `source`, populated from `mthds_names` when\
+        \ `message`, and — for pipe/concept and blueprint errors — the owning\n  `source`, populated from `mthds_sources` when\
         \ the caller supplied them). Direct mode:\n  `ValidateBundleError` is a `PipelexError` (`error_domain = INPUT`) and\
         \ propagates to\n  the global handler in `api.exception_handlers` unchanged. Temporal mode: the same failure crosses\
         \ the\n  activity boundary as a structured `ErrorReport` and surfaces as\n  `WorkflowExecutionError` — also a `PipelexError`\
@@ -3270,24 +3270,24 @@ components:
           description: When true, the validation sweep tolerates unimplemented pipe signatures instead of rejecting the bundle
             (signatures dry-run trivially by minting a mock). Defaults to false (strict).
           default: false
-        mthds_names:
+        mthds_sources:
           anyOf:
           - items:
               type: string
             type: array
           - type: 'null'
-          title: Mthds Names
-          description: Optional per-file logical names, parallel to `mthds_contents`. When provided, names each bundle so
-            server-side validation errors carry a `source` pointing at the owning file. Must match `mthds_contents` in length
-            when present.
+          title: Mthds Sources
+          description: Optional per-file sources, parallel to `mthds_contents`. When provided, each entry is threaded onto the
+            corresponding bundle's `source` so server-side validation errors carry a `source` pointing at the owning file. Must
+            match `mthds_contents` in length when present.
       type: object
       required:
       - mthds_contents
       title: ValidateRequest
-      description: 'The shared `mthds_contents` + `allow_signatures` payload, plus optional per-file names.
+      description: 'The shared `mthds_contents` + `allow_signatures` payload, plus optional per-file sources.
 
 
-        `mthds_names`, when provided, pairs each `mthds_contents[i]` with a logical name (e.g. the
+        `mthds_sources`, when provided, pairs each `mthds_contents[i]` with a logical source (e.g. the
 
         file''s path relative to the submitted directory). The runner threads it onto
 

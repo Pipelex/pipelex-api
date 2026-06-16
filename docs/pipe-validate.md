@@ -16,7 +16,7 @@ Validate MTHDS content by parsing, loading, and dry-running pipes without execut
 
 - `mthds_contents` (list[str], required): MTHDS contents to validate (always an array, even for a single file)
 - `allow_signatures` (boolean, optional, default `false`): when true, the validation sweep tolerates unimplemented `PipeSignature` declarations instead of rejecting the bundle — the lenient mode used during top-down builds
-- `mthds_names` (list[str] | null, optional): per-file logical names, parallel to `mthds_contents` — see [Naming submitted files](#naming-submitted-files). When present it must match `mthds_contents` in length (a mismatch is a 422 request error)
+- `mthds_sources` (list[str] | null, optional): per-file sources, parallel to `mthds_contents` — see [Sourcing submitted files](#sourcing-submitted-files). When present it must match `mthds_contents` in length (a mismatch is a 422 request error)
 
 **Response:**
 
@@ -76,9 +76,9 @@ The success envelope is the canonical Pipelex validation report — the exact sa
 
 The route is a thin wrapper over the runtime's protocol `validate`: parse → load → dry-run-sweep every pipe → build the per-pipe IO contracts → best-effort graph of the `main_pipe` → assemble the canonical report. A bundle that declares no `main_pipe` validates normally and simply carries `graph_spec: null` — there is no main-pipe precondition.
 
-**Naming submitted files:**
+**Sourcing submitted files:**
 
-The submit path carries bundle text, not file paths, so by default the runtime cannot tell the client which file an error belongs to — `source` comes back `null`. Send `mthds_names` parallel to `mthds_contents` to fix this: each name is the logical identity of that content (e.g. the file's path relative to the submitted directory), and the runtime threads it onto the corresponding `blueprint.source`. The name then rides back on both paths — `bundle_blueprint.source` in the success report, and `validation_errors[].source` on a 422 — so a multi-file editor client can map a cross-file diagnostic to the file that owns it. Omit `mthds_names` (or send `null`) and behavior is exactly as before. The list, when present, must be the same length as `mthds_contents`; a mismatch is a request-shape 422 (it is the caller's wiring bug, caught before the validation sweep runs).
+The submit path carries bundle text, not file paths, so by default the runtime cannot tell the client which file an error belongs to — `source` comes back `null`. Send `mthds_sources` parallel to `mthds_contents` to fix this: each source is the logical identity of that content (e.g. the file's path relative to the submitted directory), and the runtime threads it onto the corresponding `blueprint.source`. The source then rides back on both paths — `bundle_blueprint.source` in the success report, and `validation_errors[].source` on a 422 — so a multi-file editor client can map a cross-file diagnostic to the file that owns it. Omit `mthds_sources` (or send `null`) and behavior is exactly as before. The list, when present, must be the same length as `mthds_contents`; a mismatch is a request-shape 422 (it is the caller's wiring bug, caught before the validation sweep runs).
 
 **Execution Backends:**
 

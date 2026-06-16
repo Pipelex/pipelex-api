@@ -161,19 +161,19 @@ class ApiRunner(PipelexMTHDSProtocol):
         self,
         mthds_contents: list[str],
         allow_signatures: bool = False,
-        mthds_names: list[str] | None = None,
+        mthds_sources: list[str] | None = None,
     ) -> PipelexValidationReport:
         """Validate MTHDS bundles — protocol `validate`, Temporal-aware backend selection.
 
-        `mthds_names` is the optional per-content source-threading hook (additive over the
-        protocol signature): each name lands on the corresponding `blueprint.source`, so the
+        `mthds_sources` is the optional per-content source-threading hook (additive over the
+        protocol signature): each source lands on the corresponding `blueprint.source`, so the
         structured `validation_errors` on a failure — and the `bundle_blueprint` on success —
         carry a real `source` instead of `None`. The route maps a length mismatch to a 422
-        before we get here; `None` keeps the prior nameless behavior.
+        before we get here; `None` keeps the prior sourceless behavior.
 
         Temporal disabled: run in-process via `validate_bundles_in_process` directly (the same
         orchestrator the inherited local path delegates to — `validate_bundle` + graph arm +
-        `build_validation_report`, one library window — called here so `mthds_names` rides
+        `build_validation_report`, one library window — called here so `mthds_sources` rides
         through, which `super().validate` cannot carry).
 
         Temporal enabled: pure dispatch + map (D10) — the whole job (validation sweep,
@@ -190,7 +190,7 @@ class ApiRunner(PipelexMTHDSProtocol):
             library_dirs = [Path(library_dir) for library_dir in self.library_dirs] if self.library_dirs else None
             return await validate_bundles_in_process(
                 mthds_contents=mthds_contents,
-                mthds_names=mthds_names,
+                mthds_sources=mthds_sources,
                 library_dirs=library_dirs,
                 allow_signatures=allow_signatures,
                 log_context="API validate",
@@ -201,17 +201,17 @@ class ApiRunner(PipelexMTHDSProtocol):
         # surfaces through the worker's `validate_bundle` cascade with the exact same
         # categorized `ValidateBundleError` identity the direct path raises.
         dry_validate_result = await dispatch_dry_validate(
-            DryValidateArg(mthds_contents=mthds_contents, mthds_names=mthds_names, allow_signatures=allow_signatures)
+            DryValidateArg(mthds_contents=mthds_contents, mthds_sources=mthds_sources, allow_signatures=allow_signatures)
         )
 
         # The bundle is known-valid now — parse the blueprints for the report, threading the
-        # same per-content names so the success-path `bundle_blueprint.source` matches the
+        # same per-content sources so the success-path `bundle_blueprint.source` matches the
         # failure path. Parsing is pure interpretation (no library), so the worker's single
         # library load stays the only one in the whole request.
-        content_names: list[str | None] = list(mthds_names) if mthds_names is not None else [None] * len(mthds_contents)
+        content_sources: list[str | None] = list(mthds_sources) if mthds_sources is not None else [None] * len(mthds_contents)
         blueprints = [
-            PipelexInterpreter.make_pipelex_bundle_blueprint(mthds_content=content, mthds_name=name)
-            for content, name in zip(mthds_contents, content_names, strict=True)
+            PipelexInterpreter.make_pipelex_bundle_blueprint(mthds_content=content, mthds_source=source)
+            for content, source in zip(mthds_contents, content_sources, strict=True)
         ]
         return build_validation_report(
             blueprints=blueprints,

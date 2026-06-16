@@ -2,10 +2,10 @@
 
 On an invalid bundle the route answers 422 RFC 7807 `application/problem+json` carrying a
 structured `validation_errors[]` list — the per-error diagnostics the VS Code extension maps to
-per-line problems. When the caller sends `mthds_names` parallel to `mthds_contents`, each name is
+per-line problems. When the caller sends `mthds_sources` parallel to `mthds_contents`, each name is
 threaded onto `blueprint.source`, so pipe/concept and blueprint errors name the owning file on
 BOTH the failure path (`validation_errors[].source`) and the success path
-(`bundle_blueprint.source`). A caller-supplied `mthds_names`/`mthds_contents` length mismatch is a
+(`bundle_blueprint.source`). A caller-supplied `mthds_sources`/`mthds_contents` length mismatch is a
 request-shape error (422) caught before the runtime — which would otherwise treat the mismatch as
 an internal 500.
 
@@ -57,7 +57,7 @@ class TestValidateErrors:
         client = _build_client()
         response = client.post(
             "/v1/validate",
-            json={"mthds_contents": [INVALID_MAIN_PIPE_MTHDS], "mthds_names": ["broken.mthds"]},
+            json={"mthds_contents": [INVALID_MAIN_PIPE_MTHDS], "mthds_sources": ["broken.mthds"]},
         )
 
         assert response.status_code == 422, response.text
@@ -72,7 +72,7 @@ class TestValidateErrors:
         client = _build_client()
         response = client.post(
             "/v1/validate",
-            json={"mthds_contents": [VALID_MTHDS], "mthds_names": ["api://smoke.mthds"]},
+            json={"mthds_contents": [VALID_MTHDS], "mthds_sources": ["api://smoke.mthds"]},
         )
 
         assert response.status_code == 200, response.text
@@ -84,16 +84,16 @@ class TestValidateErrors:
         client = _build_client()
         response = client.post(
             "/v1/validate",
-            json={"mthds_contents": [VALID_MTHDS], "mthds_names": ["a.mthds", "b.mthds"]},
+            json={"mthds_contents": [VALID_MTHDS], "mthds_sources": ["a.mthds", "b.mthds"]},
         )
 
         # Caught at request validation as a 422 — never reaches the runtime (which would 500 on
         # the mismatch). The validator message rides the problem `detail`.
         assert response.status_code == 422, response.text
         assert response.headers["content-type"].startswith("application/problem+json")
-        assert "mthds_names" in response.text
+        assert "mthds_sources" in response.text
 
-    def test_temporal_backend_threads_mthds_names_through_dispatch(self, mocker: MockerFixture):
+    def test_temporal_backend_threads_mthds_sources_through_dispatch(self, mocker: MockerFixture):
         # Issue 5 on the Temporal arm: the per-content names ride the dispatched DryValidateArg
         # AND the API-side blueprint parse threads them onto `bundle_blueprint.source`.
         worker_result = DryValidateResult(
@@ -118,11 +118,11 @@ class TestValidateErrors:
         client = _build_client()
         response = client.post(
             "/v1/validate",
-            json={"mthds_contents": [NO_MAIN_PIPE_MTHDS], "mthds_names": ["api://nomain.mthds"]},
+            json={"mthds_contents": [NO_MAIN_PIPE_MTHDS], "mthds_sources": ["api://nomain.mthds"]},
         )
 
         assert response.status_code == 200, response.text
         assert response.json()["bundle_blueprint"]["source"] == "api://nomain.mthds"
         dispatch_mock.assert_awaited_once()
         dispatched_arg = dispatch_mock.await_args.args[0]
-        assert dispatched_arg.mthds_names == ["api://nomain.mthds"]
+        assert dispatched_arg.mthds_sources == ["api://nomain.mthds"]
