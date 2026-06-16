@@ -26,7 +26,7 @@ dependencies = [
 # For a tight local iteration loop, swap to the editable path form below and re-`uv lock`:
 #   pipelex = { path = "../_calls", editable = true }
 [tool.uv.sources]
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "0ab2cb8b03957aeee70145089570f91f9722ef3b" }
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "0b03e6b00a2bf6db75a497521a68f44e0171634c" }
 
 [build-system]
 requires = ["hatchling"]
