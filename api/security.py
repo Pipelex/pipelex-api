@@ -21,15 +21,22 @@ from api.errors import raise_internal_server_error, raise_unauthenticated
 # JWT Configuration (only used when AUTH_MODE=jwt)
 JWT_ALGORITHM = "HS256"
 
-# A caller's `user_id` is the first path segment of every
-# `pipelex-storage://` URI; the storage resolver enforces this exact shape
-# when parsing those URIs. Validating here at the auth boundary keeps the
-# two layers in sync — without it, a token or proxy header with a non-UUID
-# value (e.g. `"google#abc"`, `"user-123"`, or anything containing `/`)
-# would authenticate, let `/upload` write S3 keys under a non-UUID owner
-# segment, and then `/resolve-storage-url` would refuse to resolve the
-# resulting URIs for the same caller.
-USER_ID_UUID_REGEX = re.compile(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")
+# A caller's `user_id` is the first path segment of every `pipelex-storage://`
+# URI and S3 key (`<user_id>/...`). The runner treats it as an OPAQUE id and
+# does NOT validate its identity/shape: a self-hosted deployment may use any id
+# scheme (uuid, `user_<uuid>`, `google#abc`, an email, …), and a hosted
+# deployment behind a trusted proxy receives the *authenticated* id the gateway
+# injects (derived from the JWT / API key — never client-chosen). The only
+# constraint is PATH-SAFETY, because the id becomes a key segment: it must be a
+# single segment that can't enable traversal (no `/`, `\`, NUL/control chars,
+# and not `.`/`..`).
+_PATH_UNSAFE_CHARS = re.compile(r"[/\\\x00-\x1f]")
+
+
+def is_safe_user_id(value: str) -> bool:
+    """True if `value` is usable as a single, path-safe key segment (opaque id)."""
+    return bool(value) and value not in (".", "..") and _PATH_UNSAFE_CHARS.search(value) is None
+
 
 # `auto_error=False` so a missing/empty/non-Bearer `Authorization` header
 # does NOT raise FastAPI's default `HTTPException` (which would emit
@@ -119,19 +126,16 @@ async def verify_jwt(
 
         # The caller identifier MUST be supplied as an explicit `user_id`
         # claim. We deliberately do NOT fall back to the standard `sub`
-        # claim: storage URIs require the owner segment to be a UUID
-        # (`parse_storage_uri` in `routes/storage.py`), and provider-issued
-        # `sub` values like `"google#abc"` would let a caller upload to
-        # S3 under a key that `/resolve-storage-url` would later refuse to
-        # resolve. Deployments using OAuth JWTs must mint their own
-        # `user_id` claim (a UUID for that caller) when issuing tokens.
+        # claim. The id is opaque (any scheme is fine — see `is_safe_user_id`);
+        # we only reject values that aren't a single path-safe segment, since
+        # the id becomes the owner segment of every storage key.
         user_id = payload.get("user_id")
         if not user_id:
             log.warning("JWT missing user_id claim")
             raise_unauthenticated("Invalid token: missing user_id claim", error_type=ErrorType.INVALID_TOKEN)
-        if not isinstance(user_id, str) or not USER_ID_UUID_REGEX.match(user_id):
-            log.warning(f"JWT user_id claim is not a UUID: {user_id!r}")
-            raise_unauthenticated("Invalid token: user_id claim must be a UUID", error_type=ErrorType.INVALID_TOKEN)
+        if not isinstance(user_id, str) or not is_safe_user_id(user_id):
+            log.warning(f"JWT user_id claim is not a path-safe segment: {user_id!r}")
+            raise_unauthenticated("Invalid token: user_id claim must be a single path-safe segment", error_type=ErrorType.INVALID_TOKEN)
         _set_request_user(request, user_id=user_id)
 
         return payload
@@ -190,8 +194,8 @@ async def no_auth(request: Request) -> None:
     user_id = request.headers.get(ForwardedIdentityHeader.USER_ID)
     if not user_id or user_id == "anonymous":
         return
-    if not USER_ID_UUID_REGEX.match(user_id):
-        log.warning(f"Forwarded X-User-Id is not a UUID, ignoring: {user_id!r}")
+    if not is_safe_user_id(user_id):
+        log.warning(f"Forwarded X-User-Id is not a path-safe segment, ignoring: {user_id!r}")
         return
 
     _set_request_user(request, user_id=user_id)

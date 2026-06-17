@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.4.0] - 2026-06-17
+
+### Changed — `user_id` is opaque again (path-safe, not UUID-shaped)
+
+The runner no longer requires `user_id` to be a bare UUID. `user_id` is the owner segment of every storage key (`<user_id>/...`), and the runner is a generic execution engine: identity is the deployment's concern (enforced upstream by the gateway/auth layer that injects `X-User-Id`, or by the JWT issuer), not the runner's. The previous UUID-shape check (from v0.3.0's identity-header work) wrongly rejected any non-UUID id — including hosted deployments that use prefixed ids like `user_<uuid>`, which were **silently downgraded to anonymous** and wrote results under `anonymous/...`.
+
+- `USER_ID_UUID_REGEX` is replaced by `is_safe_user_id(value)` in `api/security.py`: the only constraint is **path-safety** — a single segment with no `/`, `\`, NUL/control chars, and not `.`/`..`. Any other opaque id (`user_<uuid>`, `google#abc`, an email, a bare uuid) is accepted as-is.
+- Applies to all three sites: the JWT `user_id` claim, the forwarded `X-User-Id` header (`TRUST_FORWARDED_IDENTITY_HEADERS=true`), and `pipelex-storage://` URI parsing (`/resolve-storage-url`).
+- This reverses the "must be a UUID" constraint from v0.3.0. Path-traversal protection is unchanged (it never depended on the UUID shape).
+
 ## [v0.3.0] - 2026-06-12
 
 ### Breaking Changes — `/validate` and `/models` rewired through the protocol runner (MTHDS Protocol surface alignment, Phase 2)
