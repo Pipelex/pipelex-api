@@ -42,32 +42,38 @@ class TestBuildAndAgentRoutes:
         assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "ValidationError"
 
-    def test_validate_invalid_mthds_returns_rfc7807(self):
-        # Regression for TODOS.md Q11: a `ValidateBundleError` (PipelexError
-        # subclass, error_domain=INPUT) must propagate to the global handler
-        # and render as RFC 7807 — NOT the legacy
-        # `{success: false, mthds_contents, message}` envelope that this
-        # endpoint used to return for 422 before Q11. Invalid TOML reliably
-        # triggers a `ValidateBundleError` from the underlying interpreter.
+    def test_validate_invalid_mthds_returns_200_invalid_report(self):
+        # `/validate` is a diagnostic endpoint: an invalid bundle is a produced verdict, so it rides
+        # a 200 `InvalidReport` (discriminated on `is_valid: false`) — NOT a 422 problem document,
+        # and NOT the older `{success, mthds_contents, message}` 422 envelope. Invalid TOML reliably
+        # triggers a `ValidateBundleError` from the interpreter, which the route converts to the
+        # invalid arm. The verdict is carried by `is_valid`/`message`, not the status code.
         client = _build_client()
         response = client.post(
             "/v1/validate",
             json={"mthds_contents": ["this is not valid TOML !!!"]},
         )
-        assert response.status_code == 422
-        assert response.headers["content-type"] == "application/problem+json"
+        assert response.status_code == 200, response.text
+        assert response.headers["content-type"].startswith("application/json")
         body = response.json()
-        assert body["error_type"] == "ValidateBundleError"
-        assert body["error_domain"] == "input"
-        assert body["status"] == 422
-        # The pipelex message is preserved (caller-facing under
-        # `_authors_caller_facing_message`) so the client gets the actual
-        # interpreter complaint, not a generic placeholder.
-        assert "TOML" in body["detail"]
-        # Legacy fields must NOT appear in the failure envelope anymore.
+        assert body["is_valid"] is False
+        assert body["is_runnable"] is False
+        # The pipelex message is preserved (caller-facing under `_authors_caller_facing_message`) so
+        # the client gets the actual interpreter complaint, not a generic placeholder.
+        assert "TOML" in body["message"]
+        # The diagnostics list is non-empty on every invalid arm — the structured-info invariant is
+        # total. A raw TOML-syntax error is a parse-level failure the interpreter raises with no
+        # categorized error-data, but the shared builder's last-resort residual still emits one
+        # `blueprint_validation` item carrying the message (no `source` at this layer). A categorized
+        # failure (e.g. an invalid `main_pipe`) yields richer items; that path is pinned in
+        # test_validate_errors.py.
+        assert isinstance(body["validation_errors"], list)
+        assert body["validation_errors"], "an invalid verdict must carry a non-empty validation_errors[]"
+        assert body["validation_errors"][0]["category"] == "blueprint_validation"
+        assert body["validation_errors"][0]["message"]
+        # The valid arm's structural artifacts + the retired `success` extra are absent.
+        assert "bundle_blueprint" not in body
         assert "success" not in body
-        assert "mthds_contents" not in body
-        assert "message" not in body
 
     # NOTE: the former `main_pipe` precondition on /validate is deleted (protocol alignment
     # D2) — a bundle without `main_pipe` now answers 200 with `graph_spec=null`. The

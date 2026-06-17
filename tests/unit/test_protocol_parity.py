@@ -3,8 +3,9 @@
 The alignment's end-to-end claim: a client of the Pipelex family can write portable code
 across the local runtime and the hosted API. Each scenario here calls the local
 `PipelexMTHDSProtocol` directly AND the HTTP route with the same payload, then asserts the
-shared report keys are byte-identical and the wire extras (`mthds_contents`, `success`,
-`message`) appear on the HTTP envelope only. `graph_spec` is compared by presence/absence,
+shared report keys are byte-identical and the wire extras (`mthds_contents`, `message`)
+appear on the HTTP envelope only. `is_valid` is a canonical report field on both backends (not a
+wire extra — the `success` extra is retired). `graph_spec` is compared by presence/absence,
 not value: it carries run-specific identity (graph id, node timings, random dry-run data),
 so two runs never serialize identically.
 
@@ -24,7 +25,7 @@ from api.routes import router as api_router
 from tests.unit._constants import HEADER_AND_DEFINITION_BATCH, NO_MAIN_PIPE_MTHDS, SIGNATURE_ONLY_BATCH, VALID_MTHDS
 
 # The hosted /validate envelope = canonical report + exactly these wire-only extras.
-VALIDATE_WIRE_EXTRAS = {"mthds_contents", "success", "message"}
+VALIDATE_WIRE_EXTRAS = {"mthds_contents", "message"}
 
 
 def _build_client() -> TestClient:
@@ -66,9 +67,9 @@ class TestProtocolParity:
         for key in sorted(set(local_dump) - {"graph_spec"}):
             assert body[key] == local_dump[key], f"local/hosted divergence on shared key {key!r}"
 
-        # The extras carry what the webapp depends on.
+        # The extras carry what the webapp depends on; `is_valid` is the canonical valid-arm discriminant.
         assert body["mthds_contents"] == mthds_contents
-        assert body["success"] is True
+        assert body["is_valid"] is True
         assert body["message"]
 
     async def test_models_parity_unfiltered(self):
