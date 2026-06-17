@@ -15,20 +15,11 @@ classifiers = [
 ]
 
 dependencies = [
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal,temporal]==0.33.0",
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal,temporal]==0.34.0",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",
 ]
-
-# GIT-REV PIN — pinned to the pushed pipelex commit carrying Phase 2 (signatures-as-data,
-# dry_run, is_valid) + the structured-info-invariant GATE, so CI installs the Phase-2 runtime
-# the 200-diagnostic adapter (Phase 3) is built against. This rev rides pipelex PR #992
-# (stacked on the keyword-only PR #991); the release-LAST train re-pins to `==0.34.0`.
-# For local iteration against the sibling checkout, swap to the editable path form:
-#   pipelex = { path = "../_calls", editable = true }
-[tool.uv.sources]
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "89038e5b44135e03e07acf232a965510ecec6b24" }
 
 [build-system]
 requires = ["hatchling"]
