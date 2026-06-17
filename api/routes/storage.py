@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from api.error_types import ErrorType
 from api.errors import raise_bad_request, raise_forbidden, raise_internal_server_error, raise_unauthenticated
-from api.security import USER_ID_UUID_REGEX, RequestUser, get_request_user
+from api.security import RequestUser, get_request_user, is_safe_user_id
 
 router = APIRouter(tags=["storage"])
 
@@ -70,8 +70,8 @@ def parse_storage_uri(uri: str) -> tuple[str, str]:
         raise ValueError(msg)
 
     user_id = segments[0]
-    if not USER_ID_UUID_REGEX.match(user_id):
-        msg = "URI first segment must be a UUID user_id"
+    if not is_safe_user_id(user_id):
+        msg = "URI first segment must be a non-empty, path-safe user_id"
         raise ValueError(msg)
 
     last_segment = segments[-1]

@@ -292,9 +292,9 @@ async def needs_body_route(_body: _RequestValidationBody) -> None:
     return None
 
 
-# A canonical user_id for the authenticated test routes — the same UUID shape
-# `api.security.USER_ID_UUID_REGEX` enforces in production, so the routes mirror
-# real auth state rather than a placeholder string.
+# A canonical user_id for the authenticated test routes — a realistic
+# path-safe id (`api.security.is_safe_user_id`), so the routes mirror real
+# auth state rather than a placeholder string.
 _TEST_USER_ID = "00000000-0000-0000-0000-000000000001"
 
 
