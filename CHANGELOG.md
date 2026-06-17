@@ -1,6 +1,6 @@
 # Changelog
 
-## [v0.2.1] - 2026-06-17
+## [v0.3.0] - 2026-06-17
 
 ### Changed — `user_id` is opaque again (path-safe, not UUID-shaped)
 
