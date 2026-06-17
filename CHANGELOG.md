@@ -1,5 +1,24 @@
 # Changelog
 
+## [v0.3.0] - 2026-06-17
+
+### Changed — `user_id` is opaque again (path-safe, not UUID-shaped)
+
+The runner no longer requires `user_id` to be a bare UUID. `user_id` is the owner segment of every storage key (`<user_id>/...`), and the runner is a generic execution engine: identity is the deployment's concern (enforced upstream by the gateway/auth layer that injects `X-User-Id`, or by the JWT issuer), not the runner's. The previous UUID-shape check wrongly rejected any non-UUID id — including hosted deployments that use prefixed ids like `user_<uuid>`, which were **silently downgraded to anonymous** and wrote results under `anonymous/...`.
+
+- `USER_ID_UUID_REGEX` is replaced by `is_safe_user_id(value)` in `api/security.py`: the only constraint is that the id be a single, **unambiguous path segment** — path-safe (no `/`, `\`, NUL/control chars, DEL; not `.`/`..`) and free of URI gen-delims (`:`, `?`, `#`, `[`, `]`, `@`). Any other opaque id (`user_<uuid>`, a bare uuid, `user-123`, …) is accepted as-is.
+- URI gen-delims are rejected because the id is embedded into a `pipelex-storage://<user_id>/...` URI: a value like `google#abc` is owner `google#abc` by raw split but `google` under a standard URI parser (`urlparse`), so a consumer could resolve a different owner than the one this server authorized.
+- Applies to all three sites: the JWT `user_id` claim, the forwarded `X-User-Id` header (`TRUST_FORWARDED_IDENTITY_HEADERS=true`), and `pipelex-storage://` URI parsing (`/resolve-storage-url`).
+- This reverses the prior "must be a UUID" constraint. Path-traversal protection is unchanged (it never depended on the UUID shape).
+
+### Fixed — close the `anonymous`-sentinel and malformed-forwarded-id gaps
+
+The opaque-id change above made `anonymous` a path-safe value and left the forwarded-id path failing open. Both are now closed in `api/security.py`:
+
+- **The reserved `anonymous` sentinel can no longer be claimed by an authenticated token.** A JWT with `user_id: "anonymous"` previously passed the path-safety check and bound that exact value — landing the caller's runs in the shared `anonymous/...` namespace while storage/upload routes still treated them as unauthenticated. `verify_jwt` now rejects it with `401 InvalidToken`. The value is centralized as `ANONYMOUS_USER_ID`.
+- **A malformed forwarded `X-User-Id` now fails closed.** When `TRUST_FORWARDED_IDENTITY_HEADERS=true` and the proxy forwards a non-empty but path-unsafe id, `no_auth` previously logged and silently downgraded to anonymous; it now rejects the request with `400 BadRequest`. The absent-header and explicit-`anonymous` cases still stay anonymous (the proxy's deliberate "this request is anonymous" signal).
+- **`is_safe_user_id` now rejects DEL (`\x7f`).** The unsafe-character class covered C0 controls (`\x00-\x1f`) but let DEL through, contradicting the "no control characters" invariant. DEL is now rejected across all three sites (JWT claim, forwarded header, storage-URI parsing).
+
 ## [v0.2.0] - 2026-06-12
 
 ### Changed — extension args are this server's own (callback_urls)
