@@ -85,28 +85,64 @@ class TestSecurityVerifiers:
         assert response.json()["error_type"] == "InvalidToken"
 
     @pytest.mark.parametrize(
-        "non_uuid_user_id",
+        "unsafe_user_id",
         [
-            "google#abc",
-            "user-123",
-            "11111111-1111-4111-1111-11111111111",
             "../etc/passwd",
-            "a" * 36,
-            "11111111111141111111111111111111111Z",
+            "a/b",
+            "..",
+            ".",
+            "with\x00null",  # C0 control (NUL)
+            "with\x7fdel",  # DEL is a control char too — must be rejected
+            "google#abc",  # URI fragment delimiter — ambiguous owner segment
+            "user@example.com",  # URI userinfo delimiter
+            "a:99999",  # URI port delimiter
         ],
     )
-    def test_jwt_non_uuid_user_id_rejected(self, mocker: MockerFixture, non_uuid_user_id: str):
-        """A non-UUID `user_id` claim must be rejected.
+    def test_jwt_path_unsafe_user_id_rejected(self, mocker: MockerFixture, unsafe_user_id: str):
+        r"""A `user_id` claim that isn't a single path-safe segment is rejected.
 
-        Storage URIs require the owner segment to match
-        `^[a-f0-9-]{36}$` (`_USER_ID_REGEX` in `routes/storage.py`). If the
-        auth layer accepted looser values, an authenticated upload would
-        write S3 keys under a non-UUID owner segment and
-        `/resolve-storage-url` would later refuse to resolve them.
+        The id becomes the owner segment of every storage key, so a value with
+        `/`, `\`, or being `.`/`..` could enable traversal — reject at the auth
+        boundary. (Identity/shape is otherwise the issuer's concern; the runner
+        treats `user_id` as opaque.)
         """
         mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
         client = _build_jwt_client()
-        token = jwt.encode({"user_id": non_uuid_user_id}, JWT_SECRET, algorithm="HS256")
+        token = jwt.encode({"user_id": unsafe_user_id}, JWT_SECRET, algorithm="HS256")
+        response = client.get(RoutePath.WHOAMI, headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 401
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.headers["WWW-Authenticate"] == "Bearer"
+        assert response.json()["error_type"] == "InvalidToken"
+
+    @pytest.mark.parametrize(
+        "opaque_user_id",
+        [
+            "user-123",
+            "user_11111111-1111-4111-8111-111111111111",  # the prefixed id scheme
+            "a" * 36,
+        ],
+    )
+    def test_jwt_opaque_user_id_accepted(self, mocker: MockerFixture, opaque_user_id: str):
+        """An opaque, path-safe `user_id` claim is accepted as-is (no shape check)."""
+        mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
+        client = _build_jwt_client()
+        token = jwt.encode({"user_id": opaque_user_id}, JWT_SECRET, algorithm="HS256")
+        response = client.get(RoutePath.WHOAMI, headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 200
+        assert response.json() == {"user_id": opaque_user_id}
+
+    def test_jwt_anonymous_user_id_rejected(self, mocker: MockerFixture):
+        """A JWT claiming the reserved `anonymous` sentinel is rejected.
+
+        `anonymous` is path-safe, so it passes the segment check, but it is the
+        reserved owner id for unauthenticated runs. An authenticated token must
+        not bind it — that would land the caller's runs in the shared anonymous
+        namespace while storage routes still treat them as unauthenticated.
+        """
+        mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
+        client = _build_jwt_client()
+        token = jwt.encode({"user_id": "anonymous"}, JWT_SECRET, algorithm="HS256")
         response = client.get(RoutePath.WHOAMI, headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 401
         assert response.headers["content-type"] == "application/problem+json"

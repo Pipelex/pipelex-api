@@ -16,20 +16,41 @@ from pipelex.types import StrEnum
 from pydantic import BaseModel, Field
 
 from api.error_types import ErrorType
-from api.errors import raise_internal_server_error, raise_unauthenticated
+from api.errors import raise_bad_request, raise_internal_server_error, raise_unauthenticated
 
 # JWT Configuration (only used when AUTH_MODE=jwt)
 JWT_ALGORITHM = "HS256"
 
-# A caller's `user_id` is the first path segment of every
-# `pipelex-storage://` URI; the storage resolver enforces this exact shape
-# when parsing those URIs. Validating here at the auth boundary keeps the
-# two layers in sync — without it, a token or proxy header with a non-UUID
-# value (e.g. `"google#abc"`, `"user-123"`, or anything containing `/`)
-# would authenticate, let `/upload` write S3 keys under a non-UUID owner
-# segment, and then `/resolve-storage-url` would refuse to resolve the
-# resulting URIs for the same caller.
-USER_ID_UUID_REGEX = re.compile(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")
+# A caller's `user_id` is the first path segment of every `pipelex-storage://`
+# URI and S3 key (`<user_id>/...`). The runner treats it as an OPAQUE id and
+# does NOT validate its identity/shape: a self-hosted deployment may use any id
+# scheme (uuid, `user_<uuid>`, …), and a hosted deployment behind a trusted
+# proxy receives the *authenticated* id the gateway injects (derived from the
+# JWT / API key — never client-chosen). The only constraint is that the id be a
+# single, UNAMBIGUOUS path segment, because it is embedded into a
+# `pipelex-storage://<user_id>/...` URI / S3 key:
+#   - PATH-SAFE: no `/`, `\`, NUL/control chars, DEL; and not `.`/`..` (no traversal).
+#   - URI-UNAMBIGUOUS: no URI gen-delims (`:`, `?`, `#`, `[`, `]`, `@`). These
+#     parse differently under a raw split vs a standard URI parser — e.g.
+#     `pipelex-storage://google#abc/...` has owner `google#abc` by raw split but
+#     `google` (with `abc/...` as the fragment) under `urlparse`, so a consumer
+#     could resolve a different owner than the one this server authorized.
+_PATH_UNSAFE_CHARS = re.compile(r"[/\\:?#\[\]@\x00-\x1f\x7f]")
+
+
+def is_safe_user_id(value: str) -> bool:
+    """True if `value` is usable as a single, path-safe, URI-unambiguous key segment (opaque id)."""
+    return bool(value) and value not in (".", "..") and _PATH_UNSAFE_CHARS.search(value) is None
+
+
+# Reserved owner segment for unauthenticated pipeline runs (see
+# `routes.pipelex.pipeline._get_user_id`); storage/upload routes treat this exact
+# value as "not authenticated". It is therefore NOT a valid authenticated identity:
+# an authenticated caller — a JWT `user_id` claim or a trusted-proxy `X-User-Id`
+# header — must never be allowed to bind it, or their runs would silently collide
+# with the shared anonymous namespace.
+ANONYMOUS_USER_ID = "anonymous"
+
 
 # `auto_error=False` so a missing/empty/non-Bearer `Authorization` header
 # does NOT raise FastAPI's default `HTTPException` (which would emit
@@ -119,19 +140,23 @@ async def verify_jwt(
 
         # The caller identifier MUST be supplied as an explicit `user_id`
         # claim. We deliberately do NOT fall back to the standard `sub`
-        # claim: storage URIs require the owner segment to be a UUID
-        # (`parse_storage_uri` in `routes/storage.py`), and provider-issued
-        # `sub` values like `"google#abc"` would let a caller upload to
-        # S3 under a key that `/resolve-storage-url` would later refuse to
-        # resolve. Deployments using OAuth JWTs must mint their own
-        # `user_id` claim (a UUID for that caller) when issuing tokens.
+        # claim. The id is opaque (any scheme is fine — see `is_safe_user_id`);
+        # we only reject values that aren't a single path-safe segment, since
+        # the id becomes the owner segment of every storage key.
         user_id = payload.get("user_id")
         if not user_id:
             log.warning("JWT missing user_id claim")
             raise_unauthenticated("Invalid token: missing user_id claim", error_type=ErrorType.INVALID_TOKEN)
-        if not isinstance(user_id, str) or not USER_ID_UUID_REGEX.match(user_id):
-            log.warning(f"JWT user_id claim is not a UUID: {user_id!r}")
-            raise_unauthenticated("Invalid token: user_id claim must be a UUID", error_type=ErrorType.INVALID_TOKEN)
+        if not isinstance(user_id, str) or not is_safe_user_id(user_id):
+            log.warning(f"JWT user_id claim is not a path-safe segment: {user_id!r}")
+            raise_unauthenticated("Invalid token: user_id claim must be a single path-safe segment", error_type=ErrorType.INVALID_TOKEN)
+        if user_id == ANONYMOUS_USER_ID:
+            # `anonymous` is path-safe but is the reserved sentinel for unauthenticated
+            # runs. An authenticated token must not claim it — that would land the
+            # caller's runs in the shared anonymous namespace while storage routes
+            # still treat them as unauthenticated. Reject rather than silently downgrade.
+            log.warning("JWT user_id claim is the reserved 'anonymous' sentinel")
+            raise_unauthenticated("Invalid token: user_id claim must not be the reserved 'anonymous' value", error_type=ErrorType.INVALID_TOKEN)
         _set_request_user(request, user_id=user_id)
 
         return payload
@@ -188,11 +213,17 @@ async def no_auth(request: Request) -> None:
         return
 
     user_id = request.headers.get(ForwardedIdentityHeader.USER_ID)
-    if not user_id or user_id == "anonymous":
+    if not user_id or user_id == ANONYMOUS_USER_ID:
+        # Absent header or the explicit `anonymous` sentinel both mean "the proxy
+        # is telling us this request is anonymous" — stay anonymous, don't bind.
         return
-    if not USER_ID_UUID_REGEX.match(user_id):
-        log.warning(f"Forwarded X-User-Id is not a UUID, ignoring: {user_id!r}")
-        return
+    if not is_safe_user_id(user_id):
+        # The proxy forwarded a non-empty id that is NOT path-safe: it intended to
+        # authenticate someone but sent a malformed value. Fail closed rather than
+        # silently downgrade to anonymous (which would scope the caller's outputs
+        # into the shared anonymous namespace under a forwarded-but-broken identity).
+        log.warning(f"Forwarded X-User-Id is not a path-safe segment, rejecting: {user_id!r}")
+        raise_bad_request("Forwarded X-User-Id must be a single path-safe segment", error_type=ErrorType.BAD_REQUEST)
 
     _set_request_user(request, user_id=user_id)
 
