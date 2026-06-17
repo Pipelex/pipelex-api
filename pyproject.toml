@@ -21,13 +21,14 @@ dependencies = [
   "uvicorn>=0.37.0",
 ]
 
-# EDITABLE PATH FORM — local iteration against the sibling pipelex checkout. Active while the
-# 200-diagnostic adapter (Phase 3 of the validate-surface plan) is built against Phase-2 pipelex,
-# which is not yet pushed. Swap back to the committed git-rev form below — and re-`uv lock` — once
-# Phase 2 lands on a pushed pipelex commit (the release-LAST train re-pins to `==<version>`).
-#   pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "<pushed-rev>" }
+# GIT-REV PIN — pinned to the pushed pipelex commit carrying Phase 2 (signatures-as-data,
+# dry_run, is_valid) + the structured-info-invariant GATE, so CI installs the Phase-2 runtime
+# the 200-diagnostic adapter (Phase 3) is built against. This rev rides pipelex PR #992
+# (stacked on the keyword-only PR #991); the release-LAST train re-pins to `==0.34.0`.
+# For local iteration against the sibling checkout, swap to the editable path form:
+#   pipelex = { path = "../_calls", editable = true }
 [tool.uv.sources]
-pipelex = { path = "../_calls", editable = true }
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "89038e5b44135e03e07acf232a965510ecec6b24" }
 
 [build-system]
 requires = ["hatchling"]
