@@ -16,7 +16,7 @@ from pipelex.types import StrEnum
 from pydantic import BaseModel, Field
 
 from api.error_types import ErrorType
-from api.errors import raise_internal_server_error, raise_unauthenticated
+from api.errors import raise_bad_request, raise_internal_server_error, raise_unauthenticated
 
 # JWT Configuration (only used when AUTH_MODE=jwt)
 JWT_ALGORITHM = "HS256"
@@ -30,12 +30,21 @@ JWT_ALGORITHM = "HS256"
 # constraint is PATH-SAFETY, because the id becomes a key segment: it must be a
 # single segment that can't enable traversal (no `/`, `\`, NUL/control chars,
 # and not `.`/`..`).
-_PATH_UNSAFE_CHARS = re.compile(r"[/\\\x00-\x1f]")
+_PATH_UNSAFE_CHARS = re.compile(r"[/\\\x00-\x1f\x7f]")
 
 
 def is_safe_user_id(value: str) -> bool:
     """True if `value` is usable as a single, path-safe key segment (opaque id)."""
     return bool(value) and value not in (".", "..") and _PATH_UNSAFE_CHARS.search(value) is None
+
+
+# Reserved owner segment for unauthenticated pipeline runs (see
+# `routes.pipelex.pipeline._get_user_id`); storage/upload routes treat this exact
+# value as "not authenticated". It is therefore NOT a valid authenticated identity:
+# an authenticated caller — a JWT `user_id` claim or a trusted-proxy `X-User-Id`
+# header — must never be allowed to bind it, or their runs would silently collide
+# with the shared anonymous namespace.
+ANONYMOUS_USER_ID = "anonymous"
 
 
 # `auto_error=False` so a missing/empty/non-Bearer `Authorization` header
@@ -136,6 +145,13 @@ async def verify_jwt(
         if not isinstance(user_id, str) or not is_safe_user_id(user_id):
             log.warning(f"JWT user_id claim is not a path-safe segment: {user_id!r}")
             raise_unauthenticated("Invalid token: user_id claim must be a single path-safe segment", error_type=ErrorType.INVALID_TOKEN)
+        if user_id == ANONYMOUS_USER_ID:
+            # `anonymous` is path-safe but is the reserved sentinel for unauthenticated
+            # runs. An authenticated token must not claim it — that would land the
+            # caller's runs in the shared anonymous namespace while storage routes
+            # still treat them as unauthenticated. Reject rather than silently downgrade.
+            log.warning("JWT user_id claim is the reserved 'anonymous' sentinel")
+            raise_unauthenticated("Invalid token: user_id claim must not be the reserved 'anonymous' value", error_type=ErrorType.INVALID_TOKEN)
         _set_request_user(request, user_id=user_id)
 
         return payload
@@ -192,11 +208,17 @@ async def no_auth(request: Request) -> None:
         return
 
     user_id = request.headers.get(ForwardedIdentityHeader.USER_ID)
-    if not user_id or user_id == "anonymous":
+    if not user_id or user_id == ANONYMOUS_USER_ID:
+        # Absent header or the explicit `anonymous` sentinel both mean "the proxy
+        # is telling us this request is anonymous" — stay anonymous, don't bind.
         return
     if not is_safe_user_id(user_id):
-        log.warning(f"Forwarded X-User-Id is not a path-safe segment, ignoring: {user_id!r}")
-        return
+        # The proxy forwarded a non-empty id that is NOT path-safe: it intended to
+        # authenticate someone but sent a malformed value. Fail closed rather than
+        # silently downgrade to anonymous (which would scope the caller's outputs
+        # into the shared anonymous namespace under a forwarded-but-broken identity).
+        log.warning(f"Forwarded X-User-Id is not a path-safe segment, rejecting: {user_id!r}")
+        raise_bad_request("Forwarded X-User-Id must be a single path-safe segment", error_type=ErrorType.BAD_REQUEST)
 
     _set_request_user(request, user_id=user_id)
 

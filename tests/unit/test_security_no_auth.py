@@ -5,6 +5,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 
+from api.exception_handlers import register_exception_handlers
 from api.security import ForwardedIdentityHeader, RequestUser, get_request_user, no_auth
 from tests.unit._constants import RoutePath
 
@@ -20,6 +21,7 @@ async def _whoami(user: Annotated[RequestUser | None, Depends(get_request_user)]
 def _build_client() -> TestClient:
     app = FastAPI()
     app.add_api_route(RoutePath.WHOAMI, _whoami, methods=["GET"], dependencies=[Depends(no_auth)])
+    register_exception_handlers(app)
     return TestClient(app)
 
 
@@ -73,23 +75,27 @@ class TestNoAuthForwardedHeaders:
             "a/b",
             "..",
             ".",
-            "with\x00null",
+            "with\x00null",  # C0 control (NUL)
+            "with\x7fdel",  # DEL is a control char too — must be rejected
         ],
     )
-    def test_path_unsafe_forwarded_user_id_ignored(self, mocker: MockerFixture, unsafe_user_id: str):
-        r"""A forwarded `X-User-Id` that is not a single path-safe segment is ignored.
+    def test_path_unsafe_forwarded_user_id_rejected(self, mocker: MockerFixture, unsafe_user_id: str):
+        r"""A forwarded `X-User-Id` that is not a single path-safe segment fails closed.
 
         `user_id` is the owner segment of every storage key, so a value
         containing `/`, `\`, control chars, or being `.`/`..` could enable
-        traversal. We silently fall through to anonymous rather than write a
-        malformed key.
+        traversal. The proxy intended to authenticate someone but forwarded a
+        malformed value — we reject the request (400) rather than silently
+        downgrade to anonymous and scope the caller's outputs into the shared
+        anonymous namespace.
         """
         mocker.patch("api.security.get_optional_env", return_value="true")
         client = _build_client()
         headers: dict[str, str] = {ForwardedIdentityHeader.USER_ID: unsafe_user_id}
         response = client.get(RoutePath.WHOAMI, headers=headers)
-        assert response.status_code == 200
-        assert response.json() == {"user_id": None}
+        assert response.status_code == 400
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "BadRequest"
 
     @pytest.mark.parametrize(
         "opaque_user_id",
