@@ -10,7 +10,7 @@ def reset_api_config_fixture(request: FixtureRequest):
     # Code to run before each test
     print("\n[magenta] Api setup[/magenta]")
     pipelex_instance = Pipelex.make(
-        IntegrationMode.PYTEST,
+        integration_mode=IntegrationMode.PYTEST,
         needs_inference=needs_inference_in_pipelex(request),
         # Force Temporal off so the suite is hermetic and runs pipelines (incl. dry-run validation)
         # in-process. Temporal is opt-in via a gitignored .pipelex/pipelex_override.toml; CI has no

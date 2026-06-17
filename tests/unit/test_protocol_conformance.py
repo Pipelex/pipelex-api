@@ -32,10 +32,10 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from mthds.protocol.protocol import PROTOCOL_VERSION
 from pipelex.pipe_run.delivery_assignment import DeliveryAssignment, DeliveryStatus
 from pipelex.pipe_run.delivery_executor import DeliveryExecutor
 from pipelex.pipeline.pipeline_response import RunState
-from pipelex.pipeline.runner import MTHDS_PROTOCOL_VERSION
 from typing_extensions import override
 
 from api.exception_handlers import register_exception_handlers
@@ -121,7 +121,7 @@ class TestProtocolConformance:
         response = client.get("/v1/version")
         assert response.status_code == 200
         body = response.json()
-        assert body["protocol_version"] == MTHDS_PROTOCOL_VERSION
+        assert body["protocol_version"] == PROTOCOL_VERSION
         assert body["implementation"] == "pipelex-api"
         assert body["implementation_version"]
         assert body["runtime_version"]

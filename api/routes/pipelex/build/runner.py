@@ -70,10 +70,11 @@ async def build_runner(request_data: BuildRunnerRequest) -> JSONResponse:
         pipes = library_manager.load_from_blueprints(library_id=library_id, blueprints=blueprints)
 
         # Public inner sweep against the library we just opened: it runs the static
-        # `validate_with_libraries` wiring check, the signature pre-pass (strict unless the request
-        # opts in via `allow_signatures`), and the per-pipe dry run, raising on any unexpected
+        # `validate_with_libraries` wiring check and the per-pipe dry run, raising on any unexpected
         # failure — and crucially never tears the library down, so it stays loaded + current for
-        # `generate_runner_code` below.
+        # `generate_runner_code` below. Signatures are sweep-mechanics, not a gate (D-B): when
+        # `allow_signatures` is False, signature pipes are filtered out of the sweep rather than
+        # rejected, so a bundle with an unimplemented signature is no longer refused here.
         try:
             sweep_result = await BundleValidator().validate_pipes(pipes=pipes, library_id=library_id, allow_signatures=request_data.allow_signatures)
         except DryRunError as dry_run_error:
@@ -82,10 +83,10 @@ async def build_runner(request_data: BuildRunnerRequest) -> JSONResponse:
             # it — and `DryRunError` carries no `error_domain`, which the global handler would render as a
             # 500 server fault. A failed dry-run of a caller-submitted bundle is a caller-fixable INPUT
             # error, so translate it to `ValidateBundleError` (error_domain=INPUT → 422) — the exact shape
-            # `/validate`, `/build/inputs`, and `/build/output` return for the identical failure via
-            # `validate_bundle`'s `_translate_to_validate_bundle_error`. (`SignaturesNotAllowedError` is a
-            # sibling class, not a `DryRunError`, and already carries error_domain=INPUT, so it is left to
-            # propagate untouched and still renders as 422.)
+            # `/build/inputs` and `/build/output` return for the identical failure via
+            # `validate_bundle`'s `_translate_to_validate_bundle_error`. (On `/validate` the same
+            # `ValidateBundleError` now surfaces as a 200 `InvalidReport` instead; this build route keeps
+            # the 422, since a failed dry-run means no runner code can be generated.)
             raise ValidateBundleError(
                 message=dry_run_error.message,
                 dry_run_error_message=dry_run_error.message,

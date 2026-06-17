@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, Request
@@ -10,11 +11,16 @@ from kajson import kajson
 from kajson.exceptions import KajsonDecoderError
 from mthds.protocol.exceptions import PipelineRequestError
 from pipelex.config import get_config
+from pipelex.core.interpreter.interpreter import PipelexInterpreter
 from pipelex.pipe_run.delivery_assignment import DeliveryAssignment, StorageTarget, WebhookTarget
 from pipelex.pipeline.pipeline_response import PipelexRunResultExecute, PipelexRunResultStart, RunState
 from pipelex.pipeline.pipeline_run_setup import pipeline_run_setup
 from pipelex.pipeline.runner import PipelexMTHDSProtocol
+from pipelex.pipeline.validate_in_process import validate_bundles_in_process
+from pipelex.pipeline.validation_report import PipelexValidationReport, build_validation_report
 from pipelex.system.environment import get_required_env
+from pipelex.temporal.tprl_pipe.act_dry_validate import DryValidateArg
+from pipelex.temporal.tprl_pipe.dry_validate_dispatch import dispatch_dry_validate
 from pipelex.temporal.tprl_pipe.temporal_pipe_run import make_temporal_pipe_run
 from pydantic import ValidationError
 from typing_extensions import override
@@ -59,7 +65,12 @@ def _completion_signature(pipeline_run_id: str) -> str:
 
 
 class ApiRunner(PipelexMTHDSProtocol):
-    """API runner that extends PipelexMTHDSProtocol with async `start` support (Temporal dispatch)."""
+    """API runner that extends PipelexMTHDSProtocol with Temporal-backed `start` and `validate`.
+
+    Overrides change the BACKEND (in-process vs Temporal dispatch), never the artifact
+    shapes — every protocol operation answers with the same canonical models as the
+    local runtime.
+    """
 
     @override
     async def start(
@@ -143,6 +154,71 @@ class ApiRunner(PipelexMTHDSProtocol):
             created_at=created_at,
             state=RunState.STARTED,
             workflow_id=workflow_id,
+        )
+
+    @override
+    async def validate(
+        self,
+        mthds_contents: list[str],
+        allow_signatures: bool = False,
+        mthds_sources: list[str] | None = None,
+    ) -> PipelexValidationReport:
+        """Validate MTHDS bundles — protocol `validate`, Temporal-aware backend selection.
+
+        `mthds_sources` is the optional per-content source-threading hook (additive over the
+        protocol signature): each source lands on the corresponding `blueprint.source`, so the
+        structured `validation_errors` on a failure — and the `bundle_blueprint` on success —
+        carry a real `source` instead of `None`. The route maps a length mismatch to a 422
+        before we get here; `None` keeps the prior sourceless behavior.
+
+        Temporal disabled: run in-process via `validate_bundles_in_process` directly (the same
+        orchestrator the inherited local path delegates to — `validate_bundle` + graph arm +
+        `build_validation_report`, one library window — called here so `mthds_sources` rides
+        through, which `super().validate` cannot carry).
+
+        Temporal enabled: pure dispatch + map (D10) — the whole job (validation sweep,
+        graph dry-run, and every worker-side artifact: status map, `pending_signatures`,
+        `pipe_io_contracts`) runs as ONE in-process activity on a worker; this side parses
+        the blueprints (cheap, no library) and assembles the SAME canonical report via
+        `build_validation_report` (D14). No API-side library acquisition.
+
+        Either way the result is the canonical `PipelexValidationReport`: a bundle
+        without a declared `main_pipe` validates fine and simply carries
+        `graph_spec=None` (D2 — no precondition).
+        """
+        if not get_config().temporal.is_enabled:
+            library_dirs = [Path(library_dir) for library_dir in self.library_dirs] if self.library_dirs else None
+            return await validate_bundles_in_process(
+                mthds_contents=mthds_contents,
+                mthds_sources=mthds_sources,
+                library_dirs=library_dirs,
+                allow_signatures=allow_signatures,
+                log_context="API validate",
+            )
+
+        # Dispatch FIRST — before any API-side parsing — so every validation failure
+        # (malformed TOML, factory/wiring errors, strict-mode signature refusals)
+        # surfaces through the worker's `validate_bundle` cascade with the exact same
+        # categorized `ValidateBundleError` identity the direct path raises.
+        dry_validate_result = await dispatch_dry_validate(
+            DryValidateArg(mthds_contents=mthds_contents, mthds_sources=mthds_sources, allow_signatures=allow_signatures)
+        )
+
+        # The bundle is known-valid now — parse the blueprints for the report, threading the
+        # same per-content sources so the success-path `bundle_blueprint.source` matches the
+        # failure path. Parsing is pure interpretation (no library), so the worker's single
+        # library load stays the only one in the whole request.
+        content_sources: list[str | None] = list(mthds_sources) if mthds_sources is not None else [None] * len(mthds_contents)
+        blueprints = [
+            PipelexInterpreter.make_pipelex_bundle_blueprint(mthds_content=content, mthds_source=source)
+            for content, source in zip(mthds_contents, content_sources, strict=True)
+        ]
+        return build_validation_report(
+            blueprints=blueprints,
+            pipe_io_contracts=dry_validate_result.pipe_io_contracts,
+            dry_run_result=dry_validate_result.dry_run_outputs,
+            pending_signatures=dry_validate_result.pending_signatures,
+            graph_spec=dry_validate_result.graph_spec,
         )
 
 

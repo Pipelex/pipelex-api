@@ -70,7 +70,7 @@ Requests use the collection variable `{{base_url}}` and inherit the collection's
 
 ## Validate = the API's dry-run
 
-The API has **no separate "dry-run" endpoint that takes inputs**. `POST /v1/validate` *is* the dry-run: it parses, loads, and dry-runs every pipe with mock inputs and **zero inference** (no LLM calls, no cost, no latency), then returns the validated bundle blueprint, a `graph_spec`, and per-pipe input/output JSON-Schema `pipe_structures`. It confirms the whole pipeline wires up — concepts resolve, pipe inputs/outputs match, controllers find their sub-pipes — without ever running it. That makes it the safe, free counterpart to `execute`/`start`: reach for it to "just check" or "dry-run" a bundle.
+The API has **no separate "dry-run" endpoint that takes inputs**. `POST /v1/validate` *is* the dry-run: it parses, loads, and dry-runs every pipe with mock inputs and **zero inference** (no LLM calls, no cost, no latency), then returns the validated bundle blueprint, a `graph_spec`, and per-pipe input/output JSON-Schema `pipe_io_contracts`. It confirms the whole pipeline wires up — concepts resolve, pipe inputs/outputs match, controllers find their sub-pipes — without ever running it. That makes it the safe, free counterpart to `execute`/`start`: reach for it to "just check" or "dry-run" a bundle.
 
 Two things to know:
 

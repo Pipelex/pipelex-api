@@ -159,7 +159,7 @@ Tools for AI agents building pipelines programmatically.
 
 - `POST /v1/build/concept` — Convert a JSON concept spec to TOML
 - `POST /v1/build/pipe-spec` — Convert a JSON pipe spec to TOML
-- `GET /v1/models` — List available model presets, aliases, and waterfalls
+- `GET /v1/models` — The protocol model deck this runner routes to (flat `models` list, plus category-keyed `aliases`/`waterfalls` routing extensions); optional single `?type=` category filter
 
 ### Uploader (auth-gated, NON-CONTRACT)
 
