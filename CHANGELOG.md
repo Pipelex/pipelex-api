@@ -10,6 +10,14 @@ The runner no longer requires `user_id` to be a bare UUID. `user_id` is the owne
 - Applies to all three sites: the JWT `user_id` claim, the forwarded `X-User-Id` header (`TRUST_FORWARDED_IDENTITY_HEADERS=true`), and `pipelex-storage://` URI parsing (`/resolve-storage-url`).
 - This reverses the "must be a UUID" constraint from v0.3.0. Path-traversal protection is unchanged (it never depended on the UUID shape).
 
+### Fixed — close the `anonymous`-sentinel and malformed-forwarded-id gaps
+
+The opaque-id change above made `anonymous` a path-safe value and left the forwarded-id path failing open. Both are now closed in `api/security.py`:
+
+- **The reserved `anonymous` sentinel can no longer be claimed by an authenticated token.** A JWT with `user_id: "anonymous"` previously passed the path-safety check and bound that exact value — landing the caller's runs in the shared `anonymous/...` namespace while storage/upload routes still treated them as unauthenticated. `verify_jwt` now rejects it with `401 InvalidToken`. The value is centralized as `ANONYMOUS_USER_ID`.
+- **A malformed forwarded `X-User-Id` now fails closed.** When `TRUST_FORWARDED_IDENTITY_HEADERS=true` and the proxy forwards a non-empty but path-unsafe id, `no_auth` previously logged and silently downgraded to anonymous; it now rejects the request with `400 BadRequest`. The absent-header and explicit-`anonymous` cases still stay anonymous (the proxy's deliberate "this request is anonymous" signal).
+- **`is_safe_user_id` now rejects DEL (`\x7f`).** The unsafe-character class covered C0 controls (`\x00-\x1f`) but let DEL through, contradicting the "no control characters" invariant. DEL is now rejected across all three sites (JWT claim, forwarded header, storage-URI parsing).
+
 ## [v0.3.0] - 2026-06-12
 
 ### Breaking Changes — `/validate` and `/models` rewired through the protocol runner (MTHDS Protocol surface alignment, Phase 2)

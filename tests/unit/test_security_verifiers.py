@@ -91,6 +91,8 @@ class TestSecurityVerifiers:
             "a/b",
             "..",
             ".",
+            "with\x00null",  # C0 control (NUL)
+            "with\x7fdel",  # DEL is a control char too — must be rejected
         ],
     )
     def test_jwt_path_unsafe_user_id_rejected(self, mocker: MockerFixture, unsafe_user_id: str):
@@ -127,6 +129,23 @@ class TestSecurityVerifiers:
         response = client.get(RoutePath.WHOAMI, headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 200
         assert response.json() == {"user_id": opaque_user_id}
+
+    def test_jwt_anonymous_user_id_rejected(self, mocker: MockerFixture):
+        """A JWT claiming the reserved `anonymous` sentinel is rejected.
+
+        `anonymous` is path-safe, so it passes the segment check, but it is the
+        reserved owner id for unauthenticated runs. An authenticated token must
+        not bind it — that would land the caller's runs in the shared anonymous
+        namespace while storage routes still treat them as unauthenticated.
+        """
+        mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
+        client = _build_jwt_client()
+        token = jwt.encode({"user_id": "anonymous"}, JWT_SECRET, algorithm="HS256")
+        response = client.get(RoutePath.WHOAMI, headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 401
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.headers["WWW-Authenticate"] == "Bearer"
+        assert response.json()["error_type"] == "InvalidToken"
 
     def test_jwt_invalid_token_rejected(self, mocker: MockerFixture):
         mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
