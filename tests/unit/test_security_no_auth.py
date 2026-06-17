@@ -77,6 +77,9 @@ class TestNoAuthForwardedHeaders:
             ".",
             "with\x00null",  # C0 control (NUL)
             "with\x7fdel",  # DEL is a control char too — must be rejected
+            "google#abc",  # URI fragment delimiter — ambiguous owner segment
+            "user@example.com",  # URI userinfo delimiter
+            "a:99999",  # URI port delimiter
         ],
     )
     def test_path_unsafe_forwarded_user_id_rejected(self, mocker: MockerFixture, unsafe_user_id: str):
@@ -100,7 +103,6 @@ class TestNoAuthForwardedHeaders:
     @pytest.mark.parametrize(
         "opaque_user_id",
         [
-            "google#abc",
             "user-123",
             "user_11111111-1111-4111-8111-111111111111",  # the prefixed id scheme
             "a" * 36,

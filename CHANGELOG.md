@@ -6,7 +6,8 @@
 
 The runner no longer requires `user_id` to be a bare UUID. `user_id` is the owner segment of every storage key (`<user_id>/...`), and the runner is a generic execution engine: identity is the deployment's concern (enforced upstream by the gateway/auth layer that injects `X-User-Id`, or by the JWT issuer), not the runner's. The previous UUID-shape check wrongly rejected any non-UUID id — including hosted deployments that use prefixed ids like `user_<uuid>`, which were **silently downgraded to anonymous** and wrote results under `anonymous/...`.
 
-- `USER_ID_UUID_REGEX` is replaced by `is_safe_user_id(value)` in `api/security.py`: the only constraint is **path-safety** — a single segment with no `/`, `\`, NUL/control chars, and not `.`/`..`. Any other opaque id (`user_<uuid>`, `google#abc`, an email, a bare uuid) is accepted as-is.
+- `USER_ID_UUID_REGEX` is replaced by `is_safe_user_id(value)` in `api/security.py`: the only constraint is that the id be a single, **unambiguous path segment** — path-safe (no `/`, `\`, NUL/control chars, DEL; not `.`/`..`) and free of URI gen-delims (`:`, `?`, `#`, `[`, `]`, `@`). Any other opaque id (`user_<uuid>`, a bare uuid, `user-123`, …) is accepted as-is.
+- URI gen-delims are rejected because the id is embedded into a `pipelex-storage://<user_id>/...` URI: a value like `google#abc` is owner `google#abc` by raw split but `google` under a standard URI parser (`urlparse`), so a consumer could resolve a different owner than the one this server authorized.
 - Applies to all three sites: the JWT `user_id` claim, the forwarded `X-User-Id` header (`TRUST_FORWARDED_IDENTITY_HEADERS=true`), and `pipelex-storage://` URI parsing (`/resolve-storage-url`).
 - This reverses the prior "must be a UUID" constraint. Path-traversal protection is unchanged (it never depended on the UUID shape).
 
