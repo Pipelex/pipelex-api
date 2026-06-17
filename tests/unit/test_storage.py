@@ -65,6 +65,9 @@ class TestStorageEndpoint:
             (UPLOAD_URI, USER_A, "pdf"),
             (RUN_URI, USER_A, "png"),
             (f"pipelex-storage://{USER_A}/a/b/c/d/e/file.tar", USER_A, "tar"),
+            # user_id is opaque + path-safe — a non-uuid owner segment is valid.
+            ("pipelex-storage://not-a-uuid/assets/x.pdf", "not-a-uuid", "pdf"),
+            ("pipelex-storage://user_11111111-1111-4111-8111-111111111111/results/run_x/y.json", "user_11111111-1111-4111-8111-111111111111", "json"),
         ],
     )
     def test_parse_storage_uri_valid(self, uri: str, expected_user: str, expected_ext: str):
@@ -76,7 +79,6 @@ class TestStorageEndpoint:
         "uri",
         [
             "https://example.com/file.pdf",  # wrong scheme
-            "pipelex-storage://not-a-uuid/assets/x.pdf",  # bad user_id
             f"pipelex-storage://{USER_A}/..//assets/x.pdf",  # traversal
             f"pipelex-storage://{USER_A}/./assets/x.pdf",  # single-dot
             f"pipelex-storage://{USER_A}/assets/x",  # no extension
