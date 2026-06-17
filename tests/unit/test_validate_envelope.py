@@ -4,9 +4,10 @@ Phase 2 of the MTHDS Protocol surface alignment: `/validate` routes through
 `ApiRunner.validate`, so the HTTP envelope is the canonical `PipelexValidationReport`
 (`bundle_blueprint`, `pipe_io_contracts` keyed by namespaced `pipe_ref`, `validated_pipes`,
 `pending_signatures` + `is_runnable`, best-effort `graph_spec`) plus this server's
-wire-only extras (`mthds_contents` echo, `success`, `message`). The direct backend runs the
-real in-process validation; the Temporal backend is exercised by faking the dispatch with a
-realistic worker result and asserting the pure dispatch + map contract (D10): same canonical
+wire-only extras (`mthds_contents` echo, `message`). The valid verdict carries `is_valid: true`
+(the discriminant of the 200 response union — the `success` extra is retired). The direct backend
+runs the real in-process validation; the Temporal backend is exercised by faking the dispatch with
+a realistic worker result and asserting the pure dispatch + map contract (D10): same canonical
 envelope, zero API-side library acquisition.
 
 Includes the D2 regression pin: a bundle that declares no `main_pipe` validates with 200 and
@@ -77,7 +78,7 @@ class TestValidateEnvelope:
 
         # Wire extras the webapp depends on.
         assert body["mthds_contents"] == [VALID_MTHDS]
-        assert body["success"] is True
+        assert body["is_valid"] is True
         assert body["message"]
 
     def test_direct_lenient_signatures_report_verdict(self):
@@ -104,7 +105,7 @@ class TestValidateEnvelope:
         assert body["pipe_io_contracts"]["nomain.echo"]["output"]["multiplicity"] == "single"
         assert body["validated_pipes"] == [{"pipe_ref": "nomain.echo", "status": DryRunStatus.SUCCESS}]
         assert body["is_runnable"] is True
-        assert body["success"] is True
+        assert body["is_valid"] is True
 
     def test_temporal_backend_is_pure_dispatch_and_map(self, mocker: MockerFixture):
         # D10: everything worker-computed rides DryValidateResult; the API side parses
@@ -138,7 +139,7 @@ class TestValidateEnvelope:
         assert body["is_runnable"] is True
         assert body["graph_spec"] is None
         assert body["mthds_contents"] == [NO_MAIN_PIPE_MTHDS]
-        assert body["success"] is True
+        assert body["is_valid"] is True
 
         # ONE dispatch carrying the request verbatim...
         dispatch_mock.assert_awaited_once()

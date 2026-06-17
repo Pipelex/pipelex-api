@@ -24,17 +24,22 @@ JWT_ALGORITHM = "HS256"
 # A caller's `user_id` is the first path segment of every `pipelex-storage://`
 # URI and S3 key (`<user_id>/...`). The runner treats it as an OPAQUE id and
 # does NOT validate its identity/shape: a self-hosted deployment may use any id
-# scheme (uuid, `user_<uuid>`, `google#abc`, an email, …), and a hosted
-# deployment behind a trusted proxy receives the *authenticated* id the gateway
-# injects (derived from the JWT / API key — never client-chosen). The only
-# constraint is PATH-SAFETY, because the id becomes a key segment: it must be a
-# single segment that can't enable traversal (no `/`, `\`, NUL/control chars,
-# and not `.`/`..`).
-_PATH_UNSAFE_CHARS = re.compile(r"[/\\\x00-\x1f\x7f]")
+# scheme (uuid, `user_<uuid>`, …), and a hosted deployment behind a trusted
+# proxy receives the *authenticated* id the gateway injects (derived from the
+# JWT / API key — never client-chosen). The only constraint is that the id be a
+# single, UNAMBIGUOUS path segment, because it is embedded into a
+# `pipelex-storage://<user_id>/...` URI / S3 key:
+#   - PATH-SAFE: no `/`, `\`, NUL/control chars, DEL; and not `.`/`..` (no traversal).
+#   - URI-UNAMBIGUOUS: no URI gen-delims (`:`, `?`, `#`, `[`, `]`, `@`). These
+#     parse differently under a raw split vs a standard URI parser — e.g.
+#     `pipelex-storage://google#abc/...` has owner `google#abc` by raw split but
+#     `google` (with `abc/...` as the fragment) under `urlparse`, so a consumer
+#     could resolve a different owner than the one this server authorized.
+_PATH_UNSAFE_CHARS = re.compile(r"[/\\:?#\[\]@\x00-\x1f\x7f]")
 
 
 def is_safe_user_id(value: str) -> bool:
-    """True if `value` is usable as a single, path-safe key segment (opaque id)."""
+    """True if `value` is usable as a single, path-safe, URI-unambiguous key segment (opaque id)."""
     return bool(value) and value not in (".", "..") and _PATH_UNSAFE_CHARS.search(value) is None
 
 

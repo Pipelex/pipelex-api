@@ -407,18 +407,23 @@ paths:
       - validate
       summary: Validate Mthds
       description: "Validate MTHDS content by parsing, loading, and dry-running pipes (MTHDS Protocol `POST /validate`).\n\
-        \nThin wrapper over `ApiRunner.validate` — the runner owns backend selection\n(in-process when Temporal is disabled,\
-        \ ONE dispatched worker activity when enabled)\nand always answers with the canonical `PipelexValidationReport`; this\
-        \ route only\nadds the wire extras (`mthds_contents` echo, `success`, `message`).\n\nResponse contract:\n\n- **Success\
-        \ (200):** the `ValidateResponse` envelope — the canonical report\n  (primary `bundle_blueprint`, `pipe_io_contracts`\
-        \ keyed by namespaced `pipe_ref`,\n  per-pipe `validated_pipes` sweep outcomes, `pending_signatures` + `is_runnable`\n\
-        \  runnability verdict, best-effort `graph_spec`) plus the wire extras. A bundle\n  that declares no `main_pipe` validates\
-        \ fine and carries `graph_spec=null` —\n  there is no main-pipe precondition.\n- **Failure (422):** RFC 7807 `application/problem+json`\
-        \ — same shape as every\n  other API endpoint. Direct mode: `ValidateBundleError` is a `PipelexError`\n  (`error_domain\
-        \ = INPUT`) and propagates to the global handler in\n  `api.exception_handlers` unchanged. Temporal mode: the same\
-        \ failure crosses the\n  activity boundary as a structured `ErrorReport` and surfaces as\n  `WorkflowExecutionError`\
-        \ — also a `PipelexError` — whose `to_error_report()`\n  returns the recovered original report (`error_type=ValidateBundleError`,\n\
-        \  `error_domain=input`, caller-facing message), so the handler renders the SAME\n  problem document."
+        \n`/validate` is a **diagnostic endpoint**: any verdict the validator can produce — valid,\ninvalid, or valid-but-not-runnable\
+        \ — rides a **200** discriminated in the body on `is_valid`.\nNon-2xx is reserved for the cases where *no verdict\
+        \ could be produced*.\n\nResponse contract:\n\n- **Valid verdict (200, `is_valid: true`):** the `ValidReport` arm\
+        \ — the canonical report\n  (primary `bundle_blueprint`, `pipe_io_contracts` keyed by namespaced `pipe_ref`, per-pipe\n\
+        \  `validated_pipes` sweep outcomes, `pending_signatures` + `is_runnable` runnability verdict,\n  best-effort `graph_spec`)\
+        \ plus the wire extras (`mthds_contents` echo, `message`). A bundle\n  that declares no `main_pipe` validates fine\
+        \ and carries `graph_spec=null`. Pending\n  signatures are reported as `pending_signatures` + `is_runnable: false`,\
+        \ never as an error.\n- **Invalid verdict (200, `is_valid: false`):** the `InvalidReport` arm — `validation_errors[]`\n\
+        \  (the structured per-error diagnostics, built by pipelex's one shared builder, incl. the\n  `dry_run` residual item)\
+        \ + `message`, with the structural artifacts absent. This is what the\n  route synthesizes by catching the runtime's\
+        \ `ValidateBundleError` (direct mode) and the\n  Temporal-recovered `WorkflowExecutionError` (whose `to_error_report()`\
+        \ recovers the original\n  `ValidateBundleError` report) — neither reaches the global handler.\n- **No verdict (non-2xx):**\
+        \ a malformed request body or an `mthds_sources` length mismatch is a\n  request-shape **422**; a host-wiring programmer\
+        \ error is a `PipelexUnexpectedError` → **500**;\n  auth is **401/403**. All are RFC 7807 `application/problem+json`\
+        \ rendered by the global\n  handler in `api.exception_handlers` — routes never shape them. A genuine Temporal workflow\n\
+        \  fault (a `WorkflowExecutionError` that recovers no `ValidateBundleError`) is re-raised here\n  so it lands as a\
+        \ 5xx, not a verdict."
       operationId: validate_mthds_v1_validate_post
       requestBody:
         content:
@@ -432,7 +437,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ValidateResponse'
+                oneOf:
+                - $ref: '#/components/schemas/ValidReport'
+                - $ref: '#/components/schemas/InvalidReport'
+                title: Response Validate Mthds V1 Validate Post
+                discriminator:
+                  propertyName: is_valid
+                  mapping:
+                    'True': '#/components/schemas/ValidReport'
+                    'False': '#/components/schemas/InvalidReport'
         '422':
           description: Validation Error
           content:
@@ -1481,6 +1494,53 @@ components:
       - inference_model_id
       - nb_tokens_by_category
       title: ImgGenTokensUsage
+    InvalidReport:
+      properties:
+        is_valid:
+          type: boolean
+          const: false
+          title: Is Valid
+          default: false
+        validation_errors:
+          items:
+            $ref: '#/components/schemas/ValidationErrorItem'
+          type: array
+          title: Validation Errors
+          description: Per-error diagnostics, built by pipelex's one shared builder — non-empty on every invalid verdict.
+        pending_signatures:
+          items:
+            type: string
+          type: array
+          title: Pending Signatures
+          description: Best-effort outstanding signatures; empty on the invalid arm since no library was assembled.
+        is_runnable:
+          type: boolean
+          const: false
+          title: Is Runnable
+          default: false
+        message:
+          type: string
+          title: Message
+          description: Human-readable summary of the verdict.
+          default: MTHDS validation found errors
+      type: object
+      title: InvalidReport
+      description: 'The 200 **invalid** arm: a produced "invalid" verdict, discriminated on `is_valid: false`.
+
+
+        An invalid bundle is the *successful product* of a diagnostic call, not a transport failure
+
+        (the request was well-formed; the bundle was not), so it rides a **200** — the global
+
+        `problem+json` 422/5xx is reserved for the no-verdict conditions (malformed request body,
+
+        `mthds_sources` length mismatch, auth, server fault). The structural artifacts
+
+        (`bundle_blueprint`, `pipe_io_contracts`, `graph_spec`, `validated_pipes`) do not exist when
+
+        load/parse/wiring failed, so this arm omits them and carries only the per-error diagnostics
+
+        plus the runnability facts.'
     JobCategory:
       type: string
       enum:
@@ -3252,29 +3312,13 @@ components:
       - uri
       - filename
       title: UploadResponse
-    ValidateRequest:
+    ValidReport:
       properties:
-        mthds_contents:
-          items:
-            type: string
-          type: array
-          maxItems: 16
-          minItems: 1
-          title: Mthds Contents
-          description: MTHDS contents to load (always an array, even for a single file).
-        allow_signatures:
+        is_valid:
           type: boolean
-          title: Allow Signatures
-          description: When true, the validation sweep tolerates unimplemented pipe signatures instead of rejecting the bundle
-            (signatures dry-run trivially by minting a mock). Defaults to false (strict).
-          default: false
-      type: object
-      required:
-      - mthds_contents
-      title: ValidateRequest
-      description: '`/validate` needs nothing beyond the shared `mthds_contents` + `allow_signatures` payload.'
-    ValidateResponse:
-      properties:
+          const: true
+          title: Is Valid
+          default: true
         bundle_blueprint:
           $ref: '#/components/schemas/PipelexBundleBlueprint'
         pipe_io_contracts:
@@ -3306,11 +3350,6 @@ components:
           type: array
           title: Mthds Contents
           description: The MTHDS contents that were validated (echo of the request)
-        success:
-          type: boolean
-          title: Success
-          description: Whether the validation was successful
-          default: true
         message:
           type: string
           title: Message
@@ -3321,17 +3360,59 @@ components:
       required:
       - bundle_blueprint
       - mthds_contents
-      title: ValidateResponse
-      description: 'The canonical `PipelexValidationReport` plus this server''s wire-only extras.
+      title: ValidReport
+      description: 'The 200 **valid** arm: the canonical `PipelexValidationReport` plus this server''s wire-only extras.
 
 
         The report fields are inherited — typed models, identical to what the local runtime
 
-        returns for the same bundle. The extras exist for HTTP clients only (the webapp gates
+        returns for the same bundle, with `is_valid: Literal[True]` (from the report) as the union
 
-        UI on `success` and reads back `mthds_contents`); they are NOT part of the canonical
+        discriminant. The extras exist for HTTP clients only (the webapp reads back `mthds_contents`);
 
-        report and no in-process consumer should depend on them.'
+        they are NOT part of the canonical report and no in-process consumer should depend on them.'
+    ValidateRequest:
+      properties:
+        mthds_contents:
+          items:
+            type: string
+          type: array
+          maxItems: 16
+          minItems: 1
+          title: Mthds Contents
+          description: MTHDS contents to load (always an array, even for a single file).
+        allow_signatures:
+          type: boolean
+          title: Allow Signatures
+          description: When true, the validation sweep tolerates unimplemented pipe signatures instead of rejecting the bundle
+            (signatures dry-run trivially by minting a mock). Defaults to false (strict).
+          default: false
+        mthds_sources:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Mthds Sources
+          description: Optional per-file sources, parallel to `mthds_contents`. When provided, each entry is threaded onto
+            the corresponding bundle's `source` so server-side validation errors carry a `source` pointing at the owning file.
+            Must match `mthds_contents` in length when present.
+      type: object
+      required:
+      - mthds_contents
+      title: ValidateRequest
+      description: 'The shared `mthds_contents` + `allow_signatures` payload, plus optional per-file sources.
+
+
+        `mthds_sources`, when provided, pairs each `mthds_contents[i]` with a logical source (e.g. the
+
+        file''s path relative to the submitted directory). The runner threads it onto
+
+        `blueprint.source`, so the structured `validation_errors` on a 200 `InvalidReport` carry a real
+
+        `source` the client maps back to the owning file — without it the in-memory load path leaves
+
+        `source` null and cross-file diagnostics misfire. Omit it and behavior is unchanged.'
     ValidatedPipeEntry:
       properties:
         pipe_ref:
@@ -3377,6 +3458,133 @@ components:
       - msg
       - type
       title: ValidationError
+    ValidationErrorCategory:
+      type: string
+      enum:
+      - blueprint_validation
+      - pipe_factory
+      - pipe_validation
+      - dry_run
+      title: ValidationErrorCategory
+      description: 'Which validation stage produced a :class:`ValidationErrorItem`.
+
+
+        Mirrors the categorized error-data lists aggregated by ``ValidateBundleError``:
+
+        blueprint validation (from the interpreter), pipe-factory failures (e.g. a
+
+        missing concept), pipe/concept validation (e.g. a missing input variable
+
+        or a type mismatch), and the ``dry_run`` residual — a dry-run failure with no
+
+        structured locator (graph-level), carried as a single message-only item so an
+
+        invalid verdict always surfaces a non-empty ``validation_errors[]`` (the
+
+        structured-info invariant) instead of a bare ``detail``.'
+    ValidationErrorItem:
+      properties:
+        category:
+          $ref: '#/components/schemas/ValidationErrorCategory'
+        message:
+          type: string
+          title: Message
+        error_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Type
+        pipe_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pipe Code
+        concept_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Code
+        domain_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Domain Code
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+        field_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Field Path
+        field_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Field Name
+        variable_names:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Variable Names
+        missing_concept_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Missing Concept Code
+        declared_concepts:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Declared Concepts
+      additionalProperties: false
+      type: object
+      required:
+      - category
+      - message
+      title: ValidationErrorItem
+      description: 'One structured bundle-validation error, projected onto the error wire.
+
+
+        The typed wire item carried by :attr:`ErrorReport.validation_errors`. Its
+
+        fields are the *union* across the three ``ValidateBundleError`` error-data
+
+        models (``PipelexBundleBlueprintValidationErrorData``, ``PipeFactoryErrorData``,
+
+        ``PipesAndConceptValidationErrorData``); a given item only populates the
+
+        subset its :attr:`category` produces, and the unset fields drop out of the
+
+        ``exclude_none`` wire projection.
+
+
+        Built exclusively by ``pipelex.pipeline.validation_errors.build_validation_error_items``,
+
+        which both the agent CLI (``extract_validation_errors``) and the API path
+
+        (``ValidateBundleError.to_error_report``) call — so the CLI''s structured
+
+        output and the API''s 422 ``validation_errors`` can never drift.
+
+
+        ``source`` is the declaring file path (CLI) or the per-content source the API
+
+        threads onto the in-memory load path — it hands a consumer the owning file
+
+        for cross-file diagnostics. Lives here, alongside :class:`ErrorReport`,
+
+        rather than next to the source error-data models because ``ErrorReport``
+
+        references it as a typed field and ``base_exceptions`` must not import the
+
+        ``pipelex.core`` error modules (which import back into this module).'
     WorkingMemory:
       properties:
         root:

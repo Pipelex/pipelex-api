@@ -35,6 +35,25 @@ A failure response looks like this:
 - `error_category` — finer classification when the originating error provides one (currently used by inference errors — see [`InferenceErrorCategory`](https://docs.pipelex.com/latest/errors/) upstream).
 - `user_action` — structured suggestion of what the caller should do next, when the error can author one.
 - `model`, `provider`, `provider_metadata` — populated when the failure originated in an upstream inference call. **Stripped under STRICT disclosure** (see [Disclosure modes](#disclosure-modes)).
+- `validation_errors` — structured per-error list carried by a `ValidateBundleError`. On the build routes it rides this 422 problem document; on `/validate` it rides the **200 `InvalidReport`** body instead (see [Pipe Validate](pipe-validate.md)). See [Structured validation errors](#structured-validation-errors).
+
+## Structured validation errors
+
+When a bundle fails validation, the `ValidateBundleError` carries a `validation_errors` array — the per-error diagnostics an editor maps to per-line problems. Where it surfaces depends on the endpoint: on `/validate` it rides the **200 `InvalidReport`** body (`is_valid: false`, the diagnostic-endpoint contract — see [Pipe Validate](pipe-validate.md)); on the build routes (`/build/{inputs,output,runner}`) it rides the **422** problem document alongside the single human-readable `detail`. Built by pipelex's one shared builder, the items are identical wherever they appear (and to the agent CLI's). Each item is one categorized validation failure:
+
+| Field | Meaning |
+|---|---|
+| `category` | The failure family — one of `blueprint_validation`, `pipe_factory`, `pipe_validation`, `dry_run`. |
+| `message` | Human-readable description of this specific error. |
+| `error_type` | Finer error subtype within the category, when the source error provides one. |
+| `source` | The owning file of the error — present on `pipe_validation` and `blueprint_validation` items that the runtime could attribute to a file. On the in-memory submit path it is the matching `mthds_sources[i]` (see [Sourcing submitted files](pipe-validate.md)); `null` when the caller sent no sources. Absent for `pipe_factory` and `dry_run` errors (the latter is graph-level), and absent on the parse-level `blueprint_validation` residual (a raw TOML-syntax error, an empty blueprint, or an elaborator failure), which carries the failure message but no file attribution — see the note below. |
+| `pipe_code`, `concept_code`, `domain_code` | The pipe / concept / domain the error is about, when applicable. |
+| `field_path`, `field_name` | The offending field within the bundle, when the error localizes to one. |
+| `variable_names`, `missing_concept_code`, `declared_concepts` | Extra context for specific failure shapes (undefined variables, an unresolved concept reference, the set of concepts that were declared). |
+
+Items carry only the fields that apply to their category — absent fields are omitted, not null. `validation_errors` is **retained under STRICT disclosure** (it describes the caller's own submitted bundle, not server internals). It is present only on `ValidateBundleError`; other error types omit it.
+
+Every invalid verdict carries a **non-empty** `validation_errors` array — the structured-info invariant is total. A parse-level failure the runtime cannot attribute to a known pipe/concept/field — a raw TOML-syntax error, an empty blueprint, or an elaborator failure — still becomes one `blueprint_validation` residual item carrying the failure message (no `source`, no `error_type` at this layer), so the array is never empty on an invalid verdict. The richer, locator-bearing items appear only when the runtime could attribute the failure; the human-readable summary (the `detail` on a build-route 422, the `message` on a `/validate` 200 `InvalidReport`) stays available alongside, but a consumer can always read at least one structured item.
 
 ## Status codes
 
@@ -92,7 +111,10 @@ When opening an issue, include the `request_id` from the response (or response h
 
 ```http
 POST /v1/validate
-{"mthds_contents": ["this is not valid TOML !!!"]}
+{
+  "mthds_contents": ["domain = \"broken\"\nmain_pipe = \"Not A Valid Pipe Code!\"\n"],
+  "mthds_sources": ["broken.mthds"]
+}
 ```
 
 ```http
@@ -104,14 +126,28 @@ X-Request-ID: 9f2c1ab3-…
   "type": "https://docs.pipelex.com/latest/errors/validate-bundle-error/",
   "title": "Validate bundle",
   "status": 422,
-  "detail": "TOML syntax error at line 1, column 6: Expected '=' after a key in a key/value pair",
+  "detail": "Validation error(s):\n\nValue errors: 'main_pipe': Value error, Invalid main pipe syntax 'Not A Valid Pipe Code!'. Must be in snake_case.",
   "instance": "/v1/validate",
   "error_type": "ValidateBundleError",
   "error_domain": "input",
-  "retryable": false,
-  "request_id": "9f2c1ab3-…"
+  "user_action": {
+    "kind": "change_input",
+    "detail": "Check the validation_errors array for specific issues"
+  },
+  "request_id": "9f2c1ab3-…",
+  "validation_errors": [
+    {
+      "category": "blueprint_validation",
+      "message": "Value error, Invalid main pipe syntax 'Not A Valid Pipe Code!'. Must be in snake_case.",
+      "error_type": "invalid_pipe_code_syntax",
+      "domain_code": "broken",
+      "source": "broken.mthds"
+    }
+  ]
 }
 ```
+
+The single `detail` is the human summary; `validation_errors` is the machine-readable list a client maps to per-line diagnostics. `source` echoes the `mthds_sources` entry the caller paired with that content — see [Structured validation errors](#structured-validation-errors) and [Sourcing submitted files](pipe-validate.md).
 
 ### 500 — deployment configuration fault
 

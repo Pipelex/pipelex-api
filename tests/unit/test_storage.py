@@ -79,6 +79,7 @@ class TestStorageEndpoint:
         "uri",
         [
             "https://example.com/file.pdf",  # wrong scheme
+            "pipelex-storage://google#abc/assets/x.pdf",  # URI delimiter in owner segment
             f"pipelex-storage://{USER_A}/..//assets/x.pdf",  # traversal
             f"pipelex-storage://{USER_A}/./assets/x.pdf",  # single-dot
             f"pipelex-storage://{USER_A}/assets/x",  # no extension
