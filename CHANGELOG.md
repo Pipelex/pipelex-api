@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v0.4.0] - 2026-06-17
 
 MTHDS Protocol surface alignment (Phase 2): `/validate` (like `/models`) now routes through `ApiRunner` (extending `PipelexMTHDSProtocol`), exactly like `/execute` and `/start`. The runner owns backend selection (in-process vs a single dispatched Temporal activity), the runtime owns the canonical artifact shapes, and the route only adds wire extras — so hosted and local runners answer with identical artifacts.
 
