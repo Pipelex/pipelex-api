@@ -15,17 +15,22 @@ classifiers = [
 ]
 
 dependencies = [
-  # NOTE (validate render train): this code requires the pipelex feature branch
-  # (validation_render + the protocol `extra` hook from mthds 0.5.0). A git-rev pin
-  # is INFEASIBLE under uv — pipelex's dev-only `[tool.uv.sources] mthds = path` is
-  # read on a git install and breaks (it is not in a published wheel). So this stays
-  # at the released ==0.34.0; CI is RED until Phase 7 publishes mthds-python 0.5.0
-  # then pipelex <new>, after which this bumps to ==<new>. See the PR description.
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal,temporal]==0.34.0",
+  # Validate-render train (PR phase): this code requires the pipelex feature branch
+  # (validation_render + the protocol `extra` hook from mthds 0.5.0). Both pipelex and
+  # mthds are pinned to public git revs below in [tool.uv.sources]. `mthds` is declared
+  # directly because the routes import `mthds.protocol.*`; pinning it here also satisfies
+  # pipelex's transitive `mthds>=0.5.0` (uv does not propagate a dependency's own sources).
+  # Phase 7 (release) replaces both with published versions (pipelex==<new>, mthds 0.5.0).
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal,temporal]",
+  "mthds>=0.5.0",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",
 ]
+
+[tool.uv.sources]
+pipelex = { git = "https://github.com/Pipelex/pipelex", rev = "db87bc13888d6f4d8a1ec92cfe18f267bc32e461" }
+mthds = { git = "https://github.com/mthds-ai/mthds-python", rev = "fecbf2e0cf38caadf87aec53ec35958d6600ae40" }
 
 [build-system]
 requires = ["hatchling"]
