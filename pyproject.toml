@@ -29,7 +29,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-pipelex = { git = "https://github.com/Pipelex/pipelex", rev = "db87bc13888d6f4d8a1ec92cfe18f267bc32e461" }
+pipelex = { git = "https://github.com/Pipelex/pipelex", rev = "24b3830c7919b707daefe4daa20ae54502d2d3bf" }
 mthds = { git = "https://github.com/mthds-ai/mthds-python", rev = "fecbf2e0cf38caadf87aec53ec35958d6600ae40" }
 
 [build-system]

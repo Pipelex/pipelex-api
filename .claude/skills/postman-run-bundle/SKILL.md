@@ -55,16 +55,20 @@ The **start** (async) body is the same plus a `callback_urls` array — the webh
 }
 ```
 
-The **validate** body is different — `/validate` takes **no `pipe_code` and no `inputs`**, only the bundle text:
+The **validate** body is different — `/validate` takes **no `pipe_code` and no `inputs`**, only the bundle text. It mirrors exactly what `mthds-agent validate bundle <file>` sends through `--runner api`:
 
 ```json
 {
   "mthds_contents": ["<full text of the .mthds file(s)>"],
-  "allow_signatures": false
+  "allow_signatures": false,
+  "mthds_sources": ["<file name per content>"],
+  "render": ["markdown"]
 }
 ```
 
-(`allow_signatures` is emitted only when you opt in via `--allow-signatures`; the default is strict, and it's omitted from the body.)
+- `allow_signatures` is always present (real clients send the bool verbatim); `false` is the strict default. Flip it with `--allow-signatures`.
+- `mthds_sources` is parallel to `mthds_contents` (one source per file, by name) so server-side `validation_errors[].source` names the owning file. Always emitted.
+- `render` is the opt-in presentation hint and is **what distinguishes a skill from a hook**: a **skill** validates with the default Markdown view → it sends `render: ["markdown"]` and reads the `rendered_markdown` the 200 carries; a **hook** validates with `--format json` → it omits `render` and reads the structured `is_valid`. Pass `--render markdown` to reproduce the skill flow; omit it for the lean structured body.
 
 Requests use the collection variable `{{base_url}}` and inherit the collection's `{{auth_token}}` bearer auth — so the same query works against a local server or the hosted one by switching the Postman environment.
 
@@ -72,10 +76,11 @@ Requests use the collection variable `{{base_url}}` and inherit the collection's
 
 The API has **no separate "dry-run" endpoint that takes inputs**. `POST /v1/validate` *is* the dry-run: it parses, loads, and dry-runs every pipe with mock inputs and **zero inference** (no LLM calls, no cost, no latency), then returns the validated bundle blueprint, a `graph_spec`, and per-pipe input/output JSON-Schema `pipe_io_contracts`. It confirms the whole pipeline wires up — concepts resolve, pipe inputs/outputs match, controllers find their sub-pipes — without ever running it. That makes it the safe, free counterpart to `execute`/`start`: reach for it to "just check" or "dry-run" a bundle.
 
-Two things to know:
+A few things to know:
 
-- **The bundle must declare a `main_pipe`.** `/validate` derives everything from the bundle text and rejects a bundle with no `main_pipe` (clean 422: *"Bundle does not declare a main_pipe, which is required for validation"*). Unlike the run endpoints, you cannot substitute `--pipe` — the endpoint takes no `pipe_code`. If the user's bundle has no `main_pipe`, tell them to declare one.
+- **`main_pipe` is optional for `/validate`.** Unlike the run endpoints, `/validate` derives everything from the bundle text and takes no `pipe_code`, so `--pipe` is ignored. A bundle with no `main_pipe` still validates (200, `is_valid: true`) — you just get `graph_spec: null`, since there's no entry pipe to anchor the graph. Tell the user to declare a `main_pipe` only if they want the graph.
 - **`allow_signatures`** (`--allow-signatures`) loosens one thing: by default the validation sweep rejects unimplemented pipe signatures; opt in and it tolerates them (each signature dry-runs trivially by minting a mock). Useful for an in-progress bundle whose pipes aren't all fleshed out yet.
+- **`render`** (`--render markdown`) opts into a server-rendered Markdown view of the verdict — the same readable output the CLI prints, rendered once server-side from pipelex's own renderer so it can't drift. It rides the 200 on both arms as `rendered_markdown` (alongside the structured `is_valid`); the structured fields stay the contract, the Markdown is the view. This is what a **skill** sends; a **hook** omits it. Default off → response unchanged.
 
 ## Callback URLs (the async `start` endpoint)
 
@@ -128,9 +133,10 @@ python3 .claude/skills/postman-run-bundle/scripts/build_postman_query.py <bundle
 ```bash
 python3 .claude/skills/postman-run-bundle/scripts/build_postman_query.py <bundle-path> --run --endpoint validate
 # add --allow-signatures to tolerate unimplemented pipe signatures (in-progress bundles)
+# add --render markdown to reproduce a skill-driven validate (response carries rendered_markdown)
 ```
 
-On success it returns the validated bundle blueprint, a graph spec, and per-pipe input/output structures. On a wiring problem it returns an RFC 7807 `422` naming the offending pipe — that's the dry-run doing its job. Validate ignores `--pipe`/`--inputs`, but the bundle must declare a `main_pipe` (the endpoint takes no `pipe_code`).
+On success it returns the validated bundle blueprint, a graph spec, and per-pipe input/output structures. On a wiring problem it returns an RFC 7807 `422` naming the offending pipe — that's the dry-run doing its job. Validate ignores `--pipe`/`--inputs` (the endpoint takes no `pipe_code`); `main_pipe` is optional — without it the bundle still validates, just with `graph_spec: null`.
 
 **Emit a curl command** (to share, or to run in a separate terminal). It writes the body to a temp file and prints a `curl --data @file` so the multi-line `mthds_contents` never has to be shell-escaped:
 
@@ -150,6 +156,7 @@ Useful options (apply across modes):
 |---|---|
 | `--endpoint execute` / `start` / `validate` / `both` | Pick the endpoint. Default `both` (= execute + start) for Postman/curl; `--run both` runs `execute`. `validate` is the inference-free dry-run. |
 | `--allow-signatures` | (validate only) Tolerate unimplemented pipe signatures instead of rejecting the bundle. Default strict. |
+| `--render <fmt>` | (validate only) Opt-in server-side view format, e.g. `--render markdown`. Adds `render` to the body so `/validate` returns a `rendered_markdown` view — this is what a **skill** sends (default Markdown). Repeatable. Omit it for the lean structured body a **hook** reads. |
 | `--inputs <path>` | Inputs JSON lives elsewhere, or you point at a `.mthds` file directly (file mode does not auto-detect inputs, matching the CLI). Ignored by `validate`. |
 | `--pipe <pipe_code>` | The bundle has no `main_pipe`, or you want a different entry pipe. Ignored by `validate` (the endpoint takes no `pipe_code`). |
 | `--callback-url <url>` | (start only) Webhook the async result is POSTed to. Repeatable. Falls back to `CALLBACK_URL` in env/`.env`; required when `start` is built or run. Ignored by `execute`/`validate`. |
@@ -182,7 +189,7 @@ A related limit: the API receives only the inline `mthds_contents`, not the bund
 - **No `POSTMAN_API_KEY`** → the script exits asking you to `source ~/.zshenv`. Do that and retry. If it's still unset, the user needs to add it to `~/.zshenv` (Postman → Settings → API keys → Generate).
 - **No `main_pipe` and no `--pipe`** (run endpoints) → the script exits; ask the user which pipe to run and pass `--pipe`.
 - **`start` selected and no callback URL** → the script exits ("the async /start endpoint requires callback_urls"). Resolve it from `--callback-url`, `CALLBACK_URL` in `.env`, or ask the user for one (e.g. a `https://webhook.site/...` endpoint), then re-run. `execute`/`validate` never hit this.
-- **No `main_pipe`, validating** → the script proceeds (validate needs no `pipe_code`), but the API returns a `422` *"Bundle does not declare a main_pipe"*. `--pipe` can't help here — `/validate` takes no `pipe_code`; the bundle itself must declare a `main_pipe`.
+- **No `main_pipe`, validating** → that's fine, not an error: `/validate` needs no `pipe_code`, so the bundle still validates (200) — you just get `graph_spec: null` (no entry pipe to anchor the graph). Declare a `main_pipe` only if you want the graph.
 
 ## Constants
 
