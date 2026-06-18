@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.5.0] - 2026-06-18
+
+### Added
+ - **Opt-in Markdown rendering on `/validate`:** `POST /v1/validate` now accepts an optional `render` list of view-format tokens (e.g., `["markdown"]`). When requested, the response includes a `rendered_markdown` field on both valid and invalid arms, matching the local CLI output. Unknown tokens are ignored to keep presentation hints separate from the verdict contract. This is supported end-to-end via a new `--render` flag in `build_postman_query.py` and a `RENDER` variable in `Makefile.local.mk`.
+ - **Postman sample bundles:** Added a suite of sample `.mthds` bundles and `.inputs.json` files in `postman/sample-bundles/` covering valid, invalid, and runnable pipeline states.
+
+### Changed
+ - **`mthds_sources` migrated to `extra` hook:** `ApiRunner.validate` now passes `mthds_sources` through the generalized `extra: dict | None` extension point, matching the updated `PipelexMTHDSProtocol.validate` signature from `mthds-python 0.5.0`.
+ - **`main_pipe` is now optional for validation:** Bundles without a main pipe validate successfully (`is_valid: true`) but return `graph_spec: null`. Documentation and scripts updated accordingly.
+ - **OpenAPI Makefile targets depend on `install`:** `openapi-export` and `openapi-check` now depend on `install` instead of `env`, ensuring the schema is generated and validated against a fully synced environment to prevent silent CI drift.
+ - **Dependencies:** Bumped `pipelex` to `0.35.0` and added `mthds>=0.5.0` to `pyproject.toml`.
+
 ## [v0.4.0] - 2026-06-17
 
 MTHDS Protocol surface alignment (Phase 2): `/validate` (like `/models`) now routes through `ApiRunner` (extending `PipelexMTHDSProtocol`), exactly like `/execute` and `/start`. The runner owns backend selection (in-process vs a single dispatched Temporal activity), the runtime owns the canonical artifact shapes, and the route only adds wire extras — so hosted and local runners answer with identical artifacts.

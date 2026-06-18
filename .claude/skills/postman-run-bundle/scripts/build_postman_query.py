@@ -253,17 +253,39 @@ def build_run_body(
     return json.dumps(body, indent=2, ensure_ascii=False)
 
 
-def build_validate_body(mthds_contents: list[str], allow_signatures: bool) -> str:
-    """Body for /validate: just the mthds_contents, plus the allow_signatures opt-in.
+def build_validate_body(
+    mthds_contents: list[str],
+    allow_signatures: bool,
+    *,
+    mthds_sources: list[str] | None = None,
+    render: list[str] | None = None,
+) -> str:
+    """Body for /validate — the skill-faithful wire shape.
 
     The endpoint takes no ``pipe_code`` and no ``inputs`` — it parses, loads, and
     dry-runs every pipe with mock inputs and zero inference, so it needs only the
-    bundle text. ``allow_signatures`` is omitted when false (the strict default)
-    to keep the body minimal.
+    bundle text. This mirrors exactly what ``mthds-agent validate bundle <file>``
+    sends through ``--runner api`` (see ``mthds-js`` ``MthdsApiClient.validate``):
+
+    - ``mthds_contents`` — always.
+    - ``allow_signatures`` — always present (real clients send the bool verbatim;
+      ``false`` is the strict default).
+    - ``mthds_sources`` — when provided, parallel to ``mthds_contents``; each entry
+      names the owning file so server-side ``validation_errors[].source`` resolves.
+    - ``render`` — the opt-in Pipelex-API presentation hint (e.g. ``["markdown"]``).
+      A **skill** validates with the default Markdown view, so it sends
+      ``render: ["markdown"]`` and reads the ``rendered_markdown`` the 200 carries; a
+      **hook** validates with ``--format json`` and omits ``render`` (lean structured
+      body). Pass ``--render markdown`` to reproduce the skill flow.
     """
-    body: dict[str, Any] = {"mthds_contents": mthds_contents}
-    if allow_signatures:
-        body["allow_signatures"] = True
+    body: dict[str, Any] = {
+        "mthds_contents": mthds_contents,
+        "allow_signatures": allow_signatures,
+    }
+    if mthds_sources:
+        body["mthds_sources"] = mthds_sources
+    if render:
+        body["render"] = render
     return json.dumps(body, indent=2, ensure_ascii=False)
 
 
@@ -399,6 +421,17 @@ def main() -> None:
         help="(validate only) Tolerate unimplemented pipe signatures instead of rejecting the bundle. Default: strict.",
     )
     parser.add_argument(
+        "--render",
+        action="append",
+        metavar="FORMAT",
+        help=(
+            "(validate only) Opt-in server-side view format to request, e.g. --render markdown. Adds `render` "
+            "to the body so /validate returns a `rendered_markdown` view of the verdict — this is what a "
+            "skill-driven validate (default Markdown) sends. Repeatable. Omit it for the lean structured body "
+            "a hook reads (--format json)."
+        ),
+    )
+    parser.add_argument(
         "--endpoint",
         choices=["execute", "start", "validate", "both"],
         default="both",
@@ -478,6 +511,18 @@ def main() -> None:
 
     subfolder_name = args.name or domain or main_file.stem
 
+    # Skill-faithful /validate extras. `mthds_sources` is parallel to mthds_contents
+    # (one source per sent file, by name) so server-side validation errors name the
+    # owning file — every real client sends it. `render` is the opt-in presentation
+    # hint: a skill validates with the default Markdown view (`--render markdown`),
+    # a hook omits it and reads the structured body.
+    mthds_sources = [path.name for path in all_mthds]
+    render_formats: list[str] = []
+    for raw_format in cast("list[str]", args.render or []):
+        normalized = raw_format.strip().lower()
+        if normalized and normalized not in render_formats:
+            render_formats.append(normalized)
+
     # One body per endpoint kind in play: execute -> "run", start -> "run" body plus
     # callback_urls, validate -> the inference-free /validate body.
     bodies: dict[str, str] = {}
@@ -486,7 +531,12 @@ def main() -> None:
     if needs_start:
         bodies["start"] = build_run_body(pipe_code, mthds_contents, inputs, callback_urls=callback_urls)
     if needs_validate:
-        bodies["validate"] = build_validate_body(mthds_contents, args.allow_signatures)
+        bodies["validate"] = build_validate_body(
+            mthds_contents,
+            args.allow_signatures,
+            mthds_sources=mthds_sources,
+            render=render_formats or None,
+        )
 
     print(f"Bundle:      {main_file}")
     print(f"mthds files: {', '.join(path.name for path in all_mthds)}")
@@ -496,7 +546,10 @@ def main() -> None:
     if needs_start:
         print(f"callback:    {', '.join(callback_urls)}")
     if needs_validate:
+        render_note = ", ".join(render_formats) or "none (structured-only, hook-style)"
         print(f"validate:    POST /v1/validate (no inference) — allow_signatures={args.allow_signatures}")
+        print(f"  sources:   {', '.join(mthds_sources)}")
+        print(f"  render:    {render_note}")
     if local_url_warnings:
         warn_target = "the API" if mode in ("run", "curl") else "Postman"
         print("\nWARNING: inputs reference local (non-http) url(s) — file uploads are out of scope.")
@@ -535,12 +588,19 @@ def main() -> None:
     assert api_key is not None  # guaranteed above for the postman path
     if needs_validate:
         # validate is never combined with the run endpoints, so a single description fits.
+        render_line = (
+            f"- render: `{render_formats}` → response carries `rendered_markdown` (a skill-driven validate)\n"
+            if render_formats
+            else "- render: none (lean structured body — what a hook reads with --format json)\n"
+        )
         description = (
             f"Validate (dry-run) the `{subfolder_name}` bundle — parse, load, and dry-run every pipe "
             "with NO inference (free, no LLM cost).\n\n"
             f"- Source: `{main_file}`\n"
             f"- .mthds files sent: {len(mthds_contents)}\n"
-            f"- allow_signatures: {args.allow_signatures}\n\n"
+            f"- mthds_sources: `{mthds_sources}`\n"
+            f"- allow_signatures: {args.allow_signatures}\n"
+            f"{render_line}\n"
             "Takes no pipe_code and no inputs. Returns the bundle blueprint, graph spec, and per-pipe "
             "input/output structures. Generated by the postman-run-bundle skill. Set `base_url` and "
             "`auth_token` in your Postman environment before running."

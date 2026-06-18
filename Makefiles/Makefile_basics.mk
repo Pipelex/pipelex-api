@@ -471,10 +471,16 @@ docs-deploy: env
 
 OPENAPI_ARTIFACT := docs/openapi/pipelex-api.openapi.yaml
 
-openapi-export: env
+# These depend on `install` (not `env`) on purpose: `env` only ensures the venv
+# directory exists, it never runs `uv sync`. The schema is generated from whatever
+# is actually installed in .venv, so without a sync the export/check validates the
+# committed artifact against a drifted venv (e.g. a stale or editable pipelex) and
+# silently passes while CI — which runs `make install` (uv sync from the lock) first —
+# sees the real drift. Depending on `install` makes the local result match CI.
+openapi-export: install
 	$(call PRINT_TITLE,"Exporting OpenAPI schema to $(OPENAPI_ARTIFACT)")
 	$(VENV_PYTHON) scripts/export_openapi.py $(OPENAPI_ARTIFACT)
 
-openapi-check: env
+openapi-check: install
 	$(call PRINT_TITLE,"Checking committed OpenAPI artifact against the app")
 	$(VENV_PYTHON) scripts/export_openapi.py --check $(OPENAPI_ARTIFACT)
