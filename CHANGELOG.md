@@ -3,10 +3,14 @@
 ## [v0.5.0] - 2026-06-18
 
 ### Added
- - **Opt-in `rendered_markdown` on `/validate`:** `POST /v1/validate` accepts an optional `render` list of view-format tokens (default empty). When it includes the supported `markdown` token, the 200 response gains a `rendered_markdown` field on both the valid and invalid arms — a server-rendered Markdown view of the verdict, produced by the shared pipelex renderers (`format_validate_markdown` / `render_invalid_validation_markdown`) so the hosted output cannot drift from the local CLI. The field is absent by default (the structured body is unchanged), and an unknown/unsupported token is silently ignored (lenient-ignore, not a 422) — `render` is a presentation hint, not part of the verdict contract. This is a Pipelex-API presentation extra, not the neutral protocol body.
+ - **Opt-in Markdown rendering on `/validate`:** `POST /v1/validate` now accepts an optional `render` list of view-format tokens (e.g., `["markdown"]`). When requested, the response includes a `rendered_markdown` field on both valid and invalid arms, matching the local CLI output. Unknown tokens are ignored to keep presentation hints separate from the verdict contract. This is supported end-to-end via a new `--render` flag in `build_postman_query.py` and a `RENDER` variable in `Makefile.local.mk`.
+ - **Postman sample bundles:** Added a suite of sample `.mthds` bundles and `.inputs.json` files in `postman/sample-bundles/` covering valid, invalid, and runnable pipeline states.
 
 ### Changed
- - **`mthds_sources` now rides the protocol `extra` hook:** `ApiRunner.validate` was migrated from a concrete `mthds_sources` parameter to the protocol's generalized `extra: dict | None` extension point (mthds-python 0.5.0), matching the base `PipelexMTHDSProtocol.validate` signature. The route passes `extra={"mthds_sources": ...}` when sources are provided; behavior is unchanged.
+ - **`mthds_sources` migrated to `extra` hook:** `ApiRunner.validate` now passes `mthds_sources` through the generalized `extra: dict | None` extension point, matching the updated `PipelexMTHDSProtocol.validate` signature from `mthds-python 0.5.0`.
+ - **`main_pipe` is now optional for validation:** Bundles without a main pipe validate successfully (`is_valid: true`) but return `graph_spec: null`. Documentation and scripts updated accordingly.
+ - **OpenAPI Makefile targets depend on `install`:** `openapi-export` and `openapi-check` now depend on `install` instead of `env`, ensuring the schema is generated and validated against a fully synced environment to prevent silent CI drift.
+ - **Dependencies:** Bumped `pipelex` to `0.35.0` and added `mthds>=0.5.0` to `pyproject.toml`.
 
 ## [v0.4.0] - 2026-06-17
 
