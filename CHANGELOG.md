@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v0.5.0] - 2026-06-18
 
 ### Added
  - **Opt-in `rendered_markdown` on `/validate`:** `POST /v1/validate` accepts an optional `render` list of view-format tokens (default empty). When it includes the supported `markdown` token, the 200 response gains a `rendered_markdown` field on both the valid and invalid arms — a server-rendered Markdown view of the verdict, produced by the shared pipelex renderers (`format_validate_markdown` / `render_invalid_validation_markdown`) so the hosted output cannot drift from the local CLI. The field is absent by default (the structured body is unchanged), and an unknown/unsupported token is silently ignored (lenient-ignore, not a 422) — `render` is a presentation hint, not part of the verdict contract. This is a Pipelex-API presentation extra, not the neutral protocol body.
