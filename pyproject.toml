@@ -15,22 +15,12 @@ classifiers = [
 ]
 
 dependencies = [
-  # Validate-render train (PR phase): this code requires the pipelex feature branch
-  # (validation_render + the protocol `extra` hook from mthds 0.5.0). Both pipelex and
-  # mthds are pinned to public git revs below in [tool.uv.sources]. `mthds` is declared
-  # directly because the routes import `mthds.protocol.*`; pinning it here also satisfies
-  # pipelex's transitive `mthds>=0.5.0` (uv does not propagate a dependency's own sources).
-  # Phase 7 (release) replaces both with published versions (pipelex==<new>, mthds 0.5.0).
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal,temporal]",
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal,temporal]==0.35.0",
   "mthds>=0.5.0",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",
 ]
-
-[tool.uv.sources]
-pipelex = { git = "https://github.com/Pipelex/pipelex", rev = "24b3830c7919b707daefe4daa20ae54502d2d3bf" }
-mthds = { git = "https://github.com/mthds-ai/mthds-python", rev = "fecbf2e0cf38caadf87aec53ec35958d6600ae40" }
 
 [build-system]
 requires = ["hatchling"]
