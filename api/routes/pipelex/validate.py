@@ -4,15 +4,38 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pipelex.base_exceptions import ErrorReport, ValidationErrorItem
 from pipelex.pipeline.exceptions import ValidateBundleError
+from pipelex.pipeline.validation_render import format_validate_markdown, render_invalid_validation_markdown
 from pipelex.pipeline.validation_report import PipelexValidationReport
 from pipelex.temporal.exceptions import WorkflowExecutionError
 from pipelex.tools.typing.pydantic_utils import empty_list_factory_of
+from pipelex.types import StrEnum
 from pydantic import BaseModel, Field, model_validator
 
 from api.routes.pipelex.pipeline import ApiRunner
 from api.schemas.models import MthdsContentsRequest
 
 router = APIRouter(tags=["validate"])
+
+
+class RenderFormat(StrEnum):
+    """The closed set of server-side **supported** presentation formats for `/validate`.
+
+    This is the supported-set vocabulary the route resolves request `render` tokens against —
+    NOT the request-body type (the request stays `list[str]` so an unknown token is lenient-ignored,
+    not 422'd). A Pipelex-API presentation concern (D-D): never the neutral protocol body.
+    """
+
+    MARKDOWN = "markdown"
+
+
+def _resolve_render_formats(render: list[str]) -> set[RenderFormat]:
+    """Resolve raw `render` tokens to the supported `RenderFormat` set (deduped, order-insensitive).
+
+    Unknown/unsupported tokens are silently dropped (lenient-ignore, per-token): `render` is a
+    presentation hint, not part of the verdict contract, so a stale view token never fails the call.
+    """
+    supported_values = {render_format.value for render_format in RenderFormat}
+    return {RenderFormat(token) for token in render if token in supported_values}
 
 
 class ValidateRequest(MthdsContentsRequest):
@@ -31,6 +54,15 @@ class ValidateRequest(MthdsContentsRequest):
             "Optional per-file sources, parallel to `mthds_contents`. When provided, each entry is threaded "
             "onto the corresponding bundle's `source` so server-side validation errors carry a `source` pointing "
             "at the owning file. Must match `mthds_contents` in length when present."
+        ),
+    )
+    render: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Opt-in Pipelex-API presentation extra: view formats to render server-side. A supported token "
+            "(`markdown`) adds a `rendered_<format>` field (e.g. `rendered_markdown`) to the 200 verdict, on both "
+            "the valid and invalid arms. Unknown/unsupported tokens are silently ignored (presentation hint, not "
+            "part of the verdict contract); the default empty list renders nothing and the response is unchanged."
         ),
     )
 
@@ -56,6 +88,14 @@ class ValidReport(PipelexValidationReport):
 
     mthds_contents: list[str] = Field(..., description="The MTHDS contents that were validated (echo of the request)")
     message: str = Field(default="MTHDS content validated successfully", description="Status message")
+    rendered_markdown: str | None = Field(
+        default=None,
+        description=(
+            "Opt-in Pipelex-API presentation extra (D-D): a server-rendered Markdown view of the valid verdict, "
+            "present only when the request's `render` includes `markdown`. Absent by default — the structured fields "
+            "remain the contract; this is the view."
+        ),
+    )
 
 
 class InvalidReport(BaseModel):
@@ -85,6 +125,13 @@ class InvalidReport(BaseModel):
     """An invalid bundle is never runnable."""
 
     message: str = Field(default="MTHDS validation found errors", description="Human-readable summary of the verdict.")
+    rendered_markdown: str | None = Field(
+        default=None,
+        description=(
+            "Opt-in Pipelex-API presentation extra (D-D): a server-rendered Markdown view of the invalid verdict's "
+            "`validation_errors`, present only when the request's `render` includes `markdown`. Absent by default."
+        ),
+    )
 
 
 # Discriminated 200 response union (D-C): a consumer pattern-matches the one mandatory `is_valid`
@@ -121,16 +168,22 @@ async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
       fault (a `WorkflowExecutionError` that recovers no `ValidateBundleError`) is re-raised here
       so it lands as a 5xx, not a verdict.
     """
+    # Opt-in presentation formats (D-D): resolved once, threaded into both 200 arms. Empty by
+    # default → no `rendered_*` field, response byte-identical to the no-`render` request.
+    requested_formats = _resolve_render_formats(request_data.render)
     try:
         report = await ApiRunner().validate(
             mthds_contents=request_data.mthds_contents,
             allow_signatures=request_data.allow_signatures,
-            mthds_sources=request_data.mthds_sources,
+            # `mthds_sources` rides the protocol's `extra` extension hook (mthds-python 0.5.0
+            # generalized the concrete param to `extra: dict | None`). Omitted when absent so the
+            # sourceless path is unchanged.
+            extra={"mthds_sources": request_data.mthds_sources} if request_data.mthds_sources is not None else None,
         )
     except ValidateBundleError as validation_error:
         # Direct backend: an invalid bundle is a produced verdict (200 InvalidReport), not a
         # transport failure — intercept it before the global 422 handler.
-        return _invalid_report_response(validation_error.to_error_report())
+        return _invalid_report_response(validation_error.to_error_report(), requested_formats=requested_formats)
     except WorkflowExecutionError as workflow_error:
         # Temporal backend: a content verdict crosses the activity boundary as a
         # WorkflowExecutionError that recovers the original ValidateBundleError report. A genuine
@@ -139,16 +192,26 @@ async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
         recovered_report = workflow_error.to_error_report()
         if recovered_report.error_type != ValidateBundleError.__name__:
             raise
-        return _invalid_report_response(recovered_report)
+        return _invalid_report_response(recovered_report, requested_formats=requested_formats)
 
     # Splat the report's own field/value pairs so a future canonical field rides the wire
     # automatically — the wrapper never enumerates (and silently drops) report fields. `is_valid`
     # rides through from the report as the valid-arm discriminant (True).
     response_data = ValidReport.model_validate({**dict(report), "mthds_contents": request_data.mthds_contents})
-    return JSONResponse(content=response_data.model_dump(mode="json", serialize_as_any=True, by_alias=True))
+    content = response_data.model_dump(mode="json", serialize_as_any=True, by_alias=True)
+    # `rendered_markdown` is a presentation extra (D-D), not part of the report: attach it only when
+    # `markdown` was requested, else pop it so the response stays byte-identical to a no-`render` call
+    # (the valid arm is dumped without `exclude_none`, so the default `null` would otherwise linger).
+    # Rendered from the canonical report dict — the same shape the local agent CLI feeds the renderer,
+    # so the valid-arm Markdown shares one source of truth and cannot drift in format/structure.
+    if RenderFormat.MARKDOWN in requested_formats:
+        content["rendered_markdown"] = format_validate_markdown(report.model_dump(mode="json"))
+    else:
+        content.pop("rendered_markdown", None)
+    return JSONResponse(content=content)
 
 
-def _invalid_report_response(error_report: ErrorReport) -> JSONResponse:
+def _invalid_report_response(error_report: ErrorReport, *, requested_formats: set[RenderFormat]) -> JSONResponse:
     """Render a produced "invalid" verdict as a 200 `InvalidReport` (D-A / D-C / D-D).
 
     The `validation_errors[]` come straight from pipelex's one shared builder via
@@ -164,5 +227,12 @@ def _invalid_report_response(error_report: ErrorReport) -> JSONResponse:
     )
     # `exclude_none` drops each item's unset locators, so the wire items match the agent CLI's
     # `extract_validation_errors` byte-for-byte (it dumps items the same way) — the "one error item,
-    # two surfaces" guarantee. The invalid arm's own fields are all non-None, so none are lost.
-    return JSONResponse(content=invalid_report.model_dump(mode="json", serialize_as_any=True, by_alias=True, exclude_none=True))
+    # two surfaces" guarantee. The invalid arm's own fields are all non-None, so none are lost; and
+    # `rendered_markdown` stays absent here unless explicitly requested below.
+    content = invalid_report.model_dump(mode="json", serialize_as_any=True, by_alias=True, exclude_none=True)
+    # Opt-in presentation extra (D-D): a faithful render of the structured `validation_errors`,
+    # attached only when `markdown` was requested. Built from the just-dumped content so the renderer
+    # reads the same items the wire carries.
+    if RenderFormat.MARKDOWN in requested_formats:
+        content["rendered_markdown"] = render_invalid_validation_markdown(content)
+    return JSONResponse(content=content)
