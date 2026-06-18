@@ -21,6 +21,7 @@ This skill handles the full release cycle for the `pipelex-api` Python package.
 - **`pyproject.toml`** — the `version` field (line 3)
 - **`CHANGELOG.md`** — add `[vX.Y.Z] - YYYY-MM-DD` entry (remove `[Unreleased]` if present)
 - **`uv.lock`** — regenerated via `make li` (lock + install)
+- **`docs/openapi/pipelex-api.openapi.yaml`** — regenerated via `make openapi-export`. The artifact embeds the app version in `info.version`, so bumping `pyproject.toml` **always** makes it stale. This must be regenerated after the bump or CI's `make openapi-check` fails.
 
 ## Workflow
 
@@ -40,10 +41,20 @@ Ask the user which kind of version bump they want — **patch**, **minor**, or
 **major** — unless they already specified it. Show the current version and what
 the new version would be for each option so the choice is concrete.
 
-### 3. Run quality checks
+### 3. Run quality checks (pre-bump gate)
 
-Run `make check`. This is the gate — if it fails, stop and report the errors so
-they can be fixed before retrying. Do not proceed past this step on failure.
+Run `make check`. This is the entry gate — if it fails, stop and report the
+errors so they can be fixed before retrying. Do not proceed past this step on
+failure.
+
+**This runs before the version bump, so it validates the _current_ version, not
+the release version.** In particular it does NOT catch the OpenAPI artifact
+going stale from the bump itself — `docs/openapi/pipelex-api.openapi.yaml`
+embeds `info.version`, so the bump always invalidates it. That is what the
+**post-bump regeneration + re-check in step 7.5** exists to catch. Do not rely
+on this step alone. (Note: `make agent-check` / `make c` / `make cc` skip
+`openapi-check` entirely — only full `make check` and CI run the drift gate, so
+always use `make check` here, never a lighter variant.)
 
 ### 4. Ensure we're on the right branch
 
@@ -102,11 +113,31 @@ Run `make li` to regenerate `uv.lock` and reinstall. This ensures the lockfile
 reflects the new version in `pyproject.toml`. If this step fails, stop and
 report the error.
 
+### 7.5. Regenerate the OpenAPI artifact and re-run the full check
+
+The version bump in step 6 makes the committed OpenAPI artifact stale (its
+`info.version` still reads the old version). Regenerate and re-validate against
+the **final** release state — this is the step that the pre-bump gate (step 3)
+structurally cannot cover:
+
+1. Run `make openapi-export` to regenerate `docs/openapi/pipelex-api.openapi.yaml`
+   from the bumped app. Confirm the diff is the expected `info.version` change
+   (and any genuine schema changes from the release); anything unexpected means
+   the artifact had already drifted and should be investigated.
+2. Run `make check` again as the final gate on the committed state. It must pass
+   — `openapi-check` here is exactly what CI runs, so a green `make check` now
+   means CI's OpenAPI drift gate will pass. If it fails, stop and fix before
+   committing.
+
+Do not skip this even if step 3 was green: step 3 ran before the bump and cannot
+see version-driven drift.
+
 ### 8. Commit and push
 
 Stage all release-related changes. This includes at minimum `pyproject.toml`,
-`CHANGELOG.md`, and `uv.lock`, plus any other files the user chose to include
-in step 1 (e.g. previously uncommitted work that belongs in this release).
+`CHANGELOG.md`, `uv.lock`, and `docs/openapi/pipelex-api.openapi.yaml`, plus any
+other files the user chose to include in step 1 (e.g. previously uncommitted
+work that belongs in this release).
 
 Commit with the message:
 
@@ -145,5 +176,9 @@ Report the PR URL back to the user.
 - Always confirm the bump type with the user before making changes.
 - If `make check` fails, the release is blocked — help the user fix the issues
   rather than skipping the checks.
+- **The OpenAPI artifact tracks the version.** `docs/openapi/pipelex-api.openapi.yaml`
+  embeds `info.version`, so every bump makes it stale and CI's `make openapi-check`
+  will fail unless it is regenerated (step 7.5) and committed. The pre-bump
+  `make check` (step 3) cannot catch this because it runs before the bump.
 - Today's date for the changelog entry: use the current date in `YYYY-MM-DD`
   format.
