@@ -1523,6 +1523,13 @@ components:
           title: Message
           description: Human-readable summary of the verdict.
           default: MTHDS validation found errors
+        rendered_markdown:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Rendered Markdown
+          description: 'Opt-in Pipelex-API presentation extra (D-D): a server-rendered Markdown view of the invalid verdict''s
+            `validation_errors`, present only when the request''s `render` includes `markdown`. Absent by default.'
       type: object
       title: InvalidReport
       description: 'The 200 **invalid** arm: a produced "invalid" verdict, discriminated on `is_valid: false`.
@@ -3355,6 +3362,14 @@ components:
           title: Message
           description: Status message
           default: MTHDS content validated successfully
+        rendered_markdown:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Rendered Markdown
+          description: 'Opt-in Pipelex-API presentation extra (D-D): a server-rendered Markdown view of the valid verdict,
+            present only when the request''s `render` includes `markdown`. Absent by default — the structured fields remain
+            the contract; this is the view.'
       additionalProperties: true
       type: object
       required:
@@ -3397,6 +3412,15 @@ components:
           description: Optional per-file sources, parallel to `mthds_contents`. When provided, each entry is threaded onto
             the corresponding bundle's `source` so server-side validation errors carry a `source` pointing at the owning file.
             Must match `mthds_contents` in length when present.
+        render:
+          items:
+            type: string
+          type: array
+          title: Render
+          description: 'Opt-in Pipelex-API presentation extra: view formats to render server-side. A supported token (`markdown`)
+            adds a `rendered_<format>` field (e.g. `rendered_markdown`) to the 200 verdict, on both the valid and invalid
+            arms. Unknown/unsupported tokens are silently ignored (presentation hint, not part of the verdict contract); the
+            default empty list renders nothing and the response is unchanged.'
       type: object
       required:
       - mthds_contents

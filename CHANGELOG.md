@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+ - **Opt-in `rendered_markdown` on `/validate`:** `POST /v1/validate` accepts an optional `render` list of view-format tokens (default empty). When it includes the supported `markdown` token, the 200 response gains a `rendered_markdown` field on both the valid and invalid arms — a server-rendered Markdown view of the verdict, produced by the shared pipelex renderers (`format_validate_markdown` / `render_invalid_validation_markdown`) so the hosted output cannot drift from the local CLI. The field is absent by default (the structured body is unchanged), and an unknown/unsupported token is silently ignored (lenient-ignore, not a 422) — `render` is a presentation hint, not part of the verdict contract. This is a Pipelex-API presentation extra, not the neutral protocol body.
+
+### Changed
+ - **`mthds_sources` now rides the protocol `extra` hook:** `ApiRunner.validate` was migrated from a concrete `mthds_sources` parameter to the protocol's generalized `extra: dict | None` extension point (mthds-python 0.5.0), matching the base `PipelexMTHDSProtocol.validate` signature. The route passes `extra={"mthds_sources": ...}` when sources are provided; behavior is unchanged.
+
 ## [v0.4.0] - 2026-06-17
 
 MTHDS Protocol surface alignment (Phase 2): `/validate` (like `/models`) now routes through `ApiRunner` (extending `PipelexMTHDSProtocol`), exactly like `/execute` and `/start`. The runner owns backend selection (in-process vs a single dispatched Temporal activity), the runtime owns the canonical artifact shapes, and the route only adds wire extras — so hosted and local runners answer with identical artifacts.

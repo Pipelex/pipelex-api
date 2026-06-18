@@ -161,20 +161,21 @@ class ApiRunner(PipelexMTHDSProtocol):
         self,
         mthds_contents: list[str],
         allow_signatures: bool = False,
-        mthds_sources: list[str] | None = None,
+        extra: dict[str, Any] | None = None,
     ) -> PipelexValidationReport:
         """Validate MTHDS bundles — protocol `validate`, Temporal-aware backend selection.
 
-        `mthds_sources` is the optional per-content source-threading hook (additive over the
-        protocol signature): each source lands on the corresponding `blueprint.source`, so the
-        structured `validation_errors` on a failure — and the `bundle_blueprint` on success —
-        carry a real `source` instead of `None`. The route maps a length mismatch to a 422
-        before we get here; `None` keeps the prior sourceless behavior.
+        `mthds_sources` is the optional per-content source-threading hook, carried through the
+        protocol's `extra` extension point (`extra={"mthds_sources": [...]}`): each source lands on
+        the corresponding `blueprint.source`, so the structured `validation_errors` on a failure —
+        and the `bundle_blueprint` on success — carry a real `source` instead of `None`. The route
+        maps a length mismatch to a 422 before we get here; absent/`None` keeps the prior
+        sourceless behavior.
 
         Temporal disabled: run in-process via `validate_bundles_in_process` directly (the same
         orchestrator the inherited local path delegates to — `validate_bundle` + graph arm +
         `build_validation_report`, one library window — called here so `mthds_sources` rides
-        through, which `super().validate` cannot carry).
+        through, which `super().validate` does not thread onto the blueprints).
 
         Temporal enabled: pure dispatch + map (D10) — the whole job (validation sweep,
         graph dry-run, and every worker-side artifact: status map, `pending_signatures`,
@@ -186,6 +187,7 @@ class ApiRunner(PipelexMTHDSProtocol):
         without a declared `main_pipe` validates fine and simply carries
         `graph_spec=None` (D2 — no precondition).
         """
+        mthds_sources: list[str] | None = extra.get("mthds_sources") if extra else None
         if not get_config().temporal.is_enabled:
             library_dirs = [Path(library_dir) for library_dir in self.library_dirs] if self.library_dirs else None
             return await validate_bundles_in_process(
