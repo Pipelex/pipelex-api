@@ -77,12 +77,14 @@ packages = ["api"]
 [tool.uv]
 required-version = ">=0.7.2"
 
-# Phase C (orchestrator-agnostic base) is developed against the local `pipelex`
-# worktree so the new runtime-bridge / plugin seams can be exercised end-to-end
-# before a release. The published `==<ver>` pin (no `temporal` extra) is the
-# release-time form; this editable source is local-dev only.
+# The orchestrator-agnostic base + per-call dispatch seams (OrchestratorRegistry,
+# BundleValidatorRegistry) are developed against an unreleased `pipelex` branch.
+# Pin to that branch by commit SHA (public repo → git+https, resolvable in CI without
+# credentials) so CI installs the exact core this PR is built against. The published
+# `==<ver>` PyPI pin (no `temporal` extra) is the release-time form; flip back to it
+# once the core change ships to PyPI.
 [tool.uv.sources]
-pipelex = { path = "../_plugins", editable = true }
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "51ff094176996d31cb3da2bbf6be5ebb366235d4" }
 
 [tool.mypy]
 check_untyped_defs = true
