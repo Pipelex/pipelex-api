@@ -181,9 +181,15 @@ paths:
       description: 'Execute a method synchronously and return its full output (MTHDS Protocol `POST /execute`).
 
 
-        Pipelex domain failures propagate untouched: the global `PipelexError`
+        The backend is selected by the resolved `execution_mode` (deployment default + optional
 
-        handler in `api.exception_handlers` turns them into an RFC 7807 problem response.'
+        policy-gated per-request override via the `execution_mode` extra), symmetric with `/start` —
+
+        not by `boot_orchestrator`. A fire-and-forget mode is refused with a 400 (`/execute` is
+
+        synchronous). Pipelex domain failures propagate untouched: the global `PipelexError` handler
+
+        in `api.exception_handlers` turns them into an RFC 7807 problem response.'
       operationId: execute_v1_execute_post
       requestBody:
         content:
@@ -429,12 +435,13 @@ paths:
         \ and carries `graph_spec=null`. Pending\n  signatures are reported as `pending_signatures` + `is_runnable: false`,\
         \ never as an error.\n- **Invalid verdict (200, `is_valid: false`):** the `InvalidReport` arm — `validation_errors[]`\n\
         \  (the structured per-error diagnostics, built by pipelex's one shared builder, incl. the\n  `dry_run` residual item)\
-        \ + `message`, with the structural artifacts absent. This is what the\n  route synthesizes by catching the runtime's\
-        \ `ValidateBundleError` — validation runs DIRECT\n  in-process (F2), so that is the only verdict-bearing exception,\
-        \ and it never reaches the\n  global handler.\n- **No verdict (non-2xx):** a malformed request body or an `mthds_sources`\
-        \ length mismatch is a\n  request-shape **422**; a host-wiring programmer error is a `PipelexUnexpectedError` → **500**;\n\
-        \  auth is **401/403**. All are RFC 7807 `application/problem+json` rendered by the global\n  handler in `api.exception_handlers`\
-        \ — routes never shape them."
+        \ + `message`, with the structural artifacts absent. The runner\n  returns this as a value (`ErrorReport`) regardless\
+        \ of backend — the in-process arm from the\n  bundle's `ValidateBundleError`, the dispatched arm recovered from the\
+        \ worker — so the route\n  maps it to a 200 by matching the returned verdict, never by catching an exception.\n- **No\
+        \ verdict (non-2xx):** a malformed request body or an `mthds_sources` length mismatch is a\n  request-shape **422**;\
+        \ a forbidden `execution_mode` override is a **403**; a host-wiring\n  programmer error or a genuine orchestrator\
+        \ fault is a **5xx**; auth is **401/403**. All are\n  RFC 7807 `application/problem+json` rendered by the global handler\
+        \ in\n  `api.exception_handlers` — routes never shape them."
       operationId: validate_mthds_v1_validate_post
       requestBody:
         content:
@@ -2735,6 +2742,23 @@ components:
       required:
       - domain
       title: PipelexBundleBlueprint
+    PipelexExecutionMode:
+      type: string
+      enum:
+      - direct
+      - temporal_blocking
+      - temporal_fire_and_forget
+      - mistral_native
+      title: PipelexExecutionMode
+      description: "How a Pipelex pipe runs inside a host runtime activity.\n\nDIRECT: in-process; no Temporal involved on\
+        \ Pipelex's side; activity blocks\n    until the pipe completes. Fastest feedback, simplest ops.\nTEMPORAL_BLOCKING:\
+        \ dispatch the pipe as a Pipelex Temporal workflow; the\n    activity awaits completion. Pipe runs durably on Pipelex's\
+        \ worker\n    fleet. Requires the pipelex-temporal plugin.\nTEMPORAL_FIRE_AND_FORGET: dispatch the pipe as a Pipelex\
+        \ Temporal workflow\n    and return immediately with the workflow_id. Activity does NOT wait;\n    completion is signalled\
+        \ out-of-band via DeliveryAssignment (webhook /\n    storage). Same dep requirements as TEMPORAL_BLOCKING.\n    ``delivery_assignment_dump``\
+        \ is required.\nMISTRAL_NATIVE: decompose the pipe into native Mistral Workflows primitives\n    on the same worker\
+        \ — controllers as child workflows, leaves as\n    activities. Surfaces per-step retry / signals / cancellation through\n\
+        \    the host-runtime APIs. Requires the\n    ``pipelex-mistralai-workflows`` package."
     PipelexModelDeck:
       properties:
         models:
@@ -3432,6 +3456,14 @@ components:
             adds a `rendered_<format>` field (e.g. `rendered_markdown`) to the 200 verdict, on both the valid and invalid
             arms. Unknown/unsupported tokens are silently ignored (presentation hint, not part of the verdict contract); the
             default empty list renders nothing and the response is unchanged.'
+        execution_mode:
+          anyOf:
+          - $ref: '#/components/schemas/PipelexExecutionMode'
+          - type: 'null'
+          description: Optional per-request execution-mode override for the validation backend (same plumbing as `/start`).
+            `direct` validates in-process; a `temporal_*` mode dispatches the whole job to a worker. Honored only when the
+            deployment sets `allow_request_execution_mode_override = true` in its `api.toml`; otherwise a mode that differs
+            from the deployment default is refused with a 403. Omitted → the deployment default.
       type: object
       required:
       - mthds_contents

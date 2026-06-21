@@ -107,10 +107,12 @@ The base is **orchestrator-agnostic**. WHICH backend a top-level run dispatches 
 
 | Key | Meaning | Base default |
 | --- | --- | --- |
-| `execution_mode` | Which mode a top-level `POST /v1/start` dispatches as: `direct` (in-process), `temporal_blocking`, `temporal_fire_and_forget`, or `mistral_native`. A mode whose orchestrator plugin is **not installed** fails loud at dispatch with the plugin's install hint. | `direct` |
-| `allow_request_execution_mode_override` | Whether a caller may set `execution_mode` per request on `POST /v1/start`. When `false`, a requested mode that differs from the deployment default is refused with a `403`. | `false` |
+| `execution_mode` | Which backend a top-level run dispatches as — `direct` (in-process), `temporal_blocking`, `temporal_fire_and_forget`, or `mistral_native`. Governs `POST /v1/execute`, `POST /v1/start`, and `POST /v1/validate` uniformly (all dispatch through the per-call orchestrator/validator registry). A mode whose orchestrator plugin is **not installed** fails loud at dispatch with the plugin's install hint. | `direct` |
+| `allow_request_execution_mode_override` | Whether a caller may set `execution_mode` per request on `POST /v1/execute`, `POST /v1/start`, and `POST /v1/validate`. When `false`, a requested mode that differs from the deployment default is refused with a `403`. | `false` |
 
-The packaged default (`execution_mode = "direct"`, override off) is what the generic image ships. `POST /v1/validate` always runs in-process and ignores this setting. `POST /v1/execute` runs in-process unless the process is booted under a boot-orchestrator plugin.
+The packaged default (`execution_mode = "direct"`, override off) is what the generic image ships. `POST /v1/execute` is **synchronous** (it returns the full output), so a fire-and-forget mode is meaningless there and is refused with a `400` — use `POST /v1/start` for fire-and-forget.
+
+**`execution_mode` vs `boot_orchestrator` — two knobs, two jobs.** `execution_mode` (here) selects the backend a **top-level entry** (`/execute`, `/start`, `/validate`) dispatches to. `boot_orchestrator` (a core Pipelex setting) selects the **execution stack** used wherever a pipe actually runs — on a distributed worker, and for the in-process scoping inside the `direct` orchestrator. On a correctly-configured deployment the two agree (a Temporal flavor sets `execution_mode = "temporal_blocking"` *and* boots under Temporal); keeping them distinct is what lets `execution_mode` be the single source of truth for top-level dispatch without coupling it to how the stack is booted. A `temporal_*` `execution_mode` still requires the process to be booted under Temporal — set them together on a Temporal flavor.
 
 A **flavor** image (e.g. the hosted Temporal flavor) installs one orchestrator plugin and bakes an `api_{env}.toml` to flip the default, e.g.:
 

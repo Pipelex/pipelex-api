@@ -25,6 +25,12 @@ class ErrorType(StrEnum):
     TOKEN_EXPIRED = "TokenExpired"
     SERVER_MISCONFIGURED = "ServerMisconfigured"
 
+    # A caller asked `/execute` to run in a fire-and-forget execution_mode. `/execute` is
+    # synchronous (it returns the full output), so fire-and-forget is meaningless there —
+    # a 400: use `/start` for fire-and-forget. Resolved AFTER the override policy, so a
+    # forbidden per-request override still 403s first.
+    FIRE_AND_FORGET_NOT_SUPPORTED = "FireAndForgetNotSupported"
+
     # Request validation
     BAD_REQUEST = "BadRequest"
     VALIDATION_ERROR = "ValidationError"

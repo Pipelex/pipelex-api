@@ -10,6 +10,8 @@ Execute a Pipelex pipeline with flexible inputs and wait for completion.
 
 **Endpoint:** `POST /v1/execute`
 
+> **Backend selected by `execution_mode`.** `/execute` dispatches through the deployment's `execution_mode` (config default + optional policy-gated per-request `execution_mode` override), symmetric with `/start` — see [Configuration → Execution mode](configuration.md). On the orchestrator-agnostic base (`direct`, the default) it runs **in-process**; a `temporal_blocking` / `mistral_native` flavor dispatches the run to a worker and awaits it. `/execute` is **synchronous** (it returns the full output), so a fire-and-forget mode is refused with a `400` — use `POST /v1/start` for fire-and-forget. A per-request override is honored only where the deployment sets `allow_request_execution_mode_override = true`; otherwise a mode differing from the default is refused with a `403`.
+
 **Request Body:**
 
 ```json
