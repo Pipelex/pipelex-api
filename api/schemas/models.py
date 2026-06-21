@@ -107,6 +107,14 @@ class StartRequest(RunRequest):
     pipeline_run_id: str | None = Field(default=None, max_length=128)
 
 
+_EXECUTION_MODE_DESCRIPTION = (
+    "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — request the execution mode for this run "
+    "(`direct`, `temporal_blocking`, `temporal_fire_and_forget`, `mistral_native`). Honored ONLY when the "
+    "deployment sets `allow_request_execution_mode_override = true` in its `api.toml`; otherwise a mode that "
+    "differs from the deployment default is refused with a 403. Omit it to use the deployment default."
+)
+
+
 _ALLOWED_CALLBACK_SCHEMES = frozenset({"http", "https"})
 
 
@@ -142,15 +150,7 @@ class PipelineApiExtras(BaseModel):
 
     pipeline_run_id: str | None = Field(default=None, max_length=128)
     callback_urls: list[str] | None = Field(default=None, max_length=MAX_CALLBACK_URLS)
-    execution_mode: PipelexExecutionMode | None = Field(
-        default=None,
-        description=(
-            "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — request the execution mode for this run "
-            "(`direct`, `temporal_blocking`, `temporal_fire_and_forget`, `mistral_native`). Honored ONLY when the "
-            "deployment sets `allow_request_execution_mode_override = true` in its `api.toml`; otherwise a mode that "
-            "differs from the deployment default is refused with a 403. Omit it to use the deployment default."
-        ),
-    )
+    execution_mode: PipelexExecutionMode | None = Field(default=None, description=_EXECUTION_MODE_DESCRIPTION)
 
     @field_validator("callback_urls")
     @classmethod
@@ -191,6 +191,17 @@ class PipelexApiStartRequest(StartRequest):
             "and cloud-metadata hosts are rejected."
         ),
     )
+
+
+class PipelexApiExecuteRequest(RunRequest):
+    """Documented body of `POST /execute` — the protocol's `RunRequest` plus THIS server's `execution_mode` extension.
+
+    Used only to publish the OpenAPI request schema: `/execute` reads the body through the raw
+    `Request` (kajson decoding), so FastAPI cannot infer the body type; this model documents the
+    per-request `execution_mode` override the route actually honors (parsed by `PipelineApiExtras`).
+    """
+
+    execution_mode: PipelexExecutionMode | None = Field(default=None, description=_EXECUTION_MODE_DESCRIPTION)
 
 
 class MthdsContentsRequest(BaseModel):

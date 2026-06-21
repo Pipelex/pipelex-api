@@ -196,6 +196,25 @@ paths:
           application/json:
             schema:
               $defs:
+                PipelexExecutionMode:
+                  type: string
+                  enum:
+                  - direct
+                  - temporal_blocking
+                  - temporal_fire_and_forget
+                  - mistral_native
+                  title: PipelexExecutionMode
+                  description: "How a Pipelex pipe runs inside a host runtime activity.\n\nDIRECT: in-process; no Temporal\
+                    \ involved on Pipelex's side; activity blocks\n    until the pipe completes. Fastest feedback, simplest\
+                    \ ops.\nTEMPORAL_BLOCKING: dispatch the pipe as a Pipelex Temporal workflow; the\n    activity awaits\
+                    \ completion. Pipe runs durably on Pipelex's worker\n    fleet. Requires the pipelex-temporal plugin.\n\
+                    TEMPORAL_FIRE_AND_FORGET: dispatch the pipe as a Pipelex Temporal workflow\n    and return immediately\
+                    \ with the workflow_id. Activity does NOT wait;\n    completion is signalled out-of-band via DeliveryAssignment\
+                    \ (webhook /\n    storage). Same dep requirements as TEMPORAL_BLOCKING.\n    ``delivery_assignment_dump``\
+                    \ is required.\nMISTRAL_NATIVE: decompose the pipe into native Mistral Workflows primitives\n    on the\
+                    \ same worker — controllers as child workflows, leaves as\n    activities. Surfaces per-step retry / signals\
+                    \ / cancellation through\n    the host-runtime APIs. Requires the\n    ``pipelex-mistralai-workflows``\
+                    \ package."
                 StuffContentAbstract:
                   properties: {}
                   type: object
@@ -261,19 +280,26 @@ paths:
                   - type: string
                   - type: 'null'
                   title: Dynamic Output Concept Ref
+                execution_mode:
+                  anyOf:
+                  - $ref: '#/$defs/PipelexExecutionMode'
+                  - type: 'null'
+                  description: PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — request the execution mode for this
+                    run (`direct`, `temporal_blocking`, `temporal_fire_and_forget`, `mistral_native`). Honored ONLY when the
+                    deployment sets `allow_request_execution_mode_override = true` in its `api.toml`; otherwise a mode that
+                    differs from the deployment default is refused with a 403. Omit it to use the deployment default.
               additionalProperties: true
               type: object
-              title: RunRequest
-              description: "Body of `POST /execute` — this server's typed request model.\n\nThe MTHDS Protocol has no request\
-                \ model (`mthds` deleted `RunRequest`: the\nrequest body is just the basic args the runner already takes as\
-                \ named\nparameters). pipelex-api keeps a typed model so it can publish the request\nschema in its OpenAPI\
-                \ artifact and parse the body once.\n\nThe declared fields are the protocol's **basic** arguments. The model\
-                \ is\ndeliberately open (`extra=\"allow\"`): a caller may send extra request\nproperties (an extension may\
-                \ carry the method selector), and they are kept\nrather than silently dropped.\n\nAttributes:\n    pipe_code:\
-                \ Code of the pipe to execute.\n    mthds_contents: List of MTHDS bundle contents to load.\n    inputs: Inputs\
-                \ in PipelineInputs format — Pydantic validation is skipped\n        to preserve the flexible format (dicts,\
-                \ strings, StuffContent objects, etc.).\n    output_name: Name of the output slot to write to.\n    output_multiplicity:\
-                \ Output multiplicity setting.\n    dynamic_output_concept_ref: Override for the dynamic output concept ref."
+              title: PipelexApiExecuteRequest
+              description: 'Documented body of `POST /execute` — the protocol''s `RunRequest` plus THIS server''s `execution_mode`
+                extension.
+
+
+                Used only to publish the OpenAPI request schema: `/execute` reads the body through the raw
+
+                `Request` (kajson decoding), so FastAPI cannot infer the body type; this model documents the
+
+                per-request `execution_mode` override the route actually honors (parsed by `PipelineApiExtras`).'
         required: true
       responses:
         '200':

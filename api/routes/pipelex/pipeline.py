@@ -29,7 +29,7 @@ from api.error_types import ErrorType
 from api.errors import raise_bad_request, raise_validation_error
 from api.logging_context import get_request_id
 from api.routes.pipelex.utils import get_current_iso_timestamp
-from api.schemas.models import PipelexApiStartRequest, PipelineApiExtras, RunRequest
+from api.schemas.models import PipelexApiExecuteRequest, PipelexApiStartRequest, PipelineApiExtras, RunRequest
 
 if TYPE_CHECKING:
     from mthds.protocol.pipe_output import VariableMultiplicity
@@ -480,7 +480,9 @@ async def _parse_request(request: Request) -> tuple[RunRequest, PipelineApiExtra
 @router.post(
     "/execute",
     response_model=PipelexRunResultExecute,
-    # The body is read through the raw Request (kajson decoding — see
+    # Documented body = the protocol's RunRequest plus THIS server's own
+    # `execution_mode` extension (the route honors a per-request override). The
+    # body is read through the raw Request (kajson decoding — see
     # `_parse_request`), so FastAPI cannot infer a typed body parameter;
     # document it explicitly so the committed OpenAPI artifact (and protocol
     # conformance tooling) publishes the request schema.
@@ -488,7 +490,7 @@ async def _parse_request(request: Request) -> tuple[RunRequest, PipelineApiExtra
         "x-mthds-protocol": True,
         "requestBody": {
             "required": True,
-            "content": {"application/json": {"schema": RunRequest.model_json_schema()}},
+            "content": {"application/json": {"schema": PipelexApiExecuteRequest.model_json_schema()}},
         },
     },
 )
