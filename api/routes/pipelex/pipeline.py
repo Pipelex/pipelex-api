@@ -19,6 +19,7 @@ from pipelex.pipeline.pipeline_response import PipelexRunResultExecute, PipelexR
 from pipelex.pipeline.pipeline_run_setup import pipeline_run_setup
 from pipelex.pipeline.runner import PipelexMTHDSProtocol
 from pipelex.runtime_bridge.exceptions import MissingBundleValidatorError, MissingOrchestratorError
+from pipelex.runtime_bridge.execution_mode import PipelexExecutionMode
 from pipelex.runtime_bridge.primitives.hydration import hydrate_working_memory
 from pipelex.system.environment import get_required_env
 from pydantic import ValidationError
@@ -40,7 +41,6 @@ if TYPE_CHECKING:
     from pipelex.pipe_run.pipe_job import PipeJob
     from pipelex.pipeline.validation_report import PipelexValidationReport
     from pipelex.plugins.orchestrator_registry import OrchestratorProtocol
-    from pipelex.runtime_bridge.execution_mode import PipelexExecutionMode
     from pipelex.runtime_bridge.payloads import PipelexPipeRunOutput
 
     from api.security import RequestUser
@@ -104,6 +104,29 @@ def _pipe_output_from_run_output(run_output: PipelexPipeRunOutput) -> PipeOutput
         },
         strict=False,
     )
+
+
+def _async_start_mode(mode: PipelexExecutionMode) -> PipelexExecutionMode:
+    """The execution mode `POST /start` dispatches for a deployment configured with `mode`.
+
+    Fire-and-forget vs blocking is a property of the *endpoint*, not of the deployment:
+    `/execute` and `/validate` are synchronous and dispatch `execution_mode` as-is, while
+    `/start` is asynchronous and dispatches the *fire-and-forget* sibling of the configured
+    backend when one exists. Today only Temporal has a fire-and-forget variant, so
+    `temporal_blocking` maps to `temporal_fire_and_forget` (and a config already set to
+    fire-and-forget stays there); `direct` and `mistral_native` have no async variant, so
+    `/start` runs them in-process / per-call and answers `202` with `workflow_id=None`. This
+    keeps a deployment's single `execution_mode` coherent across every endpoint — it names the
+    synchronous backend, and the async variant is derived here rather than configured.
+
+    Kept a route-local mapping (not a core enum property) to stay a pipelex-api-only concern;
+    promote it onto `PipelexExecutionMode` if another consumer ever needs the same derivation.
+    """
+    match mode:
+        case PipelexExecutionMode.TEMPORAL_BLOCKING | PipelexExecutionMode.TEMPORAL_FIRE_AND_FORGET:
+            return PipelexExecutionMode.TEMPORAL_FIRE_AND_FORGET
+        case PipelexExecutionMode.DIRECT | PipelexExecutionMode.MISTRAL_NATIVE:
+            return mode
 
 
 class _OrchestratorPipeRun(PipeRunProtocol):
@@ -222,8 +245,9 @@ class ApiRunner(PipelexMTHDSProtocol):
 
         Dispatch is orchestrator-agnostic: the rich `PipeJob` is built locally (so
         `request_id`, `output_multiplicity`, `dynamic_output_concept_ref`, the run
-        registration, and telemetry all survive) and then handed to the orchestrator the
-        deployment's `execution_mode` selects, resolved through the hub's
+        registration, and telemetry all survive) and then handed to the orchestrator selected
+        by the fire-and-forget VARIANT of the deployment's resolved `execution_mode`
+        (`_async_start_mode` — `/start` is asynchronous), through the hub's
         `OrchestratorRegistry`. The base imports no `temporalio` / orchestrator SDK; the
         Temporal fire-and-forget arm (returning a `workflow_id` immediately) is contributed
         by the `pipelex-temporal` plugin when installed. A mode with no registered
@@ -246,8 +270,11 @@ class ApiRunner(PipelexMTHDSProtocol):
             msg = f"ApiRunner defines no extension args beyond its named ones; got {sorted(extra)}."
             raise PipelineRequestError(msg)
         # Resolve the effective execution mode FIRST — a per-request override the deployment policy
-        # forbids is refused (403) here, before any library load / run registration is done.
-        execution_mode = resolve_execution_mode(requested_execution_mode, config=get_api_config())
+        # forbids is refused (403) here, before any library load / run registration is done. `/start`
+        # is asynchronous, so dispatch the fire-and-forget VARIANT of the resolved backend (Temporal
+        # gets its f&f arm; direct/mistral have none and run in-process answering 202 with
+        # workflow_id=None) — the policy gate above still ran against the configured synchronous mode.
+        execution_mode = _async_start_mode(resolve_execution_mode(requested_execution_mode, config=get_api_config()))
         created_at = get_current_iso_timestamp()
         pipelex_inputs: PipelineInputs | WorkingMemory | None = cast("PipelineInputs | WorkingMemory | None", inputs)
 
@@ -548,12 +575,14 @@ async def start(
     `PipelexError` handler in `api.exception_handlers` turns them into an
     RFC 7807 problem response.
 
-    Non-blocking (fire-and-forget) is a property of a **distributed** `execution_mode`: a
-    Temporal fire-and-forget flavor enqueues the run and returns immediately with a
-    `workflow_id`. On the orchestrator-agnostic base (`execution_mode = "direct"`, the
-    default), there is no distributed backend — the run executes in-process and the request
-    blocks until it completes, then answers `202` with `workflow_id: null`. The completion
-    callback (`callback_urls` / storage delivery) fires on the same path in both cases.
+    Non-blocking (fire-and-forget) is a property of THIS endpoint, not of the deployment: a
+    deployment configures the synchronous backend (`execution_mode`) once, and `/start` derives
+    its fire-and-forget variant. A Temporal deployment (`execution_mode = "temporal_blocking"`)
+    therefore enqueues the run and returns immediately with a `workflow_id`; on the
+    orchestrator-agnostic base (`execution_mode = "direct"`, the default) there is no async
+    backend, so the run executes in-process and the request blocks until it completes, then
+    answers `202` with `workflow_id: null`. The completion callback (`callback_urls` / storage
+    delivery) fires on the same path in both cases.
     """
     run_request, extras = parsed
     runner = ApiRunner(user_id=_get_user_id(request))

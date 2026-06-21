@@ -80,7 +80,7 @@ Start a pipeline execution and get its `pipeline_run_id` back with a `202` ack.
 
 **Endpoint:** `POST /v1/start`
 
-> **Blocking vs non-blocking depends on the deployment's execution mode.** Non-blocking fire-and-forget is a property of a **distributed** `execution_mode`: a Temporal fire-and-forget flavor enqueues the run and returns immediately with a `workflow_id`. On the orchestrator-agnostic base (`execution_mode = "direct"`, the default — see [Configuration → Execution mode](configuration.md)), the run executes **in-process** and the request blocks until completion, then answers `202` with `workflow_id: null`. The completion callback fires on the same path either way.
+> **Blocking vs non-blocking is a property of this endpoint, not the deployment.** `execution_mode` names the deployment's *synchronous* backend; `/start` is asynchronous and dispatches its **fire-and-forget variant** when one exists. A Temporal deployment (`execution_mode = "temporal_blocking"`) therefore enqueues the run and returns immediately with a `workflow_id`. On the orchestrator-agnostic base (`execution_mode = "direct"`, the default — see [Configuration → Execution mode](configuration.md)) there is no async variant: the run executes **in-process** and the request blocks until completion, then answers `202` with `workflow_id: null`. The completion callback fires on the same path either way.
 
 **Request Body:**
 

@@ -328,17 +328,21 @@ paths:
         RFC 7807 problem response.
 
 
-        Non-blocking (fire-and-forget) is a property of a **distributed** `execution_mode`: a
+        Non-blocking (fire-and-forget) is a property of THIS endpoint, not of the deployment: a
 
-        Temporal fire-and-forget flavor enqueues the run and returns immediately with a
+        deployment configures the synchronous backend (`execution_mode`) once, and `/start` derives
 
-        `workflow_id`. On the orchestrator-agnostic base (`execution_mode = "direct"`, the
+        its fire-and-forget variant. A Temporal deployment (`execution_mode = "temporal_blocking"`)
 
-        default), there is no distributed backend — the run executes in-process and the request
+        therefore enqueues the run and returns immediately with a `workflow_id`; on the
 
-        blocks until it completes, then answers `202` with `workflow_id: null`. The completion
+        orchestrator-agnostic base (`execution_mode = "direct"`, the default) there is no async
 
-        callback (`callback_urls` / storage delivery) fires on the same path in both cases.'
+        backend, so the run executes in-process and the request blocks until it completes, then
+
+        answers `202` with `workflow_id: null`. The completion callback (`callback_urls` / storage
+
+        delivery) fires on the same path in both cases.'
       operationId: start_v1_start_post
       requestBody:
         content:

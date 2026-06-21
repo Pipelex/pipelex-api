@@ -107,10 +107,17 @@ The base is **orchestrator-agnostic**. WHICH backend a top-level run dispatches 
 
 | Key | Meaning | Base default |
 | --- | --- | --- |
-| `execution_mode` | Which backend a top-level run dispatches as — `direct` (in-process), `temporal_blocking`, `temporal_fire_and_forget`, or `mistral_native`. Governs `POST /v1/execute`, `POST /v1/start`, and `POST /v1/validate` uniformly (all dispatch through the per-call orchestrator/validator registry). A mode whose orchestrator plugin is **not installed** fails loud at dispatch with the plugin's install hint. | `direct` |
+| `execution_mode` | Which **backend** a top-level run dispatches as, named in its **synchronous** form — `direct` (in-process), `temporal_blocking`, or `mistral_native`. A mode whose orchestrator plugin is **not installed** fails loud at dispatch with the plugin's install hint. | `direct` |
 | `allow_request_execution_mode_override` | Whether a caller may set `execution_mode` per request on `POST /v1/execute`, `POST /v1/start`, and `POST /v1/validate`. When `false`, a requested mode that differs from the deployment default is refused with a `403`. | `false` |
 
-The packaged default (`execution_mode = "direct"`, override off) is what the generic image ships. `POST /v1/execute` is **synchronous** (it returns the full output), so a fire-and-forget mode is meaningless there and is refused with a `400` — use `POST /v1/start` for fire-and-forget.
+The packaged default (`execution_mode = "direct"`, override off) is what the generic image ships.
+
+**Fire-and-forget is a property of the endpoint, not of the deployment.** `execution_mode` names the synchronous backend; each endpoint then dispatches the right variant of it:
+
+- `POST /v1/execute` and `POST /v1/validate` are **synchronous** (they return the full output / the verdict) and dispatch `execution_mode` as-is.
+- `POST /v1/start` is **asynchronous** and dispatches the **fire-and-forget sibling** of the configured backend when one exists. So a Temporal deployment (`execution_mode = "temporal_blocking"`) enqueues on `/start` and returns a `workflow_id` immediately, while `direct` / `mistral_native` have no async variant and run in-process, answering `202` with `workflow_id: null`.
+
+So a deployment sets **one** coherent `execution_mode` and every endpoint does the right thing — you never configure `temporal_fire_and_forget` directly. (Explicitly requesting `temporal_fire_and_forget` per request on `/execute` is still refused with a `400` — `/execute` is synchronous.)
 
 **`execution_mode` vs `boot_orchestrator` — two knobs, two jobs.** `execution_mode` (here) selects the backend a **top-level entry** (`/execute`, `/start`, `/validate`) dispatches to. `boot_orchestrator` (a core Pipelex setting) selects the **execution stack** used wherever a pipe actually runs — on a distributed worker, and for the in-process scoping inside the `direct` orchestrator. On a correctly-configured deployment the two agree (a Temporal flavor sets `execution_mode = "temporal_blocking"` *and* boots under Temporal); keeping them distinct is what lets `execution_mode` be the single source of truth for top-level dispatch without coupling it to how the stack is booted. A `temporal_*` `execution_mode` still requires the process to be booted under Temporal — set them together on a Temporal flavor.
 
@@ -118,7 +125,7 @@ A **flavor** image (e.g. the hosted Temporal flavor) installs one orchestrator p
 
 ```toml
 # api_prod.toml  (keys at the file root — no [api] wrapper)
-execution_mode = "temporal_fire_and_forget"
+execution_mode = "temporal_blocking"   # /start derives temporal_fire_and_forget; /execute + /validate stay blocking
 allow_request_execution_mode_override = false
 ```
 
