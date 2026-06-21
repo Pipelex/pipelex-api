@@ -52,9 +52,7 @@ class TestAsyncStartModeMapping:
             (PipelexExecutionMode.MISTRAL_NATIVE, PipelexExecutionMode.MISTRAL_NATIVE),
         ],
     )
-    def test_async_start_mode_maps_to_fire_and_forget_sibling(
-        self, configured: PipelexExecutionMode, expected: PipelexExecutionMode
-    ) -> None:
+    def test_async_start_mode_maps_to_fire_and_forget_sibling(self, configured: PipelexExecutionMode, expected: PipelexExecutionMode) -> None:
         assert _async_start_mode(configured) == expected
 
 
