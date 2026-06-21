@@ -15,7 +15,7 @@ classifiers = [
 ]
 
 dependencies = [
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal,temporal]==0.35.0",
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.35.0",
   "mthds>=0.5.0",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
@@ -76,6 +76,13 @@ packages = ["api"]
 
 [tool.uv]
 required-version = ">=0.7.2"
+
+# Phase C (orchestrator-agnostic base) is developed against the local `pipelex`
+# worktree so the new runtime-bridge / plugin seams can be exercised end-to-end
+# before a release. The published `==<ver>` pin (no `temporal` extra) is the
+# release-time form; this editable source is local-dev only.
+[tool.uv.sources]
+pipelex = { path = "../_plugins", editable = true }
 
 [tool.mypy]
 check_untyped_defs = true

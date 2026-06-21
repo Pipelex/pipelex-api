@@ -2,9 +2,9 @@
 
 This page covers how to configure the **Docker image** — the env vars it needs at boot, and how to pass your own Pipelex config files into the container.
 
-For the syntax and meaning of Pipelex config itself (storage backends, tracing, inference routing, Temporal, model decks, …), see the official Pipelex documentation: **https://docs.pipelex.com**. This page does not duplicate that.
+For the syntax and meaning of Pipelex config itself (storage backends, tracing, inference routing, model decks, …), see the official Pipelex documentation: **https://docs.pipelex.com**. This page does not duplicate that.
 
-> **The official `pipelex/pipelex-api` image is generic.** It boots with Temporal disabled, no S3, no remote tracing, and the Pipelex Gateway as the only enabled inference backend. Anything environment-specific is meant to be supplied by you, on top of the image, via a mounted `.pipelex/` override file.
+> **The official `pipelex/pipelex-api` image is generic and orchestrator-agnostic.** It runs every pipeline **in-process** (no distributed orchestrator), with no S3, no remote tracing, and the Pipelex Gateway as the only enabled inference backend. Anything environment-specific is meant to be supplied by you, on top of the image, via a mounted `.pipelex/` override file. Distributed execution (Temporal, Mistral Workflows, …) is **not** built in — it is added by installing exactly one orchestrator plugin on top of this base to produce a deployment *flavor* (see "Execution mode" below).
 
 ## Environment variables
 
@@ -101,6 +101,27 @@ In the official Docker image, the `.pipelex/` directory shipped in this reposito
 
 For the schema and meaning of every key in these files, see https://docs.pipelex.com.
 
+## Execution mode
+
+The base is **orchestrator-agnostic**. WHICH backend a top-level run dispatches as is a deployment choice, read from a separate **`api.toml`** config file (not the main `pipelex_{env}.toml` — the core config rejects unknown sections). It is layered exactly like the Pipelex config above, but with its own base name: `api.toml` (packaged default) → `api_{PIPELEX_ENV}.toml` → `api_override.toml`. Two keys:
+
+| Key | Meaning | Base default |
+| --- | --- | --- |
+| `execution_mode` | Which mode a top-level `POST /v1/start` dispatches as: `direct` (in-process), `temporal_blocking`, `temporal_fire_and_forget`, or `mistral_native`. A mode whose orchestrator plugin is **not installed** fails loud at dispatch with the plugin's install hint. | `direct` |
+| `allow_request_execution_mode_override` | Whether a caller may set `execution_mode` per request on `POST /v1/start`. When `false`, a requested mode that differs from the deployment default is refused with a `403`. | `false` |
+
+The packaged default (`execution_mode = "direct"`, override off) is what the generic image ships. `POST /v1/validate` always runs in-process and ignores this setting. `POST /v1/execute` runs in-process unless the process is booted under a boot-orchestrator plugin.
+
+A **flavor** image (e.g. the hosted Temporal flavor) installs one orchestrator plugin and bakes an `api_{env}.toml` to flip the default, e.g.:
+
+```toml
+# api_prod.toml  (keys at the file root — no [api] wrapper)
+execution_mode = "temporal_fire_and_forget"
+allow_request_execution_mode_override = false
+```
+
+Mount your own `api_{env}.toml` / `api_override.toml` into `/root/.pipelex/` exactly like any other override file (see below).
+
 ## Providing your own configuration to Docker
 
 Two patterns. Both rely on mounting files into `/root/.pipelex/` inside the container.
@@ -195,6 +216,6 @@ API_KEY=your-strong-secret
 
 Clients now need `Authorization: Bearer your-strong-secret`.
 
-### Customizing Pipelex (storage, tracing, inference, Temporal, …)
+### Customizing Pipelex (storage, tracing, inference, model decks, …)
 
 Write a `pipelex_override.toml` (or env-specific `pipelex_<env>.toml`) with the keys you want to change. Reference any provider credentials from env vars via `${VAR}` so they stay out of the file. Mount it into the container as shown above. Refer to https://docs.pipelex.com for the full set of available keys and their semantics.

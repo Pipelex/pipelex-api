@@ -11,20 +11,18 @@ from kajson import kajson
 from kajson.exceptions import KajsonDecoderError
 from mthds.protocol.exceptions import PipelineRequestError
 from pipelex.config import get_config
-from pipelex.core.interpreter.interpreter import PipelexInterpreter
+from pipelex.hub import get_orchestrator_registry
 from pipelex.pipe_run.delivery_assignment import DeliveryAssignment, StorageTarget, WebhookTarget
 from pipelex.pipeline.pipeline_response import PipelexRunResultExecute, PipelexRunResultStart, RunState
 from pipelex.pipeline.pipeline_run_setup import pipeline_run_setup
 from pipelex.pipeline.runner import PipelexMTHDSProtocol
 from pipelex.pipeline.validate_in_process import validate_bundles_in_process
-from pipelex.pipeline.validation_report import PipelexValidationReport, build_validation_report
+from pipelex.runtime_bridge.exceptions import MissingOrchestratorError
 from pipelex.system.environment import get_required_env
-from pipelex.temporal.tprl_pipe.act_dry_validate import DryValidateArg
-from pipelex.temporal.tprl_pipe.dry_validate_dispatch import dispatch_dry_validate
-from pipelex.temporal.tprl_pipe.temporal_pipe_run import make_temporal_pipe_run
 from pydantic import ValidationError
 from typing_extensions import override
 
+from api.api_config import get_api_config, resolve_execution_mode
 from api.error_types import ErrorType
 from api.errors import raise_validation_error
 from api.logging_context import get_request_id
@@ -36,6 +34,8 @@ if TYPE_CHECKING:
     from mthds.protocol.pipeline_inputs import PipelineInputs
     from mthds.protocol.working_memory import WorkingMemoryAbstract
     from pipelex.core.memory.working_memory import WorkingMemory
+    from pipelex.pipeline.validation_report import PipelexValidationReport
+    from pipelex.runtime_bridge.execution_mode import PipelexExecutionMode
 
     from api.security import RequestUser
 
@@ -65,11 +65,14 @@ def _completion_signature(pipeline_run_id: str) -> str:
 
 
 class ApiRunner(PipelexMTHDSProtocol):
-    """API runner that extends PipelexMTHDSProtocol with Temporal-backed `start` and `validate`.
+    """API runner that overrides `start` (orchestrator-agnostic dispatch) and `validate` (DIRECT).
 
-    Overrides change the BACKEND (in-process vs Temporal dispatch), never the artifact
-    shapes — every protocol operation answers with the same canonical models as the
-    local runtime.
+    `start` dispatches a top-level run through the orchestrator registry under the deployment's
+    configured `execution_mode` — DIRECT in-process on this agnostic base, Temporal /
+    Mistral when the matching plugin is installed and selected. The base names no
+    orchestrator and imports no orchestrator SDK. `validate` always runs DIRECT in-process.
+    Overrides change the BACKEND, never the artifact shapes — every protocol operation answers
+    with the same canonical models as the local runtime.
     """
 
     @override
@@ -85,8 +88,18 @@ class ApiRunner(PipelexMTHDSProtocol):
         pipeline_run_id: str | None = None,
         callback_urls: list[str] | None = None,
         request_id: str | None = None,
+        requested_execution_mode: PipelexExecutionMode | None = None,
     ) -> PipelexRunResultStart:
         """Start a method execution asynchronously without waiting for completion.
+
+        Dispatch is orchestrator-agnostic: the rich `PipeJob` is built locally (so
+        `request_id`, `output_multiplicity`, `dynamic_output_concept_ref`, the run
+        registration, and telemetry all survive) and then handed to the orchestrator the
+        deployment's `execution_mode` selects, resolved through the hub's
+        `OrchestratorRegistry`. The base imports no `temporalio` / orchestrator SDK; the
+        Temporal fire-and-forget arm (returning a `workflow_id` immediately) is contributed
+        by the `pipelex-temporal` plugin when installed. A mode with no registered
+        orchestrator fails loud with `MissingOrchestratorError` (carrying the install hint).
 
         `pipeline_run_id` is the client-supplied run identifier — this open-source runner
         honors it (protocol: implementations MAY decline it, but then MUST 422;
@@ -97,11 +110,16 @@ class ApiRunner(PipelexMTHDSProtocol):
         extras are parsed by the route layer, so nothing reaches it — a
         non-empty value is an in-process misuse and is rejected. `request_id`
         is an API-layer extra threaded into `JobMetadata.request_id` for log
-        correlation.
+        correlation. `requested_execution_mode` is the optional per-request mode override
+        (`PipelineApiExtras.execution_mode`); it is resolved against the deployment's
+        `api.toml` policy and a forbidden override is refused with a 403.
         """
         if extra:
             msg = f"ApiRunner defines no extension args beyond its named ones; got {sorted(extra)}."
             raise PipelineRequestError(msg)
+        # Resolve the effective execution mode FIRST — a per-request override the deployment policy
+        # forbids is refused (403) here, before any library load / run registration is done.
+        execution_mode = resolve_execution_mode(requested_execution_mode, config=get_api_config())
         created_at = get_current_iso_timestamp()
         pipelex_inputs: PipelineInputs | WorkingMemory | None = cast("PipelineInputs | WorkingMemory | None", inputs)
 
@@ -143,17 +161,22 @@ class ApiRunner(PipelexMTHDSProtocol):
             else [],
         )
 
-        temporal_pipe_run = make_temporal_pipe_run()
-        workflow_id, _handle = await temporal_pipe_run.start(
-            pipe_job,
-            delivery_assignment=delivery_assignment,
-        )
+        # Dispatch the locally-built job through the hub's OrchestratorRegistry under the resolved
+        # mode — the same final dispatch `run_pipe_via_bridge` performs, but fed the rich PipeJob
+        # instead of the lossy `PipelexPipeRunInput` (which carries no request_id /
+        # output_multiplicity / dynamic_output_concept_ref and skips run registration + telemetry).
+        # DIRECT runs the pipe in-process and answers with workflow_id=None; the Temporal
+        # fire-and-forget arm enqueues and returns the workflow_id immediately.
+        orchestrator = get_orchestrator_registry().get_optional(mode=execution_mode)
+        if orchestrator is None:
+            raise MissingOrchestratorError(mode=execution_mode)
+        run_output = await orchestrator.run(pipe_job=pipe_job, delivery_assignment=delivery_assignment)
 
         return PipelexRunResultStart(
             pipeline_run_id=resolved_pipeline_run_id,
             created_at=created_at,
             state=RunState.STARTED,
-            workflow_id=workflow_id,
+            workflow_id=run_output.workflow_id,
         )
 
     @override
@@ -163,7 +186,13 @@ class ApiRunner(PipelexMTHDSProtocol):
         allow_signatures: bool = False,
         extra: dict[str, Any] | None = None,
     ) -> PipelexValidationReport:
-        """Validate MTHDS bundles — protocol `validate`, Temporal-aware backend selection.
+        """Validate MTHDS bundles — protocol `validate`, always DIRECT in-process (F2).
+
+        The orchestrator-agnostic base validates in-process regardless of which orchestrator
+        (if any) handles execution: validation is a pure analysis of the submitted bundles, so it
+        runs the same `validate_bundles_in_process` orchestrator the inherited local path uses
+        (`validate_bundle` + graph arm + report assembly, one library window) — called here so
+        `mthds_sources` rides through, which `super().validate` does not thread onto the blueprints.
 
         `mthds_sources` is the optional per-content source-threading hook, carried through the
         protocol's `extra` extension point (`extra={"mthds_sources": [...]}`): each source lands on
@@ -172,55 +201,19 @@ class ApiRunner(PipelexMTHDSProtocol):
         maps a length mismatch to a 422 before we get here; absent/`None` keeps the prior
         sourceless behavior.
 
-        Temporal disabled: run in-process via `validate_bundles_in_process` directly (the same
-        orchestrator the inherited local path delegates to — `validate_bundle` + graph arm +
-        `build_validation_report`, one library window — called here so `mthds_sources` rides
-        through, which `super().validate` does not thread onto the blueprints).
-
-        Temporal enabled: pure dispatch + map (D10) — the whole job (validation sweep,
-        graph dry-run, and every worker-side artifact: status map, `pending_signatures`,
-        `pipe_io_contracts`) runs as ONE in-process activity on a worker; this side parses
-        the blueprints (cheap, no library) and assembles the SAME canonical report via
-        `build_validation_report` (D14). No API-side library acquisition.
-
-        Either way the result is the canonical `PipelexValidationReport`: a bundle
-        without a declared `main_pipe` validates fine and simply carries
-        `graph_spec=None` (D2 — no precondition).
+        Behavior note (F2): the runner now loads the method library to validate, API-side. The
+        prior design pushed that load onto a worker; the agnostic base owns it. The result is the
+        same canonical `PipelexValidationReport` — a bundle without a declared `main_pipe`
+        validates fine and simply carries `graph_spec=None` (D2 — no precondition).
         """
         mthds_sources: list[str] | None = extra.get("mthds_sources") if extra else None
-        if not get_config().temporal.is_enabled:
-            library_dirs = [Path(library_dir) for library_dir in self.library_dirs] if self.library_dirs else None
-            return await validate_bundles_in_process(
-                mthds_contents=mthds_contents,
-                mthds_sources=mthds_sources,
-                library_dirs=library_dirs,
-                allow_signatures=allow_signatures,
-                log_context="API validate",
-            )
-
-        # Dispatch FIRST — before any API-side parsing — so every validation failure
-        # (malformed TOML, factory/wiring errors, strict-mode signature refusals)
-        # surfaces through the worker's `validate_bundle` cascade with the exact same
-        # categorized `ValidateBundleError` identity the direct path raises.
-        dry_validate_result = await dispatch_dry_validate(
-            DryValidateArg(mthds_contents=mthds_contents, mthds_sources=mthds_sources, allow_signatures=allow_signatures)
-        )
-
-        # The bundle is known-valid now — parse the blueprints for the report, threading the
-        # same per-content sources so the success-path `bundle_blueprint.source` matches the
-        # failure path. Parsing is pure interpretation (no library), so the worker's single
-        # library load stays the only one in the whole request.
-        content_sources: list[str | None] = list(mthds_sources) if mthds_sources is not None else [None] * len(mthds_contents)
-        blueprints = [
-            PipelexInterpreter.make_pipelex_bundle_blueprint(mthds_content=content, mthds_source=source)
-            for content, source in zip(mthds_contents, content_sources, strict=True)
-        ]
-        return build_validation_report(
-            blueprints=blueprints,
-            pipe_io_contracts=dry_validate_result.pipe_io_contracts,
-            dry_run_result=dry_validate_result.dry_run_outputs,
-            pending_signatures=dry_validate_result.pending_signatures,
-            graph_spec=dry_validate_result.graph_spec,
+        library_dirs = [Path(library_dir) for library_dir in self.library_dirs] if self.library_dirs else None
+        return await validate_bundles_in_process(
+            mthds_contents=mthds_contents,
+            mthds_sources=mthds_sources,
+            library_dirs=library_dirs,
+            allow_signatures=allow_signatures,
+            log_context="API validate",
         )
 
 
@@ -266,12 +259,13 @@ def _decode_body(body: bytes) -> dict[str, Any]:
 
 
 def _validate_extras(request_data: dict[str, Any]) -> PipelineApiExtras:
-    """Validate API-server-only fields (pipeline_run_id, callback_urls)."""
+    """Validate API-server-only fields (pipeline_run_id, callback_urls, execution_mode)."""
     try:
         return PipelineApiExtras.model_validate(
             {
                 "pipeline_run_id": request_data.get("pipeline_run_id"),
                 "callback_urls": request_data.get("callback_urls"),
+                "execution_mode": request_data.get("execution_mode"),
             }
         )
     except ValidationError as exc:
@@ -400,13 +394,20 @@ async def start(
     request: Request,
     parsed: Annotated[tuple[RunRequest, PipelineApiExtras], Depends(_parse_request)],
 ) -> PipelexRunResultStart:
-    """Start a method asynchronously; returns its pipeline_run_id immediately (MTHDS Protocol `POST /start`).
+    """Start a method run and return its pipeline_run_id with a 202 ack (MTHDS Protocol `POST /start`).
 
     Answers `202 Accepted` with a `StartAck`. A client-supplied `pipeline_run_id` is
     honored (protocol D11: this runner accepts it; `StartAck.pipeline_run_id` is always
     authoritative). Pipelex domain failures propagate untouched: the global
     `PipelexError` handler in `api.exception_handlers` turns them into an
     RFC 7807 problem response.
+
+    Non-blocking (fire-and-forget) is a property of a **distributed** `execution_mode`: a
+    Temporal fire-and-forget flavor enqueues the run and returns immediately with a
+    `workflow_id`. On the orchestrator-agnostic base (`execution_mode = "direct"`, the
+    default), there is no distributed backend — the run executes in-process and the request
+    blocks until it completes, then answers `202` with `workflow_id: null`. The completion
+    callback (`callback_urls` / storage delivery) fires on the same path in both cases.
     """
     run_request, extras = parsed
     runner = ApiRunner(user_id=_get_user_id(request))
@@ -420,4 +421,5 @@ async def start(
         pipeline_run_id=extras.pipeline_run_id,
         callback_urls=extras.callback_urls,
         request_id=get_request_id(),
+        requested_execution_mode=extras.execution_mode,
     )

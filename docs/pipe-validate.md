@@ -104,14 +104,13 @@ The route wraps the runtime's protocol `validate`: parse → load → dry-run-sw
 
 The submit path carries bundle text, not file paths, so by default the runtime cannot tell the client which file an error belongs to — `source` comes back `null`. Send `mthds_sources` parallel to `mthds_contents` to fix this: each source is the logical identity of that content (e.g. the file's path relative to the submitted directory), and the runtime threads it onto the corresponding `blueprint.source`. The source then rides back on both arms — `bundle_blueprint.source` on the valid arm, and `validation_errors[].source` on the invalid arm — so a multi-file editor client can map a cross-file diagnostic to the file that owns it. Omit `mthds_sources` (or send `null`) and behavior is exactly as before. The list, when present, must be the same length as `mthds_contents`; a mismatch is a request-shape 422 (it is the caller's wiring bug, caught before the validation sweep runs).
 
-**Execution Backends:**
+**Where validation runs:**
 
-The endpoint behaves identically on both deployment backends; only where the work runs differs:
+Validation **always runs in-process in the API server**, regardless of which orchestrator (if any) the deployment uses for *execution*. Validation is a pure analysis of the submitted bundles — parse → load → dry-run sweep → contracts → best-effort graph → report — so the orchestrator-agnostic base owns it directly: the whole job runs in one library load on the API side. There is no orchestrator-backend selection for `/validate`.
 
-- **Direct (Temporal disabled):** the whole job runs in-process in the API server, one library load.
-- **Temporal enabled:** the API dispatches the whole job — validation sweep, graph dry-run, and the worker-side artifacts (`pipe_io_contracts`, `pending_signatures`) — to a worker as **one** in-process activity (`wf_dry_validate` → `act_dry_validate`) and awaits the result in a single round-trip. The API side only parses the blueprints and assembles the same report; it never loads a library. An invalid verdict crosses the boundary as a structured error report (a `WorkflowExecutionError` recovering the original `ValidateBundleError`), which the route detects and renders as the same 200 invalid arm as the direct path. A genuine workflow fault (one that recovers no `ValidateBundleError`) stays a 5xx.
+> **Resource note for deployment.** Because the API server loads the method library to validate, a deployment that receives large or frequent `/validate` traffic should be sized for that load (memory + CPU for library assembly and the graph dry-run). On a distributed-execution flavor this is the one place the runner — not a worker — does the library work; size the runner accordingly.
 
-The graph remains best-effort on both backends: a bundle that validates but whose graph dry-run fails still returns 200 on the valid arm with `graph_spec: null`.
+The graph is best-effort: a bundle that validates but whose graph dry-run fails still returns 200 on the valid arm with `graph_spec: null`.
 
 **No-verdict (non-2xx) responses:**
 
@@ -119,6 +118,6 @@ Only conditions where the endpoint could not produce a verdict are non-2xx, rend
 
 - **422** — a malformed request body, or an `mthds_sources` / `mthds_contents` length mismatch (a request-shape error caught before the runtime).
 - **401 / 403** — unauthenticated / forbidden.
-- **5xx** — a server fault (including a host-wiring programmer error, surfaced as `PipelexUnexpectedError`, and a genuine Temporal workflow fault).
+- **5xx** — a server fault (including a host-wiring programmer error, surfaced as `PipelexUnexpectedError`).
 
 Read it as one rule: a non-2xx on `/validate` always means "the endpoint could not produce a verdict," never "your bundle is bad."

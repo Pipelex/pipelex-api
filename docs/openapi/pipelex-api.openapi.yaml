@@ -282,7 +282,7 @@ paths:
       tags:
       - run
       summary: Start
-      description: 'Start a method asynchronously; returns its pipeline_run_id immediately (MTHDS Protocol `POST /start`).
+      description: 'Start a method run and return its pipeline_run_id with a 202 ack (MTHDS Protocol `POST /start`).
 
 
         Answers `202 Accepted` with a `StartAck`. A client-supplied `pipeline_run_id` is
@@ -293,7 +293,20 @@ paths:
 
         `PipelexError` handler in `api.exception_handlers` turns them into an
 
-        RFC 7807 problem response.'
+        RFC 7807 problem response.
+
+
+        Non-blocking (fire-and-forget) is a property of a **distributed** `execution_mode`: a
+
+        Temporal fire-and-forget flavor enqueues the run and returns immediately with a
+
+        `workflow_id`. On the orchestrator-agnostic base (`execution_mode = "direct"`, the
+
+        default), there is no distributed backend — the run executes in-process and the request
+
+        blocks until it completes, then answers `202` with `workflow_id: null`. The completion
+
+        callback (`callback_urls` / storage delivery) fires on the same path in both cases.'
       operationId: start_v1_start_post
       requestBody:
         content:
@@ -417,13 +430,11 @@ paths:
         \ never as an error.\n- **Invalid verdict (200, `is_valid: false`):** the `InvalidReport` arm — `validation_errors[]`\n\
         \  (the structured per-error diagnostics, built by pipelex's one shared builder, incl. the\n  `dry_run` residual item)\
         \ + `message`, with the structural artifacts absent. This is what the\n  route synthesizes by catching the runtime's\
-        \ `ValidateBundleError` (direct mode) and the\n  Temporal-recovered `WorkflowExecutionError` (whose `to_error_report()`\
-        \ recovers the original\n  `ValidateBundleError` report) — neither reaches the global handler.\n- **No verdict (non-2xx):**\
-        \ a malformed request body or an `mthds_sources` length mismatch is a\n  request-shape **422**; a host-wiring programmer\
-        \ error is a `PipelexUnexpectedError` → **500**;\n  auth is **401/403**. All are RFC 7807 `application/problem+json`\
-        \ rendered by the global\n  handler in `api.exception_handlers` — routes never shape them. A genuine Temporal workflow\n\
-        \  fault (a `WorkflowExecutionError` that recovers no `ValidateBundleError`) is re-raised here\n  so it lands as a\
-        \ 5xx, not a verdict."
+        \ `ValidateBundleError` — validation runs DIRECT\n  in-process (F2), so that is the only verdict-bearing exception,\
+        \ and it never reaches the\n  global handler.\n- **No verdict (non-2xx):** a malformed request body or an `mthds_sources`\
+        \ length mismatch is a\n  request-shape **422**; a host-wiring programmer error is a `PipelexUnexpectedError` → **500**;\n\
+        \  auth is **401/403**. All are RFC 7807 `application/problem+json` rendered by the global\n  handler in `api.exception_handlers`\
+        \ — routes never shape them."
       operationId: validate_mthds_v1_validate_post
       requestBody:
         content:

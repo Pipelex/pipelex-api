@@ -15,10 +15,15 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from mthds.protocol.protocol import PROTOCOL_VERSION
 from pipelex.pipelex import Pipelex
+from pipelex.plugins.discovery import build_registrar
+from pipelex.plugins.registrar import HttpErrorMapperFn
+from pipelex.system.configuration.config_loader import config_manager
+from pipelex.system.configuration.configs import PipelexConfig
 from pipelex.system.environment import get_optional_env
 from pipelex.system.runtime import IntegrationMode
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from api.api_config import get_api_config
 from api.disclosure import resolve_disclosure_mode
 from api.exception_handlers import register_exception_handlers
 from api.middleware import RequestIdMiddleware, request_body_size_middleware
@@ -31,6 +36,11 @@ from api.security import get_auth_dependency
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     Pipelex.make(integration_mode=IntegrationMode.FASTAPI)
+    # Warm (and validate) the [api] deployment config now that Pipelex is booted, so a malformed
+    # `api.toml` / baked override fails the app at startup rather than on the first /start — the
+    # same fail-fast posture as ERROR_DISCLOSURE above. Must run after `Pipelex.make` since the
+    # loader reads `runtime_manager.environment`.
+    get_api_config()
     try:
         yield
     finally:
@@ -61,6 +71,27 @@ def _resolve_cors_origins() -> tuple[list[str], bool]:
 # module triggers it, not `api.exception_handlers` (which lets tests register
 # the handlers without inheriting the env-validation crash).
 ERROR_DISCLOSURE_MODE = resolve_disclosure_mode()
+
+
+def _resolve_http_error_mappers() -> dict[type[Exception], HttpErrorMapperFn]:
+    """Resolve the orchestrator plugins' HTTP-error mappers for this deployment.
+
+    Runs the pure, repeatable `build_registrar` against the loaded config (the same
+    standalone pattern `pipelex plugins list` uses) and reads back the
+    `{exc_type: to_error_report}` map each installed orchestrator plugin contributed
+    via `PluginRegistrar.add_http_error_mapper`. The base installs no orchestrator
+    plugin, so this is an empty map and no transport-error handler is registered; a
+    flavor (e.g. the Temporal one) contributes its plugin's mapper here, and only at
+    this point — at app construction, where the plugin (and therefore its SDK) is by
+    definition installed — is the plugin's exc-type provider thunk run. Resolved once
+    at module import so a duplicate/broken plugin fails the app fast, mirroring the
+    `ERROR_DISCLOSURE` fail-fast above.
+    """
+    config = PipelexConfig.model_validate(config_manager.load_config())
+    return build_registrar(config=config).get_http_error_mappers()
+
+
+HTTP_ERROR_MAPPERS = _resolve_http_error_mappers()
 
 
 def _own_version() -> str:
@@ -128,7 +159,7 @@ async def root() -> dict[str, str]:
     return {"message": "Pipelex API"}
 
 
-register_exception_handlers(fastapi_app, disclosure_mode=ERROR_DISCLOSURE_MODE)
+register_exception_handlers(fastapi_app, disclosure_mode=ERROR_DISCLOSURE_MODE, http_error_mappers=HTTP_ERROR_MAPPERS)
 
 
 # RequestIdMiddleware wraps the *entire* FastAPI app — including Starlette's

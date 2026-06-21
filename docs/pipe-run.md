@@ -74,9 +74,11 @@ Execute a Pipelex pipeline with flexible inputs and wait for completion.
 
 ### Start Pipeline
 
-Start a pipeline execution without waiting for completion (non-blocking).
+Start a pipeline execution and get its `pipeline_run_id` back with a `202` ack.
 
 **Endpoint:** `POST /v1/start`
+
+> **Blocking vs non-blocking depends on the deployment's execution mode.** Non-blocking fire-and-forget is a property of a **distributed** `execution_mode`: a Temporal fire-and-forget flavor enqueues the run and returns immediately with a `workflow_id`. On the orchestrator-agnostic base (`execution_mode = "direct"`, the default — see [Configuration → Execution mode](configuration.md)), the run executes **in-process** and the request blocks until completion, then answers `202` with `workflow_id: null`. The completion callback fires on the same path either way.
 
 **Request Body:**
 
@@ -138,7 +140,7 @@ Start a pipeline execution without waiting for completion (non-blocking).
 - `finished_at` (null): Always `null`; the pipeline hasn't completed.
 - `main_stuff_name` (null): Always `null`; populated only on the eventual completion callback.
 - `pipe_output` (null): Always `null`; the result isn't ready yet.
-- `workflow_id` (string | null): The Temporal workflow ID, when Temporal is enabled. `null` otherwise.
+- `workflow_id` (string | null): The orchestrator's workflow ID, when the deployment's `execution_mode` dispatches to a distributed orchestrator (e.g. a Temporal fire-and-forget flavor). `null` for the in-process `direct` mode the base ships.
 
 **Errors** follow the same convention as `/execute`: HTTP 4xx/5xx with an [RFC 7807 `application/problem+json`](error-responses.md) body.
 

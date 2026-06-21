@@ -6,7 +6,6 @@ from pipelex.base_exceptions import ErrorReport, ValidationErrorItem
 from pipelex.pipeline.exceptions import ValidateBundleError
 from pipelex.pipeline.validation_render import format_validate_markdown, render_invalid_validation_markdown
 from pipelex.pipeline.validation_report import PipelexValidationReport
-from pipelex.temporal.exceptions import WorkflowExecutionError
 from pipelex.tools.typing.pydantic_utils import empty_list_factory_of
 from pipelex.types import StrEnum
 from pydantic import BaseModel, Field, model_validator
@@ -158,15 +157,13 @@ async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
     - **Invalid verdict (200, `is_valid: false`):** the `InvalidReport` arm — `validation_errors[]`
       (the structured per-error diagnostics, built by pipelex's one shared builder, incl. the
       `dry_run` residual item) + `message`, with the structural artifacts absent. This is what the
-      route synthesizes by catching the runtime's `ValidateBundleError` (direct mode) and the
-      Temporal-recovered `WorkflowExecutionError` (whose `to_error_report()` recovers the original
-      `ValidateBundleError` report) — neither reaches the global handler.
+      route synthesizes by catching the runtime's `ValidateBundleError` — validation runs DIRECT
+      in-process (F2), so that is the only verdict-bearing exception, and it never reaches the
+      global handler.
     - **No verdict (non-2xx):** a malformed request body or an `mthds_sources` length mismatch is a
       request-shape **422**; a host-wiring programmer error is a `PipelexUnexpectedError` → **500**;
       auth is **401/403**. All are RFC 7807 `application/problem+json` rendered by the global
-      handler in `api.exception_handlers` — routes never shape them. A genuine Temporal workflow
-      fault (a `WorkflowExecutionError` that recovers no `ValidateBundleError`) is re-raised here
-      so it lands as a 5xx, not a verdict.
+      handler in `api.exception_handlers` — routes never shape them.
     """
     # Opt-in presentation formats (D-D): resolved once, threaded into both 200 arms. Empty by
     # default → no `rendered_*` field, response byte-identical to the no-`render` request.
@@ -181,18 +178,11 @@ async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
             extra={"mthds_sources": request_data.mthds_sources} if request_data.mthds_sources is not None else None,
         )
     except ValidateBundleError as validation_error:
-        # Direct backend: an invalid bundle is a produced verdict (200 InvalidReport), not a
-        # transport failure — intercept it before the global 422 handler.
+        # An invalid bundle is a produced verdict (200 InvalidReport), not a transport failure —
+        # intercept it before the global 422 handler. Validation runs DIRECT in-process (F2), so
+        # this is the only verdict-bearing exception the route catches; any other failure is a
+        # no-verdict server condition and propagates to the global problem+json handler.
         return _invalid_report_response(validation_error.to_error_report(), requested_formats=requested_formats)
-    except WorkflowExecutionError as workflow_error:
-        # Temporal backend: a content verdict crosses the activity boundary as a
-        # WorkflowExecutionError that recovers the original ValidateBundleError report. A genuine
-        # workflow fault recovers no such report → re-raise to the global problem+json handler
-        # (it is a no-verdict server condition, not a verdict the client submitted).
-        recovered_report = workflow_error.to_error_report()
-        if recovered_report.error_type != ValidateBundleError.__name__:
-            raise
-        return _invalid_report_response(recovered_report, requested_formats=requested_formats)
 
     # Splat the report's own field/value pairs so a future canonical field rides the wire
     # automatically — the wrapper never enumerates (and silently drops) report fields. `is_valid`

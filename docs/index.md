@@ -71,7 +71,7 @@ The response contains `state: "COMPLETED"` and the result under `pipe_output.wor
 
 ### 4. Customize the configuration
 
-Need to disable Temporal, point to a different storage backend, or ship your own model deck? See **[Configuration →](configuration.md)** for how to provide your own `.pipelex/` config files to the Docker image and a quick recipe for running without Temporal.
+Need to change the execution mode, point to a different storage backend, or ship your own model deck? See **[Configuration →](configuration.md)** for how to provide your own `.pipelex/` config files to the Docker image. The base runs every pipeline in-process by default; distributed execution (Temporal, …) is added by a deployment flavor, not configured on the base.
 
 ## Base URL
 

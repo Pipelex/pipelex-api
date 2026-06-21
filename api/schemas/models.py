@@ -16,6 +16,7 @@ from mthds.protocol.exceptions import PipelineRequestError
 from mthds.protocol.pipe_output import VariableMultiplicity
 from mthds.protocol.pipeline_inputs import PipelineInputs
 from mthds.protocol.working_memory import WorkingMemoryAbstract
+from pipelex.runtime_bridge.execution_mode import PipelexExecutionMode
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.functional_validators import SkipValidation
 
@@ -141,6 +142,15 @@ class PipelineApiExtras(BaseModel):
 
     pipeline_run_id: str | None = Field(default=None, max_length=128)
     callback_urls: list[str] | None = Field(default=None, max_length=MAX_CALLBACK_URLS)
+    execution_mode: PipelexExecutionMode | None = Field(
+        default=None,
+        description=(
+            "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — request the execution mode for this run "
+            "(`direct`, `temporal_blocking`, `temporal_fire_and_forget`, `mistral_native`). Honored ONLY when the "
+            "deployment sets `allow_request_execution_mode_override = true` in its `api.toml`; otherwise a mode that "
+            "differs from the deployment default is refused with a 403. Omit it to use the deployment default."
+        ),
+    )
 
     @field_validator("callback_urls")
     @classmethod

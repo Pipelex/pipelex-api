@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+Orchestrator-agnostic base. `pipelex-api` no longer hard-wires Temporal: the published base names **no** orchestrator and runs every pipeline in-process, while distributed execution (Temporal, Mistral Workflows, …) becomes a deployment *flavor* = base image + exactly one orchestrator plugin + that plugin's activation. `api/` imports no `pipelex.temporal` / `temporalio`.
+
+### Added
+ - **`execution_mode` deployment config:** a top-level run's backend is read from a new packaged `api.toml` (`execution_mode`, default `direct`; `allow_request_execution_mode_override`, default `false`), env-layered like the Pipelex config (`api_{env}.toml` / `api_override.toml`). `POST /v1/start` may carry a per-request `execution_mode` override, honored only when the deployment opts in — otherwise refused with a `403` (`ExecutionModeOverrideForbidden`). See [Configuration → Execution mode](docs/configuration.md).
+ - **Orchestrator HTTP-error mappers:** the app discovers each installed orchestrator plugin's transport-fault mapper (via the plugin SPI `add_http_error_mapper`) at construction and registers one RFC 7807 handler per mapped exception type — so a plugin's transport fault renders correctly while the base imports no orchestrator SDK.
+
+### Changed
+ - **Execution routes through the orchestrator registry (F1):** `POST /v1/start` builds the run job locally (preserving `request_id`, `output_multiplicity`, `dynamic_output_concept_ref`, run registration, and telemetry) and dispatches it through the hub's `OrchestratorRegistry` under the resolved `execution_mode`. `direct` runs in-process (`workflow_id: null`); the Temporal fire-and-forget arm (contributed by the `pipelex-temporal` plugin) enqueues and returns the `workflow_id`.
+ - **`/validate` is always DIRECT in-process (F2):** the runner loads the method library and validates on the API side regardless of execution backend; the previous Temporal dispatch path is gone. Size a distributed-execution flavor's runner for the library load — it is the one place the runner, not a worker, does library work.
+ - **Dependencies:** dropped the `temporal` extra from `pipelex` (`pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]`). The base depends on no orchestrator plugin.
+
 ## [v0.5.0] - 2026-06-18
 
 ### Added

@@ -1,28 +1,21 @@
-"""`/validate` envelope contract — the canonical report + wire extras, on both backends.
+"""`/validate` envelope contract — the canonical report + wire extras.
 
 Phase 2 of the MTHDS Protocol surface alignment: `/validate` routes through
 `ApiRunner.validate`, so the HTTP envelope is the canonical `PipelexValidationReport`
 (`bundle_blueprint`, `pipe_io_contracts` keyed by namespaced `pipe_ref`, `validated_pipes`,
 `pending_signatures` + `is_runnable`, best-effort `graph_spec`) plus this server's
 wire-only extras (`mthds_contents` echo, `message`). The valid verdict carries `is_valid: true`
-(the discriminant of the 200 response union — the `success` extra is retired). The direct backend
-runs the real in-process validation; the Temporal backend is exercised by faking the dispatch with
-a realistic worker result and asserting the pure dispatch + map contract (D10): same canonical
-envelope, zero API-side library acquisition.
+(the discriminant of the 200 response union — the `success` extra is retired). Validation runs
+DIRECT in-process on the orchestrator-agnostic base (F2): the real in-process validation, with no
+orchestrator-backend selection.
 
 Includes the D2 regression pin: a bundle that declares no `main_pipe` validates with 200 and
-`graph_spec=null` on BOTH backends — the former 422 precondition is deleted.
+`graph_spec=null` — the former 422 precondition is deleted.
 """
-
-from typing import Any
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pipelex.hub import get_library_manager
-from pipelex.pipeline.bundle_validator import DryRunOutput, DryRunStatus
-from pipelex.pipeline.pipe_io_contracts import IOMultiplicity, PipeInputContract, PipeIOContract, PipeOutputContract
-from pipelex.temporal.tprl_pipe.act_dry_validate import DryValidateResult
-from pytest_mock import MockerFixture
+from pipelex.pipeline.bundle_validator import DryRunStatus
 
 from api.exception_handlers import register_exception_handlers
 from api.routes import router as api_router
@@ -34,17 +27,6 @@ def _build_client() -> TestClient:
     app.include_router(api_router, prefix="/v1")
     register_exception_handlers(app)
     return TestClient(app)
-
-
-def _enable_fake_temporal_backend(mocker: MockerFixture, worker_result: DryValidateResult) -> Any:
-    """Flip ApiRunner.validate onto its Temporal arm with a faked worker round-trip."""
-    fake_config = mocker.MagicMock()
-    fake_config.temporal.is_enabled = True
-    mocker.patch("api.routes.pipelex.pipeline.get_config", return_value=fake_config)
-    return mocker.patch(
-        "api.routes.pipelex.pipeline.dispatch_dry_validate",
-        new=mocker.AsyncMock(return_value=worker_result),
-    )
 
 
 class TestValidateEnvelope:
@@ -106,45 +88,3 @@ class TestValidateEnvelope:
         assert body["validated_pipes"] == [{"pipe_ref": "nomain.echo", "status": DryRunStatus.SUCCESS}]
         assert body["is_runnable"] is True
         assert body["is_valid"] is True
-
-    def test_temporal_backend_is_pure_dispatch_and_map(self, mocker: MockerFixture):
-        # D10: everything worker-computed rides DryValidateResult; the API side parses
-        # blueprints and assembles the SAME canonical envelope — no library acquisition.
-        # Uses the no-main_pipe bundle so this also pins D2 on the Temporal arm (the old
-        # route 422'd AFTER the dispatch).
-        worker_result = DryValidateResult(
-            dry_run_outputs={"nomain.echo": DryRunOutput(pipe_code="echo", pipe_ref="nomain.echo", status=DryRunStatus.SUCCESS)},
-            graph_spec=None,
-            pending_signatures=[],
-            pipe_io_contracts={
-                "nomain.echo": PipeIOContract(
-                    inputs={"text": PipeInputContract(concept_ref="native.Text", json_schema={"type": "string"})},
-                    output=PipeOutputContract(concept_ref="native.Text", multiplicity=IOMultiplicity.SINGLE),
-                )
-            },
-        )
-        dispatch_mock = _enable_fake_temporal_backend(mocker, worker_result)
-        open_spy = mocker.spy(get_library_manager(), "open_library")
-
-        client = _build_client()
-        response = client.post("/v1/validate", json={"mthds_contents": [NO_MAIN_PIPE_MTHDS]})
-
-        assert response.status_code == 200, response.text
-        body = response.json()
-        # Same canonical envelope as the direct backend, fed by the worker's artifacts.
-        assert body["bundle_blueprint"]["domain"] == "nomain"
-        assert body["pipe_io_contracts"]["nomain.echo"]["inputs"]["text"]["json_schema"] == {"type": "string"}
-        assert body["validated_pipes"] == [{"pipe_ref": "nomain.echo", "status": DryRunStatus.SUCCESS}]
-        assert body["pending_signatures"] == []
-        assert body["is_runnable"] is True
-        assert body["graph_spec"] is None
-        assert body["mthds_contents"] == [NO_MAIN_PIPE_MTHDS]
-        assert body["is_valid"] is True
-
-        # ONE dispatch carrying the request verbatim...
-        dispatch_mock.assert_awaited_once()
-        dispatched_arg = dispatch_mock.await_args.args[0]
-        assert dispatched_arg.mthds_contents == [NO_MAIN_PIPE_MTHDS]
-        assert dispatched_arg.allow_signatures is False
-        # ...and ZERO API-side library loads (D10's point — the worker already had one).
-        assert open_spy.call_count == 0

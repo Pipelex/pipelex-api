@@ -5,10 +5,14 @@ handler produces the same `application/problem+json` shape: an `ApiError`
 (raised by the `api.errors` 4xx/5xx helpers) carries a pre-built problem
 document; a FastAPI `RequestValidationError` from automatic request
 validation is rendered into one; every `PipelexError` is turned into a
-problem document built from its `ErrorReport`; bare `temporalio` transport
-errors get an API-authored classification; everything else collapses to a
-sanitized 500. Routes therefore no longer need to catch and shape errors
-themselves.
+problem document built from its `ErrorReport`; each orchestrator plugin's
+transport-fault mapper (contributed through the plugin SPI's
+`add_http_error_mapper`, discovered at app construction) gets its own handler
+rendering the `ErrorReport` it produces; everything else collapses to a
+sanitized 500. The base names no orchestrator and imports no orchestrator SDK
+— the Temporal transport classification that used to live here is now owned by
+the `pipelex-temporal` plugin and reaches us only as a mapper. Routes
+therefore no longer need to catch and shape errors themselves.
 
 This module is deliberately import-side-effect-free — no env var reads, no
 app construction. `api/main.py` calls `register_exception_handlers(app,
@@ -23,6 +27,7 @@ every module that imports a handler at once.
 
 import math
 import re
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import FastAPI, Request, Response
@@ -30,15 +35,17 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pipelex import log
 from pipelex.base_exceptions import DisclosureMode, ErrorDomain, ErrorReport, PipelexError
-from temporalio.exceptions import TemporalError
+from pipelex.plugins.registrar import HttpErrorMapperFn
 
 from api.error_types import ErrorType
-from api.error_uri import error_type_uri
 from api.errors import ApiError
 from api.problem_document import PROBLEM_JSON_MEDIA_TYPE, build_problem_document, build_problem_document_from_api_error
 
 if TYPE_CHECKING:
     from api.security import RequestUser
+
+# A Starlette/FastAPI async exception handler: `(request, exc) -> response`.
+_ExceptionHandler = Callable[[Request, Exception], Awaitable[Response]]
 
 
 def _request_id_of(request: Request) -> str | None:
@@ -332,8 +339,8 @@ def _http_status_for(report: ErrorReport) -> int:
 def _problem_response(report: ErrorReport, *, request: Request, disclosure_mode: DisclosureMode) -> JSONResponse:
     """Build the RFC 7807 `JSONResponse` for an `ErrorReport` and log the entry.
 
-    Shared by the `PipelexError` and `TemporalError` handlers: both produce an
-    `ErrorReport`, so both render and log it identically. The report is first
+    Shared by the `PipelexError` handler and every orchestrator-mapper handler:
+    both produce an `ErrorReport`, so both render and log it identically. The report is first
     made JSON-safe (see `_json_safe_report`); the status code then comes from
     `_http_status_for(report)` (the report's own mapping plus any API-layer
     override registered in ``_ERROR_TYPE_STATUS_OVERRIDES``), and the response
@@ -366,44 +373,49 @@ def _problem_response(report: ErrorReport, *, request: Request, disclosure_mode:
 async def handle_pipelex_error(request: Request, exc: Exception, *, disclosure_mode: DisclosureMode) -> Response:
     """Translate any pipelex `PipelexError` into an RFC 7807 problem response.
 
-    The single place in the API that consumes an `ErrorReport`.
+    The single place in the API that consumes a `PipelexError`'s `ErrorReport`.
     `to_error_report()` walks the `__cause__` chain, so a wrapper exception
     still surfaces the classification of the underlying failure. `exc` is typed
     `Exception` to match Starlette's handler contract; FastAPI only routes a
-    `PipelexError` here, so the cast is sound. `WorkflowExecutionError` — a
-    Temporal workflow failure observed on the submitter side — is a
-    `PipelexError` (via `TemporalFlowError`) and is unrelated to `temporalio`'s
-    `TemporalError`, so Starlette's MRO walk resolves it here, never to the
-    `TemporalError` handler.
+    `PipelexError` here, so the cast is sound. An orchestrator's workflow
+    failure that is itself a `PipelexError` (e.g. the Temporal plugin's
+    `WorkflowExecutionError`, which already carries a structured `ErrorReport`)
+    resolves here via Starlette's MRO walk; only a *bare* orchestrator-SDK
+    transport error (no `PipelexError` in its MRO) is routed to that plugin's
+    own mapper-backed handler instead.
     """
     report = cast("PipelexError", exc).to_error_report()
     return _problem_response(report, request=request, disclosure_mode=disclosure_mode)
 
 
-async def handle_temporal_error(request: Request, exc: Exception, *, disclosure_mode: DisclosureMode) -> Response:
-    """Translate a bare temporalio `TemporalError` into an RFC 7807 problem response.
+def _make_orchestrator_error_handler(mapper: HttpErrorMapperFn, *, disclosure_mode: DisclosureMode) -> "_ExceptionHandler":
+    """Wrap one plugin-contributed error mapper into a FastAPI exception handler.
 
-    These are transport-level failures of the Temporal client — cluster
-    unreachable, an RPC error during workflow dispatch — that surface before
-    pipelex's `@convert_pipelex_errors` wrapping applies. pipelex deliberately
-    does not classify them, so the API authors the `ErrorReport` itself: a
-    retryable, `RUNTIME`-domain `transient` failure. (`WorkflowExecutionError`
-    IS a `PipelexError`, so it is handled by `handle_pipelex_error` instead.)
+    The plugin owns the *classification* (it maps its bare transport/runtime
+    exception — e.g. `temporalio.TemporalError` — to a structured `ErrorReport`);
+    core owns the *transport* exception type (resolved lazily by the registrar);
+    the API owns the *presentation* (the same RFC 7807 + `DisclosureMode`
+    rendering every `ErrorReport` gets via `_problem_response`). This is what
+    lets the base render an orchestrator's transport fault correctly while
+    naming — and importing — no orchestrator SDK. `exc` is typed `Exception` to
+    match Starlette's handler contract; FastAPI only routes the mapper's
+    registered `exc_type` here.
     """
-    report = ErrorReport(
-        error_type="TemporalTransportError",
-        message=str(exc),
-        title="Temporal transport error",
-        type_uri=error_type_uri("TemporalTransportError"),
-        error_category="transient",
-        error_domain=ErrorDomain.RUNTIME,
-        retryable=True,
-    )
-    return _problem_response(report, request=request, disclosure_mode=disclosure_mode)
+
+    async def _handler(request: Request, exc: Exception) -> Response:
+        report = mapper(exc)
+        return _problem_response(report, request=request, disclosure_mode=disclosure_mode)
+
+    return _handler
 
 
 async def handle_unexpected_error(request: Request, exc: Exception) -> Response:
-    """Catch-all for any failure that is neither a `PipelexError` nor a `TemporalError`.
+    """Catch-all for any failure matched by no more-specific handler.
+
+    Covers anything that is not an `ApiError`, a `RequestValidationError`, a
+    `PipelexError`, or an orchestrator plugin's mapped transport exception — so on
+    the orchestrator-agnostic base (which installs no mapper), an *unmapped* bare
+    transport/runtime error collapses here to a sanitized 500.
 
     One of the two `except Exception`-equivalent sites the project sanctions —
     the outermost handler of an API. The response body is fully sanitized: no
@@ -522,37 +534,53 @@ async def handle_request_validation_error(request: Request, exc: Exception) -> R
     return JSONResponse(status_code=422, content=document, media_type=PROBLEM_JSON_MEDIA_TYPE)
 
 
-def register_exception_handlers(app: FastAPI, *, disclosure_mode: DisclosureMode = DisclosureMode.VERBOSE) -> None:
+def register_exception_handlers(
+    app: FastAPI,
+    *,
+    disclosure_mode: DisclosureMode = DisclosureMode.VERBOSE,
+    http_error_mappers: dict[type[Exception], HttpErrorMapperFn] | None = None,
+) -> None:
     """Register the app-level exception handlers on `app`.
 
     Resolution is most-specific-first: an API-authored `ApiError` →
     `handle_api_error`; a FastAPI `RequestValidationError` (automatic
     request-body / parameter validation) → `handle_request_validation_error`; a
-    `PipelexError` (including `WorkflowExecutionError`) → `handle_pipelex_error`;
-    a non-pipelex `TemporalError` → `handle_temporal_error`; anything else →
-    `handle_unexpected_error`. Registering `RequestValidationError` overrides
-    FastAPI's built-in handler so its automatic-validation failures answer in
-    the same `application/problem+json` shape as every other error, not the
+    `PipelexError` (including an orchestrator plugin's `PipelexError`-derived
+    workflow failure) → `handle_pipelex_error`; a bare orchestrator-SDK transport
+    error → that plugin's mapper-backed handler (see `http_error_mappers`);
+    anything else → `handle_unexpected_error`. Registering `RequestValidationError`
+    overrides FastAPI's built-in handler so its automatic-validation failures answer
+    in the same `application/problem+json` shape as every other error, not the
     default `{"detail": [...]}`. Shared by the production app and by the unit
     tests, which register the same handlers on a throwaway app.
 
-    `disclosure_mode` is captured by the two handlers that actually render a
-    pipelex `ErrorReport` (`handle_pipelex_error`, `handle_temporal_error`) via
-    the thin closures below — production passes the startup-resolved value
-    (`api.main.ERROR_DISCLOSURE_MODE`); tests pass whatever the test needs and
-    the default (`VERBOSE`) covers the common case. The other three handlers
-    don't render an `ErrorReport`, so they don't need the mode and register
-    directly.
+    `http_error_mappers` is the `{exc_type: to_error_report}` map an orchestrator
+    plugin contributes through the plugin SPI (`PluginRegistrar.add_http_error_mapper`,
+    read back via `get_http_error_mappers`). The caller resolves it at app
+    construction — `api.main` builds the registrar and passes it; the base resolves
+    an empty map (it installs no orchestrator plugin), so no transport handler is
+    registered and the only fallback for an unclassified failure stays the sanitized
+    500. Each entry registers one handler that runs the mapper and renders the
+    resulting `ErrorReport` through the shared RFC 7807 + disclosure path — so core
+    and the API name no orchestrator SDK. Keeping the parameter explicit (rather than
+    calling `build_registrar` in here) preserves this module's import-side-effect-free
+    contract: tests register handlers on a throwaway app without a booted Pipelex, and
+    a test contributes a synthetic mapper to prove the seam without installing a plugin.
+
+    `disclosure_mode` is captured by the handlers that render a pipelex `ErrorReport`
+    (`handle_pipelex_error` and every mapper handler) via the closures below —
+    production passes the startup-resolved value (`api.main.ERROR_DISCLOSURE_MODE`);
+    tests pass whatever the test needs and the default (`VERBOSE`) covers the common
+    case. The other three handlers don't render an `ErrorReport`, so they don't need
+    the mode and register directly.
     """
 
     async def _pipelex_error(request: Request, exc: Exception) -> Response:
         return await handle_pipelex_error(request, exc, disclosure_mode=disclosure_mode)
 
-    async def _temporal_error(request: Request, exc: Exception) -> Response:
-        return await handle_temporal_error(request, exc, disclosure_mode=disclosure_mode)
-
     app.add_exception_handler(ApiError, handle_api_error)
     app.add_exception_handler(RequestValidationError, handle_request_validation_error)
     app.add_exception_handler(PipelexError, _pipelex_error)
-    app.add_exception_handler(TemporalError, _temporal_error)
+    for exc_type, mapper in (http_error_mappers or {}).items():
+        app.add_exception_handler(exc_type, _make_orchestrator_error_handler(mapper, disclosure_mode=disclosure_mode))
     app.add_exception_handler(Exception, handle_unexpected_error)
