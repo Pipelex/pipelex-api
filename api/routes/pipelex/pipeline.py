@@ -11,13 +11,12 @@ from kajson import kajson
 from kajson.exceptions import KajsonDecoderError
 from mthds.protocol.exceptions import PipelineRequestError
 from pipelex.config import get_config
-from pipelex.hub import get_orchestrator_registry
+from pipelex.hub import get_bundle_validator_registry, get_orchestrator_registry
 from pipelex.pipe_run.delivery_assignment import DeliveryAssignment, StorageTarget, WebhookTarget
 from pipelex.pipeline.pipeline_response import PipelexRunResultExecute, PipelexRunResultStart, RunState
 from pipelex.pipeline.pipeline_run_setup import pipeline_run_setup
 from pipelex.pipeline.runner import PipelexMTHDSProtocol
-from pipelex.pipeline.validate_in_process import validate_bundles_in_process
-from pipelex.runtime_bridge.exceptions import MissingOrchestratorError
+from pipelex.runtime_bridge.exceptions import MissingBundleValidatorError, MissingOrchestratorError
 from pipelex.system.environment import get_required_env
 from pydantic import ValidationError
 from typing_extensions import override
@@ -33,6 +32,7 @@ if TYPE_CHECKING:
     from mthds.protocol.pipe_output import VariableMultiplicity
     from mthds.protocol.pipeline_inputs import PipelineInputs
     from mthds.protocol.working_memory import WorkingMemoryAbstract
+    from pipelex.base_exceptions import ErrorReport
     from pipelex.core.memory.working_memory import WorkingMemory
     from pipelex.pipeline.validation_report import PipelexValidationReport
     from pipelex.runtime_bridge.execution_mode import PipelexExecutionMode
@@ -65,14 +65,17 @@ def _completion_signature(pipeline_run_id: str) -> str:
 
 
 class ApiRunner(PipelexMTHDSProtocol):
-    """API runner that overrides `start` (orchestrator-agnostic dispatch) and `validate` (DIRECT).
+    """API runner that dispatches `start` and `validate` through the per-call plugin registries.
 
-    `start` dispatches a top-level run through the orchestrator registry under the deployment's
-    configured `execution_mode` — DIRECT in-process on this agnostic base, Temporal /
-    Mistral when the matching plugin is installed and selected. The base names no
-    orchestrator and imports no orchestrator SDK. `validate` always runs DIRECT in-process.
-    Overrides change the BACKEND, never the artifact shapes — every protocol operation answers
-    with the same canonical models as the local runtime.
+    Both surfaces resolve the deployment's `execution_mode` (config default + optional
+    per-request override) and dispatch through a per-call hub registry: `start` runs a
+    top-level pipe through the `OrchestratorRegistry`, `validate_verdict` produces a
+    validation verdict through the `BundleValidatorRegistry`. On the orchestrator-agnostic
+    base that means DIRECT in-process for both; a `temporal_*` mode dispatches to a worker
+    when `pipelex-temporal` is installed and selected. The base names no orchestrator and
+    imports no orchestrator SDK; a mode with no registered arm fails loud with the matching
+    `Missing*Error` (carrying the install hint). Dispatch changes the BACKEND, never the
+    artifact shapes — every operation answers with the same canonical models as the local runtime.
     """
 
     @override
@@ -179,42 +182,54 @@ class ApiRunner(PipelexMTHDSProtocol):
             workflow_id=run_output.workflow_id,
         )
 
-    @override
-    async def validate(
+    async def validate_verdict(
         self,
+        *,
         mthds_contents: list[str],
-        allow_signatures: bool = False,
-        extra: dict[str, Any] | None = None,
-    ) -> PipelexValidationReport:
-        """Validate MTHDS bundles — protocol `validate`, always DIRECT in-process (F2).
+        mthds_sources: list[str] | None,
+        allow_signatures: bool,
+        requested_execution_mode: PipelexExecutionMode | None,
+    ) -> PipelexValidationReport | ErrorReport:
+        """Validate MTHDS bundles, returning the verdict as a value (the route maps it to a 200).
 
-        The orchestrator-agnostic base validates in-process regardless of which orchestrator
-        (if any) handles execution: validation is a pure analysis of the submitted bundles, so it
-        runs the same `validate_bundles_in_process` orchestrator the inherited local path uses
-        (`validate_bundle` + graph arm + report assembly, one library window) — called here so
-        `mthds_sources` rides through, which `super().validate` does not thread onto the blueprints.
+        Mode-aware, mirroring `start`: the effective `execution_mode` is resolved FIRST (config
+        default + optional per-request override, so a forbidden override is refused with a 403
+        before any library load), then dispatched through the hub's `BundleValidatorRegistry`.
+        DIRECT validates in-process on this agnostic base; a `temporal_*` mode dispatches the
+        whole job to a worker (`pipelex-temporal`). A mode with no registered validator fails
+        loud with `MissingBundleValidatorError` (carrying the install hint).
 
-        `mthds_sources` is the optional per-content source-threading hook, carried through the
-        protocol's `extra` extension point (`extra={"mthds_sources": [...]}`): each source lands on
+        Returns the verdict, not a raise: the valid `PipelexValidationReport`, or the structured
+        `ErrorReport` an invalid bundle produces (carrying `validation_errors`). A genuine
+        no-verdict infra fault propagates to the global problem+json handler (5xx). The route
+        discriminates on `isinstance(verdict, PipelexValidationReport)`.
+
+        `mthds_sources` is the optional per-content source-threading hook: each source lands on
         the corresponding `blueprint.source`, so the structured `validation_errors` on a failure —
         and the `bundle_blueprint` on success — carry a real `source` instead of `None`. The route
-        maps a length mismatch to a 422 before we get here; absent/`None` keeps the prior
-        sourceless behavior.
-
-        Behavior note (F2): the runner now loads the method library to validate, API-side. The
-        prior design pushed that load onto a worker; the agnostic base owns it. The result is the
-        same canonical `PipelexValidationReport` — a bundle without a declared `main_pipe`
-        validates fine and simply carries `graph_spec=None` (D2 — no precondition).
+        maps a length mismatch to a 422 before we get here; `None` keeps the sourceless behavior.
+        `library_dirs` is host context the in-process arm needs; a dispatched arm ignores it (the
+        worker loads its own library). A bundle without a declared `main_pipe` validates fine and
+        simply carries `graph_spec=None` (D2 — no precondition).
         """
-        mthds_sources: list[str] | None = extra.get("mthds_sources") if extra else None
+        # Resolve the effective mode FIRST — a per-request override the deployment policy forbids
+        # is refused (403) here, before any validator dispatch / library load. Mirrors start().
+        execution_mode = resolve_execution_mode(requested_execution_mode, config=get_api_config())
+        validator = get_bundle_validator_registry().get_optional(mode=execution_mode)
+        if validator is None:
+            raise MissingBundleValidatorError(mode=execution_mode)
         library_dirs = [Path(library_dir) for library_dir in self.library_dirs] if self.library_dirs else None
-        return await validate_bundles_in_process(
+        verdict = await validator.validate_bundles(
             mthds_contents=mthds_contents,
             mthds_sources=mthds_sources,
-            library_dirs=library_dirs,
             allow_signatures=allow_signatures,
-            log_context="API validate",
+            library_dirs=library_dirs,
         )
+        # The core seam types its valid arm at the protocol-level ValidationReport (a leaf type)
+        # to stay import-acyclic in core; every registered validator in fact produces the canonical
+        # PipelexValidationReport. Recover the precise type here — the single narrowing point — so
+        # the route's `isinstance(verdict, PipelexValidationReport)` yields ErrorReport on the else arm.
+        return cast("PipelexValidationReport | ErrorReport", verdict)
 
 
 def _decode_body(body: bytes) -> dict[str, Any]:

@@ -132,8 +132,9 @@ class TestValidateErrors:
     def test_all_categories_project_onto_invalid_report(self, mocker: MockerFixture):
         # Every structured category lands on the 200 InvalidReport, and collectively the items cover
         # the full ValidationErrorItem field set (so a dropped field would fail here, not silently
-        # vanish at the exception->wire boundary).
-        mocker.patch.object(ApiRunner, "validate", new=mocker.AsyncMock(side_effect=_multi_category_error()))
+        # vanish at the verdict->wire boundary). The runner returns the invalid verdict as a value
+        # (an ErrorReport) — here the ValidateBundleError's own `to_error_report()` projection.
+        mocker.patch.object(ApiRunner, "validate_verdict", new=mocker.AsyncMock(return_value=_multi_category_error().to_error_report()))
         client = _build_client()
         response = client.post("/v1/validate", json={"mthds_contents": [VALID_MTHDS]})
 
@@ -172,7 +173,7 @@ class TestValidateErrors:
         # message — the structured-info invariant (never a bare detail with an empty list). It is
         # graph-level, so it carries no `source`.
         residual = ValidateBundleError(message="Dry run failed: boom.", dry_run_error_message="Dry run failed: boom.")
-        mocker.patch.object(ApiRunner, "validate", new=mocker.AsyncMock(side_effect=residual))
+        mocker.patch.object(ApiRunner, "validate_verdict", new=mocker.AsyncMock(return_value=residual.to_error_report()))
         client = _build_client()
         response = client.post("/v1/validate", json={"mthds_contents": [VALID_MTHDS]})
 
@@ -188,12 +189,11 @@ class TestValidateErrors:
         assert "source" not in dry_run_item
 
     def test_non_verdict_failure_is_not_a_200_verdict(self, mocker: MockerFixture):
-        # Validate runs DIRECT in-process (F2), so the route catches ONLY `ValidateBundleError` (a
-        # produced verdict → 200 InvalidReport). Any OTHER failure is a no-verdict server condition:
-        # it must propagate to the global problem+json handler as a 5xx, never be masqueraded as a
-        # 200 verdict. (Route invariant — preserved from the deleted Temporal-arm test, now exercised
-        # with a non-Temporal host-wiring fault since validate no longer has a Temporal backend.)
-        mocker.patch.object(ApiRunner, "validate", new=mocker.AsyncMock(side_effect=PipelexConfigError("host wiring fault")))
+        # The runner returns a produced verdict (valid report | invalid ErrorReport) as a value; only
+        # a no-verdict fault propagates. A genuine host-wiring/server fault must reach the global
+        # problem+json handler as a 5xx, never be masqueraded as a 200 verdict. (Route invariant: the
+        # route maps the returned verdict and lets a raised fault propagate.)
+        mocker.patch.object(ApiRunner, "validate_verdict", new=mocker.AsyncMock(side_effect=PipelexConfigError("host wiring fault")))
         client = _build_client()
         response = client.post("/v1/validate", json={"mthds_contents": [VALID_MTHDS]})
 

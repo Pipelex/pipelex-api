@@ -98,7 +98,7 @@ The 200 body is one of two arms, discriminated on the mandatory `is_valid` field
 
 **What This Endpoint Does:**
 
-The route wraps the runtime's protocol `validate`: parse → load → dry-run-sweep every pipe → build the per-pipe IO contracts → best-effort graph of the `main_pipe` → assemble the canonical report. When the runtime instead raises a `ValidateBundleError` (a bundle the caller can fix), the route converts it to the 200 invalid arm rather than letting it become a transport error. A bundle that declares no `main_pipe` validates normally and simply carries `graph_spec: null` — there is no main-pipe precondition.
+The route wraps the runtime's protocol `validate`: parse → load → dry-run-sweep every pipe → build the per-pipe IO contracts → best-effort graph of the `main_pipe` → assemble the canonical report. The runner returns the verdict as a value — the canonical report on the valid arm, or a structured `ErrorReport` (a bundle the caller can fix) on the invalid arm — and the route maps the invalid verdict to the 200 invalid arm by matching the returned value, never by catching a transport error. A bundle that declares no `main_pipe` validates normally and simply carries `graph_spec: null` — there is no main-pipe precondition.
 
 **Sourcing submitted files:**
 
@@ -106,9 +106,9 @@ The submit path carries bundle text, not file paths, so by default the runtime c
 
 **Where validation runs:**
 
-Validation **always runs in-process in the API server**, regardless of which orchestrator (if any) the deployment uses for *execution*. Validation is a pure analysis of the submitted bundles — parse → load → dry-run sweep → contracts → best-effort graph → report — so the orchestrator-agnostic base owns it directly: the whole job runs in one library load on the API side. There is no orchestrator-backend selection for `/validate`.
+Validation is **`execution_mode`-aware**, the same way `/start` is: the runner resolves the effective mode (the deployment default plus the optional per-request `execution_mode` override) and dispatches through the bundle-validator registry. On the orchestrator-agnostic base — and for `execution_mode: direct` — the whole job runs **in-process in one library load on the API side**. On an orchestrator flavor whose mode is selected (e.g. `temporal_*`), the whole job is **dispatched to a worker** instead, and the API side assembles the same canonical report from the worker's result without loading a library. Either way the verdict is byte-identical: the backend changes, the contract does not. A per-request override the deployment forbids is refused with a 403.
 
-> **Resource note for deployment.** Because the API server loads the method library to validate, a deployment that receives large or frequent `/validate` traffic should be sized for that load (memory + CPU for library assembly and the graph dry-run). On a distributed-execution flavor this is the one place the runner — not a worker — does the library work; size the runner accordingly.
+> **Resource note for deployment.** When validation runs in-process (the agnostic base, or `direct` mode), the API server loads the method library to validate, so a deployment that receives large or frequent in-process `/validate` traffic should be sized for that load (memory + CPU for library assembly and the graph dry-run). On a distributed-execution flavor that dispatches validation to a worker, the library work happens worker-side; size the workers accordingly.
 
 The graph is best-effort: a bundle that validates but whose graph dry-run fails still returns 200 on the valid arm with `graph_spec: null`.
 
@@ -117,7 +117,7 @@ The graph is best-effort: a bundle that validates but whose graph dry-run fails 
 Only conditions where the endpoint could not produce a verdict are non-2xx, rendered as [RFC 7807 problem documents](error-responses.md):
 
 - **422** — a malformed request body, or an `mthds_sources` / `mthds_contents` length mismatch (a request-shape error caught before the runtime).
-- **401 / 403** — unauthenticated / forbidden.
+- **401 / 403** — unauthenticated / forbidden (including a per-request `execution_mode` override the deployment does not allow).
 - **5xx** — a server fault (including a host-wiring programmer error, surfaced as `PipelexUnexpectedError`).
 
 Read it as one rule: a non-2xx on `/validate` always means "the endpoint could not produce a verdict," never "your bundle is bad."

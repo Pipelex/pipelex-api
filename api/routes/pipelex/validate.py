@@ -3,9 +3,9 @@ from typing import Annotated, Literal, Self, Union
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pipelex.base_exceptions import ErrorReport, ValidationErrorItem
-from pipelex.pipeline.exceptions import ValidateBundleError
 from pipelex.pipeline.validation_render import format_validate_markdown, render_invalid_validation_markdown
 from pipelex.pipeline.validation_report import PipelexValidationReport
+from pipelex.runtime_bridge.execution_mode import PipelexExecutionMode
 from pipelex.tools.typing.pydantic_utils import empty_list_factory_of
 from pipelex.types import StrEnum
 from pydantic import BaseModel, Field, model_validator
@@ -62,6 +62,15 @@ class ValidateRequest(MthdsContentsRequest):
             "(`markdown`) adds a `rendered_<format>` field (e.g. `rendered_markdown`) to the 200 verdict, on both "
             "the valid and invalid arms. Unknown/unsupported tokens are silently ignored (presentation hint, not "
             "part of the verdict contract); the default empty list renders nothing and the response is unchanged."
+        ),
+    )
+    execution_mode: PipelexExecutionMode | None = Field(
+        default=None,
+        description=(
+            "Optional per-request execution-mode override for the validation backend (same plumbing as `/start`). "
+            "`direct` validates in-process; a `temporal_*` mode dispatches the whole job to a worker. Honored only "
+            "when the deployment sets `allow_request_execution_mode_override = true` in its `api.toml`; otherwise a "
+            "mode that differs from the deployment default is refused with a 403. Omitted → the deployment default."
         ),
     )
 
@@ -156,33 +165,31 @@ async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
       signatures are reported as `pending_signatures` + `is_runnable: false`, never as an error.
     - **Invalid verdict (200, `is_valid: false`):** the `InvalidReport` arm — `validation_errors[]`
       (the structured per-error diagnostics, built by pipelex's one shared builder, incl. the
-      `dry_run` residual item) + `message`, with the structural artifacts absent. This is what the
-      route synthesizes by catching the runtime's `ValidateBundleError` — validation runs DIRECT
-      in-process (F2), so that is the only verdict-bearing exception, and it never reaches the
-      global handler.
+      `dry_run` residual item) + `message`, with the structural artifacts absent. The runner
+      returns this as a value (`ErrorReport`) regardless of backend — the in-process arm from the
+      bundle's `ValidateBundleError`, the dispatched arm recovered from the worker — so the route
+      maps it to a 200 by matching the returned verdict, never by catching an exception.
     - **No verdict (non-2xx):** a malformed request body or an `mthds_sources` length mismatch is a
-      request-shape **422**; a host-wiring programmer error is a `PipelexUnexpectedError` → **500**;
-      auth is **401/403**. All are RFC 7807 `application/problem+json` rendered by the global
-      handler in `api.exception_handlers` — routes never shape them.
+      request-shape **422**; a forbidden `execution_mode` override is a **403**; a host-wiring
+      programmer error or a genuine orchestrator fault is a **5xx**; auth is **401/403**. All are
+      RFC 7807 `application/problem+json` rendered by the global handler in
+      `api.exception_handlers` — routes never shape them.
     """
     # Opt-in presentation formats (D-D): resolved once, threaded into both 200 arms. Empty by
     # default → no `rendered_*` field, response byte-identical to the no-`render` request.
     requested_formats = _resolve_render_formats(request_data.render)
-    try:
-        report = await ApiRunner().validate(
-            mthds_contents=request_data.mthds_contents,
-            allow_signatures=request_data.allow_signatures,
-            # `mthds_sources` rides the protocol's `extra` extension hook (mthds-python 0.5.0
-            # generalized the concrete param to `extra: dict | None`). Omitted when absent so the
-            # sourceless path is unchanged.
-            extra={"mthds_sources": request_data.mthds_sources} if request_data.mthds_sources is not None else None,
-        )
-    except ValidateBundleError as validation_error:
-        # An invalid bundle is a produced verdict (200 InvalidReport), not a transport failure —
-        # intercept it before the global 422 handler. Validation runs DIRECT in-process (F2), so
-        # this is the only verdict-bearing exception the route catches; any other failure is a
-        # no-verdict server condition and propagates to the global problem+json handler.
-        return _invalid_report_response(validation_error.to_error_report(), requested_formats=requested_formats)
+    # Verdict-as-value: the runner resolves the execution mode and dispatches through the bundle
+    # validator registry, returning the verdict. A produced invalid verdict is an `ErrorReport`
+    # (→ 200 InvalidReport); only a no-verdict fault propagates to the global problem+json handler.
+    verdict = await ApiRunner().validate_verdict(
+        mthds_contents=request_data.mthds_contents,
+        mthds_sources=request_data.mthds_sources,
+        allow_signatures=request_data.allow_signatures,
+        requested_execution_mode=request_data.execution_mode,
+    )
+    if not isinstance(verdict, PipelexValidationReport):
+        return _invalid_report_response(verdict, requested_formats=requested_formats)
+    report = verdict
 
     # Splat the report's own field/value pairs so a future canonical field rides the wire
     # automatically — the wrapper never enumerates (and silently drops) report fields. `is_valid`
