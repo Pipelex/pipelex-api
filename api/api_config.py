@@ -26,7 +26,7 @@ from pathlib import Path
 
 from pipelex.runtime_bridge.execution_mode import PipelexExecutionMode
 from pipelex.system.configuration.config_loader import config_manager
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from api.error_types import ErrorType
 from api.errors import raise_forbidden
@@ -50,6 +50,28 @@ class ApiConfig(BaseModel):
 
     execution_mode: PipelexExecutionMode
     allow_request_execution_mode_override: bool
+
+    @field_validator("execution_mode")
+    @classmethod
+    def _reject_fire_and_forget_default(cls, value: PipelexExecutionMode) -> PipelexExecutionMode:
+        """``execution_mode`` names the deployment's SYNCHRONOUS backend, never a fire-and-forget one.
+
+        Fire-and-forget is derived per-endpoint, not configured: ``/start`` derives the f&f sibling
+        of this mode while ``/execute`` and ``/validate`` dispatch it as-is. A *configured* f&f mode
+        would silently half-break the deployment — every ``/execute`` would ``400``
+        (``FireAndForgetNotSupported``) and ``/validate`` would dispatch f&f to the validator
+        registry. Reject it at load so a baked override fails fast (matching ``extra="forbid"``)
+        instead of booting a broken deployment. A caller may still *request* f&f per request on
+        ``/start`` — that path is gated by the override policy, not by this field.
+        """
+        if value.is_fire_and_forget:
+            msg = (
+                f"execution_mode '{value}' is fire-and-forget, which is derived per-endpoint, not configured. "
+                f"Set the synchronous backend instead (e.g. 'temporal_blocking') — '/start' derives its "
+                f"fire-and-forget variant."
+            )
+            raise ValueError(msg)
+        return value
 
 
 def load_api_config() -> ApiConfig:

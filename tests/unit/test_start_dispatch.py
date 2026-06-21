@@ -4,11 +4,14 @@ Fire-and-forget vs blocking is a property of the ENDPOINT, not of the deployment
 `/validate` dispatch `execution_mode` synchronously as-is, while `/start` is asynchronous and
 dispatches the fire-and-forget sibling of the configured backend (`_async_start_mode`). A
 `temporal_blocking` deployment therefore dispatches `temporal_fire_and_forget` on `/start`;
-`direct`/`mistral_native` have no async variant and run in-process answering 202 with
-`workflow_id=None`. This pins the derivation both as a pure mapping and end-to-end on `POST /start`
-with a stub orchestrator registered under the derived mode (the boot slot is never used).
+`direct`/`mistral_native` have no fire-and-forget variant and dispatch unchanged, blocking until
+completion — `direct` answers 202 with `workflow_id=None`, while `mistral_native` answers with the
+non-null `workflow_id` its orchestrator returns (the run id). This pins the derivation both as a
+pure mapping (`_async_start_mode` over every mode) and end-to-end on `POST /start`, with a stub
+orchestrator registered under the derived mode (the boot slot is never used).
 """
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pipelex.pipe_run.delivery_assignment import DeliveryAssignment
@@ -21,17 +24,46 @@ from pytest_mock import MockerFixture
 from api.api_config import ApiConfig
 from api.exception_handlers import register_exception_handlers
 from api.routes import router as api_router
+from api.routes.pipelex.pipeline import (
+    _async_start_mode,  # pyright: ignore[reportPrivateUsage]  # route-local helper, tested directly as a pure mapping
+)
 from tests.unit._constants import VALID_MTHDS
 
 _PIPELINE_NS = "api.routes.pipelex.pipeline"
 
 
-class _RecordingStub:
-    """Stand-in orchestrator that records the call and returns a fire-and-forget-style output.
+class TestAsyncStartModeMapping:
+    """`_async_start_mode` as a pure mapping over every execution mode.
 
-    `workflow_id` is echoed straight through (the f&f arm returns it immediately); a `None`
-    `workflow_id` models the direct/mistral case where `/start` runs in-process and answers with no
-    workflow id.
+    Only Temporal has a fire-and-forget sibling, so `temporal_blocking` derives
+    `temporal_fire_and_forget` (and an already-f&f value is idempotent); `direct` and
+    `mistral_native` have none and map to themselves. The `match` is exhaustive over the enum, so a
+    new member added without an arm here is a pyright failure — this test additionally pins the
+    intended mapping against an accidental edit (e.g. `mistral_native` silently mapped to a Temporal
+    arm).
+    """
+
+    @pytest.mark.parametrize(
+        ("configured", "expected"),
+        [
+            (PipelexExecutionMode.DIRECT, PipelexExecutionMode.DIRECT),
+            (PipelexExecutionMode.TEMPORAL_BLOCKING, PipelexExecutionMode.TEMPORAL_FIRE_AND_FORGET),
+            (PipelexExecutionMode.TEMPORAL_FIRE_AND_FORGET, PipelexExecutionMode.TEMPORAL_FIRE_AND_FORGET),
+            (PipelexExecutionMode.MISTRAL_NATIVE, PipelexExecutionMode.MISTRAL_NATIVE),
+        ],
+    )
+    def test_async_start_mode_maps_to_fire_and_forget_sibling(
+        self, configured: PipelexExecutionMode, expected: PipelexExecutionMode
+    ) -> None:
+        assert _async_start_mode(configured) == expected
+
+
+class _RecordingStub:
+    """Stand-in orchestrator that records the call and returns the configured `workflow_id`.
+
+    Models each backend's `/start` answer: the Temporal f&f arm returns a `workflow_id` immediately;
+    `direct` runs in-process and returns `None`; `mistral_native` runs per-call (awaiting completion)
+    and returns its run id as the `workflow_id`. The value is echoed straight through.
     """
 
     def __init__(self, *, workflow_id: str | None) -> None:
@@ -67,17 +99,45 @@ def _register_stub(mocker: MockerFixture, *, mode: PipelexExecutionMode, stub: _
 
 
 class TestStartDerivesAsyncVariant:
-    def test_temporal_blocking_deployment_dispatches_fire_and_forget(self, mocker: MockerFixture) -> None:
-        """A `temporal_blocking` deployment's `/start` dispatches the FIRE-AND-FORGET orchestrator.
+    """End-to-end: `POST /start` dispatches the orchestrator registered under the DERIVED mode.
 
-        The stub is registered ONLY under `temporal_fire_and_forget`; the deployment default is
-        `temporal_blocking`. A 202 with the stub called (and the workflow_id echoed) proves `/start`
-        looked up the DERIVED async mode — had it dispatched `temporal_blocking` raw, the registry
-        (which holds no blocking arm) would have raised `MissingOrchestratorError`.
-        """
-        _force_config(mocker, mode=PipelexExecutionMode.TEMPORAL_BLOCKING)
-        stub = _RecordingStub(workflow_id="wf-123")
-        _register_stub(mocker, mode=PipelexExecutionMode.TEMPORAL_FIRE_AND_FORGET, stub=stub)
+    Each case configures a synchronous deployment mode and registers the stub ONLY under the mode
+    `_async_start_mode` derives — had `/start` dispatched the configured mode raw, the registry
+    (holding no arm there) would have raised `MissingOrchestratorError`. The echoed `workflow_id`
+    proves which backend answered: a `temporal_blocking` deployment dispatches the f&f arm (non-null
+    id), `direct` answers with `null`, and `mistral_native` dispatches its per-call arm and answers
+    with the non-null run id.
+    """
+
+    @pytest.mark.parametrize(
+        ("configured", "dispatched", "stub_workflow_id", "expected_workflow_id"),
+        [
+            (
+                PipelexExecutionMode.TEMPORAL_BLOCKING,
+                PipelexExecutionMode.TEMPORAL_FIRE_AND_FORGET,
+                "wf-123",
+                "wf-123",
+            ),
+            (PipelexExecutionMode.DIRECT, PipelexExecutionMode.DIRECT, None, None),
+            (
+                PipelexExecutionMode.MISTRAL_NATIVE,
+                PipelexExecutionMode.MISTRAL_NATIVE,
+                "run-abc",
+                "run-abc",
+            ),
+        ],
+    )
+    def test_start_dispatches_derived_mode(
+        self,
+        mocker: MockerFixture,
+        configured: PipelexExecutionMode,
+        dispatched: PipelexExecutionMode,
+        stub_workflow_id: str | None,
+        expected_workflow_id: str | None,
+    ) -> None:
+        _force_config(mocker, mode=configured)
+        stub = _RecordingStub(workflow_id=stub_workflow_id)
+        _register_stub(mocker, mode=dispatched, stub=stub)
 
         response = _build_client().post(
             "/v1/start",
@@ -87,22 +147,5 @@ class TestStartDerivesAsyncVariant:
         assert response.status_code == 202, response.text
         body = response.json()
         assert body["state"] == "STARTED"
-        assert body["workflow_id"] == "wf-123"
-        assert len(stub.calls) == 1
-
-    def test_direct_deployment_dispatches_direct_with_no_workflow_id(self, mocker: MockerFixture) -> None:
-        """The base (`direct`) has no async variant: `/start` dispatches `direct` and answers with workflow_id null."""
-        _force_config(mocker, mode=PipelexExecutionMode.DIRECT)
-        stub = _RecordingStub(workflow_id=None)
-        _register_stub(mocker, mode=PipelexExecutionMode.DIRECT, stub=stub)
-
-        response = _build_client().post(
-            "/v1/start",
-            json={"pipe_code": "echo", "mthds_contents": [VALID_MTHDS], "inputs": {"text": "hello"}},
-        )
-
-        assert response.status_code == 202, response.text
-        body = response.json()
-        assert body["state"] == "STARTED"
-        assert body["workflow_id"] is None
+        assert body["workflow_id"] == expected_workflow_id
         assert len(stub.calls) == 1

@@ -113,11 +113,16 @@ def _async_start_mode(mode: PipelexExecutionMode) -> PipelexExecutionMode:
     `/execute` and `/validate` are synchronous and dispatch `execution_mode` as-is, while
     `/start` is asynchronous and dispatches the *fire-and-forget* sibling of the configured
     backend when one exists. Today only Temporal has a fire-and-forget variant, so
-    `temporal_blocking` maps to `temporal_fire_and_forget` (and a config already set to
-    fire-and-forget stays there); `direct` and `mistral_native` have no async variant, so
-    `/start` runs them in-process / per-call and answers `202` with `workflow_id=None`. This
-    keeps a deployment's single `execution_mode` coherent across every endpoint — it names the
-    synchronous backend, and the async variant is derived here rather than configured.
+    `temporal_blocking` maps to `temporal_fire_and_forget`; `direct` and `mistral_native` have
+    none, so `/start` dispatches them unchanged and blocks until completion — `direct` runs
+    in-process and answers `202` with `workflow_id=None`, while `mistral_native` runs per-call and
+    answers with the non-null `workflow_id` its orchestrator returns (the run id). This keeps a
+    deployment's single `execution_mode` coherent across every endpoint — it names the synchronous
+    backend, and the async variant is derived here rather than configured.
+
+    A `temporal_fire_and_forget` input maps to itself (idempotent), but it is rejected as a
+    *configured* `execution_mode` (`ApiConfig`); this arm therefore only fires for a per-request
+    override that the deployment policy allows.
 
     Kept a route-local mapping (not a core enum property) to stay a pipelex-api-only concern;
     promote it onto `PipelexExecutionMode` if another consumer ever needs the same derivation.
@@ -272,8 +277,9 @@ class ApiRunner(PipelexMTHDSProtocol):
         # Resolve the effective execution mode FIRST — a per-request override the deployment policy
         # forbids is refused (403) here, before any library load / run registration is done. `/start`
         # is asynchronous, so dispatch the fire-and-forget VARIANT of the resolved backend (Temporal
-        # gets its f&f arm; direct/mistral have none and run in-process answering 202 with
-        # workflow_id=None) — the policy gate above still ran against the configured synchronous mode.
+        # gets its f&f arm; direct/mistral have none and dispatch unchanged, blocking until done —
+        # direct answers 202 with workflow_id=None, mistral with its run id) — the policy gate above
+        # still ran against the configured synchronous mode.
         execution_mode = _async_start_mode(resolve_execution_mode(requested_execution_mode, config=get_api_config()))
         created_at = get_current_iso_timestamp()
         pipelex_inputs: PipelineInputs | WorkingMemory | None = cast("PipelineInputs | WorkingMemory | None", inputs)

@@ -115,7 +115,7 @@ The packaged default (`execution_mode = "direct"`, override off) is what the gen
 **Fire-and-forget is a property of the endpoint, not of the deployment.** `execution_mode` names the synchronous backend; each endpoint then dispatches the right variant of it:
 
 - `POST /v1/execute` and `POST /v1/validate` are **synchronous** (they return the full output / the verdict) and dispatch `execution_mode` as-is.
-- `POST /v1/start` is **asynchronous** and dispatches the **fire-and-forget sibling** of the configured backend when one exists. So a Temporal deployment (`execution_mode = "temporal_blocking"`) enqueues on `/start` and returns a `workflow_id` immediately, while `direct` / `mistral_native` have no async variant and run in-process, answering `202` with `workflow_id: null`.
+- `POST /v1/start` is **asynchronous** and dispatches the **fire-and-forget sibling** of the configured backend when one exists. So a Temporal deployment (`execution_mode = "temporal_blocking"`) enqueues on `/start` and returns a `workflow_id` immediately, while `direct` / `mistral_native` have no fire-and-forget variant and dispatch unchanged, blocking until completion — `direct` answers `202` with `workflow_id: null`, and `mistral_native` answers with the `workflow_id` its orchestrator returns (the run id).
 
 So a deployment sets **one** coherent `execution_mode` and every endpoint does the right thing — you never configure `temporal_fire_and_forget` directly. (Explicitly requesting `temporal_fire_and_forget` per request on `/execute` is still refused with a `400` — `/execute` is synchronous.)
 

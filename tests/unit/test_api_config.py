@@ -11,6 +11,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pipelex.runtime_bridge.execution_mode import PipelexExecutionMode
+from pydantic import ValidationError
 
 from api.api_config import ApiConfig, get_api_config, resolve_execution_mode
 from api.errors import ApiError
@@ -21,8 +22,13 @@ from tests.unit._constants import VALID_MTHDS
 
 
 def _temporal_locked_config() -> ApiConfig:
-    """A hosted-style config: Temporal fire-and-forget default, override OFF."""
-    return ApiConfig(execution_mode=PipelexExecutionMode.TEMPORAL_FIRE_AND_FORGET, allow_request_execution_mode_override=False)
+    """A hosted-style config: Temporal (blocking) default, override OFF.
+
+    The configured mode is the SYNCHRONOUS backend (`temporal_blocking`) — `/start` derives its
+    fire-and-forget variant per endpoint, and `temporal_fire_and_forget` is rejected as a configured
+    value (see `TestApiConfigRejectsFireAndForgetDefault`).
+    """
+    return ApiConfig(execution_mode=PipelexExecutionMode.TEMPORAL_BLOCKING, allow_request_execution_mode_override=False)
 
 
 class TestApiConfigDefault:
@@ -35,12 +41,12 @@ class TestApiConfigDefault:
 
 class TestResolveExecutionMode:
     def test_none_request_uses_deployment_default(self):
-        assert resolve_execution_mode(None, config=_temporal_locked_config()) is PipelexExecutionMode.TEMPORAL_FIRE_AND_FORGET
+        assert resolve_execution_mode(None, config=_temporal_locked_config()) is PipelexExecutionMode.TEMPORAL_BLOCKING
 
     def test_request_equal_to_default_is_honored(self):
         # A no-op override (same as the default) is always accepted, override policy or not.
         config = _temporal_locked_config()
-        assert resolve_execution_mode(PipelexExecutionMode.TEMPORAL_FIRE_AND_FORGET, config=config) is PipelexExecutionMode.TEMPORAL_FIRE_AND_FORGET
+        assert resolve_execution_mode(PipelexExecutionMode.TEMPORAL_BLOCKING, config=config) is PipelexExecutionMode.TEMPORAL_BLOCKING
 
     def test_forbidden_override_is_refused(self):
         # A caller must not be able to force `direct` on a locked-down distributed runner.
@@ -50,8 +56,17 @@ class TestResolveExecutionMode:
         assert exc_info.value.document["error_type"] == "ExecutionModeOverrideForbidden"
 
     def test_allowed_override_is_honored(self):
-        config = ApiConfig(execution_mode=PipelexExecutionMode.TEMPORAL_FIRE_AND_FORGET, allow_request_execution_mode_override=True)
+        config = ApiConfig(execution_mode=PipelexExecutionMode.TEMPORAL_BLOCKING, allow_request_execution_mode_override=True)
         assert resolve_execution_mode(PipelexExecutionMode.DIRECT, config=config) is PipelexExecutionMode.DIRECT
+
+
+class TestApiConfigRejectsFireAndForgetDefault:
+    def test_fire_and_forget_configured_mode_is_rejected_at_load(self):
+        # `execution_mode` names the SYNCHRONOUS backend; the fire-and-forget variant is derived
+        # per-endpoint (`/start`), never configured. A baked `temporal_fire_and_forget` would 400
+        # every `/execute` and misroute `/validate`, so it fails fast at config validation.
+        with pytest.raises(ValidationError):
+            ApiConfig(execution_mode=PipelexExecutionMode.TEMPORAL_FIRE_AND_FORGET, allow_request_execution_mode_override=False)
 
 
 class TestStartOverridePolicyEndToEnd:
