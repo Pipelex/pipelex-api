@@ -416,6 +416,17 @@ paths:
                   description: PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — completion webhooks. When the run
                     finishes, the runner POSTs the RunResult to each URL, HMAC-SHA256-signed via the X-Completion-Signature
                     header. http/https only; private, loopback, link-local and cloud-metadata hosts are rejected.
+                orchestration_mode:
+                  anyOf:
+                  - type: string
+                  - type: 'null'
+                  title: Orchestration Mode
+                  description: 'PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — request the orchestration mode (the
+                    backend) for this run. An OPEN string token: `direct` (in-process, the base default), `temporal`, and
+                    any other plugin-provided token are accepted; an unregistered token is refused at dispatch. The delivery
+                    axis (blocking vs fire-and-forget) is endpoint-set, never requestable. Honored ONLY when the deployment
+                    sets `allow_request_orchestration_mode_override = true` in its `api.toml`; otherwise a token that differs
+                    from the deployment default is refused with a 403. Omit it to use the deployment default.'
               additionalProperties: true
               type: object
               title: PipelexApiStartRequest

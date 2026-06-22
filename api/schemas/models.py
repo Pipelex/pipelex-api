@@ -192,6 +192,7 @@ class PipelexApiStartRequest(StartRequest):
             "and cloud-metadata hosts are rejected."
         ),
     )
+    orchestration_mode: str | None = Field(default=None, description=_ORCHESTRATION_MODE_DESCRIPTION)
 
 
 class PipelexApiExecuteRequest(RunRequest):
