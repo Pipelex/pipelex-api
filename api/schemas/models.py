@@ -16,7 +16,6 @@ from mthds.protocol.exceptions import PipelineRequestError
 from mthds.protocol.pipe_output import VariableMultiplicity
 from mthds.protocol.pipeline_inputs import PipelineInputs
 from mthds.protocol.working_memory import WorkingMemoryAbstract
-from pipelex.runtime_bridge.execution_mode import PipelexExecutionMode
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.functional_validators import SkipValidation
 
@@ -107,11 +106,13 @@ class StartRequest(RunRequest):
     pipeline_run_id: str | None = Field(default=None, max_length=128)
 
 
-_EXECUTION_MODE_DESCRIPTION = (
-    "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — request the execution mode for this run "
-    "(`direct`, `temporal_blocking`, `temporal_fire_and_forget`, `mistral_native`). Honored ONLY when the "
-    "deployment sets `allow_request_execution_mode_override = true` in its `api.toml`; otherwise a mode that "
-    "differs from the deployment default is refused with a 403. Omit it to use the deployment default."
+_ORCHESTRATION_MODE_DESCRIPTION = (
+    "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — request the orchestration mode (the backend) "
+    "for this run. An OPEN string token: `direct` (in-process, the base default), `temporal`, and any other "
+    "plugin-provided token are accepted; an unregistered token is refused at dispatch. The delivery axis "
+    "(blocking vs fire-and-forget) is endpoint-set, never requestable. Honored ONLY when the deployment sets "
+    "`allow_request_orchestration_mode_override = true` in its `api.toml`; otherwise a token that differs from "
+    "the deployment default is refused with a 403. Omit it to use the deployment default."
 )
 
 
@@ -150,7 +151,7 @@ class PipelineApiExtras(BaseModel):
 
     pipeline_run_id: str | None = Field(default=None, max_length=128)
     callback_urls: list[str] | None = Field(default=None, max_length=MAX_CALLBACK_URLS)
-    execution_mode: PipelexExecutionMode | None = Field(default=None, description=_EXECUTION_MODE_DESCRIPTION)
+    orchestration_mode: str | None = Field(default=None, description=_ORCHESTRATION_MODE_DESCRIPTION)
 
     @field_validator("callback_urls")
     @classmethod
@@ -194,14 +195,14 @@ class PipelexApiStartRequest(StartRequest):
 
 
 class PipelexApiExecuteRequest(RunRequest):
-    """Documented body of `POST /execute` — the protocol's `RunRequest` plus THIS server's `execution_mode` extension.
+    """Documented body of `POST /execute` — the protocol's `RunRequest` plus THIS server's `orchestration_mode` extension.
 
     Used only to publish the OpenAPI request schema: `/execute` reads the body through the raw
     `Request` (kajson decoding), so FastAPI cannot infer the body type; this model documents the
-    per-request `execution_mode` override the route actually honors (parsed by `PipelineApiExtras`).
+    per-request `orchestration_mode` override the route actually honors (parsed by `PipelineApiExtras`).
     """
 
-    execution_mode: PipelexExecutionMode | None = Field(default=None, description=_EXECUTION_MODE_DESCRIPTION)
+    orchestration_mode: str | None = Field(default=None, description=_ORCHESTRATION_MODE_DESCRIPTION)
 
 
 class MthdsContentsRequest(BaseModel):

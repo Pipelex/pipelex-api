@@ -101,32 +101,32 @@ In the official Docker image, the `.pipelex/` directory shipped in this reposito
 
 For the schema and meaning of every key in these files, see https://docs.pipelex.com.
 
-## Execution mode
+## Orchestration mode
 
-The base is **orchestrator-agnostic**. WHICH backend a top-level run dispatches as is a deployment choice, read from a separate **`api.toml`** config file (not the main `pipelex_{env}.toml` — the core config rejects unknown sections). It is layered exactly like the Pipelex config above, but with its own base name: `api.toml` (packaged default) → `api_{PIPELEX_ENV}.toml` → `api_override.toml`. Two keys:
+The base is **orchestrator-agnostic**. WHICH backend a top-level run dispatches to is a deployment choice, read from a separate **`api.toml`** config file (not the main `pipelex_{env}.toml` — the core config rejects unknown sections). It is layered exactly like the Pipelex config above, but with its own base name: `api.toml` (packaged default) → `api_{PIPELEX_ENV}.toml` → `api_override.toml`. Two keys:
 
 | Key | Meaning | Base default |
 | --- | --- | --- |
-| `execution_mode` | Which **backend** a top-level run dispatches as, named in its **synchronous** form — `direct` (in-process), `temporal_blocking`, or `mistral_native`. A mode whose orchestrator plugin is **not installed** fails loud at dispatch with the plugin's install hint. | `direct` |
-| `allow_request_execution_mode_override` | Whether a caller may set `execution_mode` per request on `POST /v1/execute`, `POST /v1/start`, and `POST /v1/validate`. When `false`, a requested mode that differs from the deployment default is refused with a `403`. | `false` |
+| `orchestration_mode` | Which **backend** (orchestrator) a top-level run dispatches to. An **open string token**: `direct` (in-process), `temporal`, and any plugin-provided token are accepted; an unregistered token fails loud at dispatch with the plugin's install hint. | `direct` |
+| `allow_request_orchestration_mode_override` | Whether a caller may set `orchestration_mode` per request on `POST /v1/execute`, `POST /v1/start`, and `POST /v1/validate`. When `false`, a requested token that differs from the deployment default is refused with a `403`. | `false` |
 
-The packaged default (`execution_mode = "direct"`, override off) is what the generic image ships.
+The packaged default (`orchestration_mode = "direct"`, override off) is what the generic image ships.
 
-**Fire-and-forget is a property of the endpoint, not of the deployment.** `execution_mode` names the synchronous backend; each endpoint then dispatches the right variant of it:
+**`orchestration_mode` is one of two orthogonal axes.** It names only the **backend**. The other axis — *delivery*, i.e. whether the caller waits — is **endpoint-intrinsic**, never configured and never requestable:
 
-- `POST /v1/execute` and `POST /v1/validate` are **synchronous** (they return the full output / the verdict) and dispatch `execution_mode` as-is.
-- `POST /v1/start` is **asynchronous** and dispatches the **fire-and-forget sibling** of the configured backend when one exists. So a Temporal deployment (`execution_mode = "temporal_blocking"`) enqueues on `/start` and returns a `workflow_id` immediately, while `direct` / `mistral_native` have no fire-and-forget variant and dispatch unchanged, blocking until completion — `direct` answers `202` with `workflow_id: null`, and `mistral_native` answers with the `workflow_id` its orchestrator returns (the run id).
+- `POST /v1/execute` and `POST /v1/validate` are **synchronous** (`BLOCKING` delivery): they return the full output / the verdict.
+- `POST /v1/start` is **fire-and-forget** (`FIRE_AND_FORGET` delivery): it returns immediately with a `workflow_id`. It works only on a backend that is genuinely async-capable. A Temporal deployment (`orchestration_mode = "temporal"`) enqueues on `/start` and returns a `workflow_id`. On the orchestrator-agnostic base (`orchestration_mode = "direct"`) the in-process orchestrator is blocking-only, so `/start` is **HONEST**: it refuses with a `400` (`StartRequiresAsyncOrchestration`) — use `/execute` — rather than silently running blocking and acking.
 
-So a deployment sets **one** coherent `execution_mode` and every endpoint does the right thing — you never configure `temporal_fire_and_forget` directly. (Explicitly requesting `temporal_fire_and_forget` per request on `/execute` is still refused with a `400` — `/execute` is synchronous.)
+So a deployment sets **one** `orchestration_mode` and each endpoint applies its own delivery — there is no fire-and-forget token to configure or request.
 
-**`execution_mode` vs `boot_orchestrator` — two knobs, two jobs.** `execution_mode` (here) selects the backend a **top-level entry** (`/execute`, `/start`, `/validate`) dispatches to. `boot_orchestrator` (a core Pipelex setting) selects the **execution stack** used wherever a pipe actually runs — on a distributed worker, and for the in-process scoping inside the `direct` orchestrator. On a correctly-configured deployment the two agree (a Temporal flavor sets `execution_mode = "temporal_blocking"` *and* boots under Temporal); keeping them distinct is what lets `execution_mode` be the single source of truth for top-level dispatch without coupling it to how the stack is booted. A `temporal_*` `execution_mode` still requires the process to be booted under Temporal — set them together on a Temporal flavor.
+**`orchestration_mode` vs `boot_orchestrator` — two knobs, two jobs.** `orchestration_mode` (here) selects the backend a **top-level entry** (`/execute`, `/start`, `/validate`) dispatches to. `boot_orchestrator` (a core Pipelex setting) selects the **execution stack** used wherever a pipe actually runs — on a distributed worker, and for the in-process scoping inside the `direct` orchestrator. On a correctly-configured deployment the two agree (a Temporal flavor sets `orchestration_mode = "temporal"` *and* boots under Temporal); keeping them distinct is what lets `orchestration_mode` be the single source of truth for top-level dispatch without coupling it to how the stack is booted. A `temporal` `orchestration_mode` still requires the process to be booted under Temporal — set them together on a Temporal flavor.
 
 A **flavor** image (e.g. the hosted Temporal flavor) installs one orchestrator plugin and bakes an `api_{env}.toml` to flip the default, e.g.:
 
 ```toml
 # api_prod.toml  (keys at the file root — no [api] wrapper)
-execution_mode = "temporal_blocking"   # /start derives temporal_fire_and_forget; /execute + /validate stay blocking
-allow_request_execution_mode_override = false
+orchestration_mode = "temporal"   # /start is fire-and-forget (async-capable); /execute + /validate stay blocking
+allow_request_orchestration_mode_override = false
 ```
 
 Mount your own `api_{env}.toml` / `api_override.toml` into `/root/.pipelex/` exactly like any other override file (see below).

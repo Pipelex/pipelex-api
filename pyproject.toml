@@ -77,14 +77,15 @@ packages = ["api"]
 [tool.uv]
 required-version = ">=0.7.2"
 
-# The orchestrator-agnostic base + per-call dispatch seams (OrchestratorRegistry,
-# BundleValidatorRegistry) are developed against an unreleased `pipelex` branch.
-# Pin to that branch by commit SHA (public repo → git+https, resolvable in CI without
-# credentials) so CI installs the exact core this PR is built against. The published
-# `==<ver>` PyPI pin (no `temporal` extra) is the release-time form; flip back to it
-# once the core change ships to PyPI.
+# The orchestration_mode / delivery split (open `orchestration_mode` token + closed
+# `DeliveryMode`, per-call OrchestratorRegistry / BundleValidatorRegistry dispatch) is
+# developed against the unreleased `pipelex` core in the sibling `../_plugins` worktree,
+# pinned editable so a core edit is live here immediately — matching `pipelex-temporal`.
+# CI gotcha: an editable local path is unresolvable in CI, so flip this to a published
+# git+https SHA (once the core change is pushed) + relock for any PR; flip to the `==<ver>`
+# PyPI pin once the core change ships to PyPI.
 [tool.uv.sources]
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "51ff094176996d31cb3da2bbf6be5ebb366235d4" }
+pipelex = { path = "../_plugins", editable = true }
 
 [tool.mypy]
 check_untyped_defs = true

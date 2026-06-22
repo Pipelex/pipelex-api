@@ -106,7 +106,7 @@ The submit path carries bundle text, not file paths, so by default the runtime c
 
 **Where validation runs:**
 
-Validation is **`execution_mode`-aware**, the same way `/start` is: the runner resolves the effective mode (the deployment default plus the optional per-request `execution_mode` override) and dispatches through the bundle-validator registry. On the orchestrator-agnostic base — and for `execution_mode: direct` — the whole job runs **in-process in one library load on the API side**. On an orchestrator flavor whose mode is selected (e.g. `temporal_*`), the whole job is **dispatched to a worker** instead, and the API side assembles the same canonical report from the worker's result without loading a library. Either way the verdict is byte-identical: the backend changes, the contract does not. A per-request override the deployment forbids is refused with a 403.
+Validation is **`orchestration_mode`-aware**, the same way `/start` is: the runner resolves the effective backend (the deployment default plus the optional per-request `orchestration_mode` override) and dispatches through the bundle-validator registry. Validation is inherently blocking, so there is no delivery axis here — only the backend varies. On the orchestrator-agnostic base — and for `orchestration_mode: direct` — the whole job runs **in-process in one library load on the API side**. On an orchestrator flavor whose mode is selected (e.g. `temporal`), the whole job is **dispatched to a worker** instead, and the API side assembles the same canonical report from the worker's result without loading a library. Either way the verdict is byte-identical: the backend changes, the contract does not. A per-request override the deployment forbids is refused with a 403.
 
 > **Resource note for deployment.** When validation runs in-process (the agnostic base, or `direct` mode), the API server loads the method library to validate, so a deployment that receives large or frequent in-process `/validate` traffic should be sized for that load (memory + CPU for library assembly and the graph dry-run). On a distributed-execution flavor that dispatches validation to a worker, the library work happens worker-side; size the workers accordingly.
 
@@ -117,7 +117,7 @@ The graph is best-effort: a bundle that validates but whose graph dry-run fails 
 Only conditions where the endpoint could not produce a verdict are non-2xx, rendered as [RFC 7807 problem documents](error-responses.md):
 
 - **422** — a malformed request body, or an `mthds_sources` / `mthds_contents` length mismatch (a request-shape error caught before the runtime).
-- **401 / 403** — unauthenticated / forbidden (including a per-request `execution_mode` override the deployment does not allow).
+- **401 / 403** — unauthenticated / forbidden (including a per-request `orchestration_mode` override the deployment does not allow).
 - **5xx** — a server fault (including a host-wiring programmer error, surfaced as `PipelexUnexpectedError`).
 
 Read it as one rule: a non-2xx on `/validate` always means "the endpoint could not produce a verdict," never "your bundle is bad."

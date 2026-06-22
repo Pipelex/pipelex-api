@@ -36,7 +36,7 @@ from mthds.protocol.protocol import PROTOCOL_VERSION
 from pipelex.pipe_run.delivery_assignment import DeliveryAssignment, DeliveryStatus
 from pipelex.pipe_run.delivery_executor import DeliveryExecutor
 from pipelex.pipeline.pipeline_response import RunState
-from pipelex.runtime_bridge.execution_mode import PipelexExecutionMode
+from pipelex.runtime_bridge.delivery_mode import DeliveryMode
 from pipelex.runtime_bridge.payloads import PipelexPipeRunOutput
 from typing_extensions import override
 
@@ -189,7 +189,9 @@ class TestProtocolConformance:
         # DeliveryExecutor delivery and returns a fire-and-forget output (workflow_id set,
         # is_completed False), so the delivery wire bytes still come from the production path
         # without needing a Temporal cluster or the `pipelex-temporal` plugin.
-        async def fake_run(*, pipe_job: Any, delivery_assignment: DeliveryAssignment) -> PipelexPipeRunOutput:
+        async def fake_run(*, pipe_job: Any, delivery_assignment: DeliveryAssignment, delivery: DeliveryMode) -> PipelexPipeRunOutput:
+            # `/start` sets the delivery axis itself — it must reach the orchestrator as FIRE_AND_FORGET.
+            assert delivery is DeliveryMode.FIRE_AND_FORGET
             await DeliveryExecutor().execute(
                 pipe_output=None,
                 user_id="anonymous",
@@ -204,7 +206,10 @@ class TestProtocolConformance:
                 is_completed=False,
             )
 
+        # The fake stands in for an async-capable backend so `/start`'s capability gate passes (it
+        # checks `supports_fire_and_forget` BEFORE dispatch — a blocking-only orchestrator would 400).
         fake_orchestrator = mocker.MagicMock()
+        fake_orchestrator.supports_fire_and_forget = True
         fake_orchestrator.run = mocker.AsyncMock(side_effect=fake_run)
         fake_registry = mocker.MagicMock()
         fake_registry.get_optional.return_value = fake_orchestrator
@@ -238,11 +243,11 @@ class TestProtocolConformance:
         assert ack["pipeline_run_id"] == client_pipeline_run_id
         assert ack["state"] == RunState.STARTED
 
-        # The runner resolved the deployment's execution mode and dispatched under it: with the
-        # packaged-default config (DIRECT) and no per-request override, the registry is asked for the
-        # DIRECT orchestrator by keyword `mode=` — so a regression that resolved/threaded the wrong
+        # The runner resolved the deployment's orchestration mode and dispatched under it: with the
+        # packaged-default config (`direct`) and no per-request override, the registry is asked for the
+        # `direct` orchestrator by keyword `mode=` — so a regression that resolved/threaded the wrong
         # mode would be caught here, not silently dispatched.
-        fake_registry.get_optional.assert_called_once_with(mode=PipelexExecutionMode.DIRECT)
+        fake_registry.get_optional.assert_called_once_with(mode="direct")
         fake_orchestrator.run.assert_awaited_once()
 
         # Exactly one delivery reached the receiver.

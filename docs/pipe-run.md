@@ -10,7 +10,7 @@ Execute a Pipelex pipeline with flexible inputs and wait for completion.
 
 **Endpoint:** `POST /v1/execute`
 
-> **Backend selected by `execution_mode`.** `/execute` dispatches through the deployment's `execution_mode` (config default + optional policy-gated per-request `execution_mode` override), symmetric with `/start` — see [Configuration → Execution mode](configuration.md). On the orchestrator-agnostic base (`direct`, the default) it runs **in-process**; a `temporal_blocking` / `mistral_native` flavor dispatches the run to a worker and awaits it. `/execute` is **synchronous** (it returns the full output), so a fire-and-forget mode is refused with a `400` — use `POST /v1/start` for fire-and-forget. A per-request override is honored only where the deployment sets `allow_request_execution_mode_override = true`; otherwise a mode differing from the default is refused with a `403`.
+> **Backend selected by `orchestration_mode`.** `/execute` dispatches through the deployment's `orchestration_mode` (config default + optional policy-gated per-request `orchestration_mode` override), symmetric with `/start` — see [Configuration → Orchestration mode](configuration.md). On the orchestrator-agnostic base (`direct`, the default) it runs **in-process**; a `temporal` flavor dispatches the run to a worker and awaits it. `/execute` is **synchronous** (it returns the full output) and always uses `BLOCKING` delivery — wait-semantics is endpoint-set, never requestable, so there is no fire-and-forget option here (use `POST /v1/start`). A per-request backend override is honored only where the deployment sets `allow_request_orchestration_mode_override = true`; otherwise a token differing from the default is refused with a `403`.
 
 **Request Body:**
 
@@ -80,7 +80,7 @@ Start a pipeline execution and get its `pipeline_run_id` back with a `202` ack.
 
 **Endpoint:** `POST /v1/start`
 
-> **Blocking vs non-blocking is a property of this endpoint, not the deployment.** `execution_mode` names the deployment's *synchronous* backend; `/start` is asynchronous and dispatches its **fire-and-forget variant** when one exists. A Temporal deployment (`execution_mode = "temporal_blocking"`) therefore enqueues the run and returns immediately with a `workflow_id`. On the orchestrator-agnostic base (`execution_mode = "direct"`, the default — see [Configuration → Execution mode](configuration.md)) there is no async variant: the run executes **in-process** and the request blocks until completion, then answers `202` with `workflow_id: null`. The completion callback fires on the same path either way.
+> **Fire-and-forget is a property of this endpoint, honored only by an async-capable backend.** `orchestration_mode` names only the deployment's backend; `/start` sets `FIRE_AND_FORGET` delivery and requires an orchestrator that can honor it. A Temporal deployment (`orchestration_mode = "temporal"`) enqueues the run and returns immediately with a `workflow_id`. On the orchestrator-agnostic base (`orchestration_mode = "direct"`, the default — see [Configuration → Orchestration mode](configuration.md)) the in-process orchestrator is blocking-only, so `/start` is **HONEST**: it refuses with a `400` (`StartRequiresAsyncOrchestration`) — use `POST /v1/execute` — rather than silently running blocking and acking. The completion callback fires on the async path.
 
 **Request Body:**
 
@@ -142,7 +142,7 @@ Start a pipeline execution and get its `pipeline_run_id` back with a `202` ack.
 - `finished_at` (null): Always `null`; the pipeline hasn't completed.
 - `main_stuff_name` (null): Always `null`; populated only on the eventual completion callback.
 - `pipe_output` (null): Always `null`; the result isn't ready yet.
-- `workflow_id` (string | null): The orchestrator's workflow ID, when the deployment's `execution_mode` dispatches to a distributed orchestrator (e.g. a Temporal fire-and-forget flavor). `null` for the in-process `direct` mode the base ships.
+- `workflow_id` (string | null): The async orchestrator's workflow ID. A `202` ack is only ever returned by an async-capable backend (e.g. a Temporal flavor), so this carries that orchestrator's id; the in-process `direct` base never acks here — it returns a `400` (`StartRequiresAsyncOrchestration`) instead.
 
 **Errors** follow the same convention as `/execute`: HTTP 4xx/5xx with an [RFC 7807 `application/problem+json`](error-responses.md) body.
 

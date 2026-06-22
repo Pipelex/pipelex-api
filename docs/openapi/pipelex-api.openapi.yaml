@@ -181,40 +181,23 @@ paths:
       description: 'Execute a method synchronously and return its full output (MTHDS Protocol `POST /execute`).
 
 
-        The backend is selected by the resolved `execution_mode` (deployment default + optional
+        The backend is selected by the resolved `orchestration_mode` (deployment default + optional
 
-        policy-gated per-request override via the `execution_mode` extra), symmetric with `/start` —
+        policy-gated per-request override via the `orchestration_mode` extra), symmetric with `/start` —
 
-        not by `boot_orchestrator`. A fire-and-forget mode is refused with a 400 (`/execute` is
+        not by `boot_orchestrator`. `/execute` is synchronous, so it dispatches with `BLOCKING` delivery
 
-        synchronous). Pipelex domain failures propagate untouched: the global `PipelexError` handler
+        regardless of backend (wait-semantics is endpoint-set, never requestable). Pipelex domain
 
-        in `api.exception_handlers` turns them into an RFC 7807 problem response.'
+        failures propagate untouched: the global `PipelexError` handler in `api.exception_handlers`
+
+        turns them into an RFC 7807 problem response.'
       operationId: execute_v1_execute_post
       requestBody:
         content:
           application/json:
             schema:
               $defs:
-                PipelexExecutionMode:
-                  type: string
-                  enum:
-                  - direct
-                  - temporal_blocking
-                  - temporal_fire_and_forget
-                  - mistral_native
-                  title: PipelexExecutionMode
-                  description: "How a Pipelex pipe runs inside a host runtime activity.\n\nDIRECT: in-process; no Temporal\
-                    \ involved on Pipelex's side; activity blocks\n    until the pipe completes. Fastest feedback, simplest\
-                    \ ops.\nTEMPORAL_BLOCKING: dispatch the pipe as a Pipelex Temporal workflow; the\n    activity awaits\
-                    \ completion. Pipe runs durably on Pipelex's worker\n    fleet. Requires the pipelex-temporal plugin.\n\
-                    TEMPORAL_FIRE_AND_FORGET: dispatch the pipe as a Pipelex Temporal workflow\n    and return immediately\
-                    \ with the workflow_id. Activity does NOT wait;\n    completion is signalled out-of-band via DeliveryAssignment\
-                    \ (webhook /\n    storage). Same dep requirements as TEMPORAL_BLOCKING.\n    ``delivery_assignment_dump``\
-                    \ is required.\nMISTRAL_NATIVE: decompose the pipe into native Mistral Workflows primitives\n    on the\
-                    \ same worker — controllers as child workflows, leaves as\n    activities. Surfaces per-step retry / signals\
-                    \ / cancellation through\n    the host-runtime APIs. Requires the\n    ``pipelex-mistralai-workflows``\
-                    \ package."
                 StuffContentAbstract:
                   properties: {}
                   type: object
@@ -280,18 +263,21 @@ paths:
                   - type: string
                   - type: 'null'
                   title: Dynamic Output Concept Ref
-                execution_mode:
+                orchestration_mode:
                   anyOf:
-                  - $ref: '#/$defs/PipelexExecutionMode'
+                  - type: string
                   - type: 'null'
-                  description: PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — request the execution mode for this
-                    run (`direct`, `temporal_blocking`, `temporal_fire_and_forget`, `mistral_native`). Honored ONLY when the
-                    deployment sets `allow_request_execution_mode_override = true` in its `api.toml`; otherwise a mode that
-                    differs from the deployment default is refused with a 403. Omit it to use the deployment default.
+                  title: Orchestration Mode
+                  description: 'PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — request the orchestration mode (the
+                    backend) for this run. An OPEN string token: `direct` (in-process, the base default), `temporal`, and
+                    any other plugin-provided token are accepted; an unregistered token is refused at dispatch. The delivery
+                    axis (blocking vs fire-and-forget) is endpoint-set, never requestable. Honored ONLY when the deployment
+                    sets `allow_request_orchestration_mode_override = true` in its `api.toml`; otherwise a token that differs
+                    from the deployment default is refused with a 403. Omit it to use the deployment default.'
               additionalProperties: true
               type: object
               title: PipelexApiExecuteRequest
-              description: 'Documented body of `POST /execute` — the protocol''s `RunRequest` plus THIS server''s `execution_mode`
+              description: 'Documented body of `POST /execute` — the protocol''s `RunRequest` plus THIS server''s `orchestration_mode`
                 extension.
 
 
@@ -299,7 +285,7 @@ paths:
 
                 `Request` (kajson decoding), so FastAPI cannot infer the body type; this model documents the
 
-                per-request `execution_mode` override the route actually honors (parsed by `PipelineApiExtras`).'
+                per-request `orchestration_mode` override the route actually honors (parsed by `PipelineApiExtras`).'
         required: true
       responses:
         '200':
@@ -328,21 +314,21 @@ paths:
         RFC 7807 problem response.
 
 
-        Non-blocking (fire-and-forget) is a property of THIS endpoint, not of the deployment: a
+        Fire-and-forget is a property of THIS endpoint (its delivery axis), honored only by an
 
-        deployment configures the synchronous backend (`execution_mode`) once, and `/start` derives
+        async-capable backend. A deployment configures the backend (`orchestration_mode`) once; `/start`
 
-        its fire-and-forget variant. A Temporal deployment (`execution_mode = "temporal_blocking"`)
+        sets `FIRE_AND_FORGET` delivery and checks the resolved orchestrator can honor it. A Temporal
 
-        therefore enqueues the run and returns immediately with a `workflow_id`; on the
+        deployment (`orchestration_mode = "temporal"`) enqueues the run and returns immediately with a
 
-        orchestrator-agnostic base (`execution_mode = "direct"`, the default) there is no async
+        `workflow_id`. On the orchestrator-agnostic base (`orchestration_mode = "direct"`, the default)
 
-        backend, so the run executes in-process and the request blocks until it completes, then
+        the in-process orchestrator is blocking-only, so `/start` is HONEST: it refuses with a `400`
 
-        answers `202` with `workflow_id: null`. The completion callback (`callback_urls` / storage
+        (`StartRequiresAsyncOrchestration`) — use `/execute` — rather than silently blocking and acking.
 
-        delivery) fires on the same path in both cases.'
+        The completion callback (`callback_urls` / storage delivery) fires on the async path.'
       operationId: start_v1_start_post
       requestBody:
         content:
@@ -469,7 +455,7 @@ paths:
         \ of backend — the in-process arm from the\n  bundle's `ValidateBundleError`, the dispatched arm recovered from the\
         \ worker — so the route\n  maps it to a 200 by matching the returned verdict, never by catching an exception.\n- **No\
         \ verdict (non-2xx):** a malformed request body or an `mthds_sources` length mismatch is a\n  request-shape **422**;\
-        \ a forbidden `execution_mode` override is a **403**; a host-wiring\n  programmer error or a genuine orchestrator\
+        \ a forbidden `orchestration_mode` override is a **403**; a host-wiring\n  programmer error or a genuine orchestrator\
         \ fault is a **5xx**; auth is **401/403**. All are\n  RFC 7807 `application/problem+json` rendered by the global handler\
         \ in\n  `api.exception_handlers` — routes never shape them."
       operationId: validate_mthds_v1_validate_post
@@ -2772,23 +2758,6 @@ components:
       required:
       - domain
       title: PipelexBundleBlueprint
-    PipelexExecutionMode:
-      type: string
-      enum:
-      - direct
-      - temporal_blocking
-      - temporal_fire_and_forget
-      - mistral_native
-      title: PipelexExecutionMode
-      description: "How a Pipelex pipe runs inside a host runtime activity.\n\nDIRECT: in-process; no Temporal involved on\
-        \ Pipelex's side; activity blocks\n    until the pipe completes. Fastest feedback, simplest ops.\nTEMPORAL_BLOCKING:\
-        \ dispatch the pipe as a Pipelex Temporal workflow; the\n    activity awaits completion. Pipe runs durably on Pipelex's\
-        \ worker\n    fleet. Requires the pipelex-temporal plugin.\nTEMPORAL_FIRE_AND_FORGET: dispatch the pipe as a Pipelex\
-        \ Temporal workflow\n    and return immediately with the workflow_id. Activity does NOT wait;\n    completion is signalled\
-        \ out-of-band via DeliveryAssignment (webhook /\n    storage). Same dep requirements as TEMPORAL_BLOCKING.\n    ``delivery_assignment_dump``\
-        \ is required.\nMISTRAL_NATIVE: decompose the pipe into native Mistral Workflows primitives\n    on the same worker\
-        \ — controllers as child workflows, leaves as\n    activities. Surfaces per-step retry / signals / cancellation through\n\
-        \    the host-runtime APIs. Requires the\n    ``pipelex-mistralai-workflows`` package."
     PipelexModelDeck:
       properties:
         models:
@@ -3486,14 +3455,16 @@ components:
             adds a `rendered_<format>` field (e.g. `rendered_markdown`) to the 200 verdict, on both the valid and invalid
             arms. Unknown/unsupported tokens are silently ignored (presentation hint, not part of the verdict contract); the
             default empty list renders nothing and the response is unchanged.'
-        execution_mode:
+        orchestration_mode:
           anyOf:
-          - $ref: '#/components/schemas/PipelexExecutionMode'
+          - type: string
           - type: 'null'
-          description: Optional per-request execution-mode override for the validation backend (same plumbing as `/start`).
-            `direct` validates in-process; a `temporal_*` mode dispatches the whole job to a worker. Honored only when the
-            deployment sets `allow_request_execution_mode_override = true` in its `api.toml`; otherwise a mode that differs
-            from the deployment default is refused with a 403. Omitted → the deployment default.
+          title: Orchestration Mode
+          description: 'Optional per-request orchestration-mode (backend) override for the validation dispatch (same plumbing
+            as `/start`). An OPEN string token: `direct` validates in-process; a `temporal` mode dispatches the whole job
+            to a worker; any plugin-provided token is accepted and an unregistered one is refused at dispatch. Honored only
+            when the deployment sets `allow_request_orchestration_mode_override = true` in its `api.toml`; otherwise a token
+            that differs from the deployment default is refused with a 403. Omitted → the default.'
       type: object
       required:
       - mthds_contents
