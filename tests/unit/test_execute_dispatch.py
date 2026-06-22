@@ -1,14 +1,14 @@
-"""`/execute` dispatches by execution_mode through the OrchestratorRegistry (full synchronous output).
+"""`/execute` dispatches by orchestration_mode through the OrchestratorRegistry (full synchronous output).
 
 Pins the dispatch + output-mapping independent of any real backend, with a stub orchestrator: the
-runner resolves the deployment's execution_mode, dispatches the locally-built PipeJob through the
-orchestrator the registry holds for it, and rehydrates the orchestrator's JSON-safe output back into
-the full PipeOutput the `/execute` response wraps — exercising the real serialize -> rehydrate
-round-trip (`serialize_completed_output` -> `hydrate_working_memory`), including the `graph_spec`
-`strict=False` re-validation branch. Also pins the policy-gated per-request override (symmetric with
-`/start`), the fire-and-forget refusal (400, `/execute` is synchronous), and the no-orchestrator case
-(`MissingOrchestratorError`). The boot slot is never used — every mode dispatches through the per-call
-registry.
+runner resolves the deployment's orchestration_mode, dispatches the locally-built PipeJob through the
+orchestrator the registry holds for it with `DeliveryMode.BLOCKING`, and rehydrates the orchestrator's
+JSON-safe output back into the full PipeOutput the `/execute` response wraps — exercising the real
+serialize -> rehydrate round-trip (`serialize_completed_output` -> `hydrate_working_memory`), including
+the `graph_spec` `strict=False` re-validation branch. Also pins the policy-gated per-request override
+(symmetric with `/start`) and the no-orchestrator case (`MissingOrchestratorError`). The boot slot is
+never used — every mode dispatches through the per-call registry. (Delivery is endpoint-set, never
+requestable, so `/execute` has no fire-and-forget refusal — that axis is `/start`'s.)
 """
 
 from datetime import UTC, datetime
@@ -22,8 +22,8 @@ from pipelex.graph.graphspec import GraphSpec
 from pipelex.pipe_run.delivery_assignment import DeliveryAssignment
 from pipelex.pipe_run.pipe_job import PipeJob
 from pipelex.plugins.orchestrator_registry import OrchestratorRegistry
+from pipelex.runtime_bridge.delivery_mode import DeliveryMode
 from pipelex.runtime_bridge.exceptions import MissingOrchestratorError
-from pipelex.runtime_bridge.execution_mode import PipelexExecutionMode
 from pipelex.runtime_bridge.payloads import PipelexPipeRunOutput
 from pipelex.runtime_bridge.serialization import serialize_completed_output
 from pytest_mock import MockerFixture
@@ -42,15 +42,17 @@ class _StubOrchestrator:
 
     Returning via `serialize_completed_output` is the point — it produces the real JSON-safe
     `PipelexPipeRunOutput` (the same shape that crosses the Temporal worker boundary), so the route
-    exercises the production serialize -> rehydrate round-trip instead of a hand-built payload.
+    exercises the production serialize -> rehydrate round-trip instead of a hand-built payload. It
+    records the `delivery` it was dispatched with so a test can assert `/execute` always passes BLOCKING.
     """
 
-    def __init__(self, *, graph_spec: GraphSpec | None = None) -> None:
+    def __init__(self, *, graph_spec: GraphSpec | None = None, supports_fire_and_forget: bool = False) -> None:
         self.calls: list[dict[str, Any]] = []
         self._graph_spec = graph_spec
+        self.supports_fire_and_forget = supports_fire_and_forget
 
-    async def run(self, *, pipe_job: PipeJob, delivery_assignment: DeliveryAssignment | None) -> PipelexPipeRunOutput:
-        self.calls.append({"pipe_code": pipe_job.pipe.code, "delivery_assignment": delivery_assignment})
+    async def run(self, *, pipe_job: PipeJob, delivery_assignment: DeliveryAssignment | None, delivery: DeliveryMode) -> PipelexPipeRunOutput:
+        self.calls.append({"pipe_code": pipe_job.pipe.code, "delivery_assignment": delivery_assignment, "delivery": delivery})
         return serialize_completed_output(
             pipe_output=PipeOutput(
                 working_memory=pipe_job.get_working_memory(),
@@ -68,23 +70,23 @@ def _build_client() -> TestClient:
     return TestClient(app)
 
 
-def _register_stub(mocker: MockerFixture, *, mode: PipelexExecutionMode, stub: _StubOrchestrator) -> None:
+def _register_stub(mocker: MockerFixture, *, mode: str, stub: _StubOrchestrator) -> None:
     """Patch the orchestrator registry so the route's mode lookup finds `stub` for `mode`."""
     registry = OrchestratorRegistry({mode: stub})
     mocker.patch(f"{_PIPELINE_NS}.get_orchestrator_registry", return_value=registry)
 
 
-def _force_config(mocker: MockerFixture, *, mode: PipelexExecutionMode, allow_override: bool) -> None:
-    """Patch the api config so `resolve_execution_mode` sees `mode` as the deployment default + policy."""
-    config = ApiConfig(execution_mode=mode, allow_request_execution_mode_override=allow_override)
+def _force_config(mocker: MockerFixture, *, mode: str, allow_override: bool) -> None:
+    """Patch the api config so `resolve_orchestration_mode` sees `mode` as the deployment default + policy."""
+    config = ApiConfig(orchestration_mode=mode, allow_request_orchestration_mode_override=allow_override)
     mocker.patch(f"{_PIPELINE_NS}.get_api_config", return_value=config)
 
 
 class TestExecuteDispatch:
     def test_direct_dispatch_returns_rehydrated_full_output(self, mocker: MockerFixture) -> None:
-        """DIRECT (the packaged default) dispatches through the registry and returns the full output."""
+        """`direct` (the packaged default) dispatches through the registry and returns the full output."""
         stub = _StubOrchestrator()
-        _register_stub(mocker, mode=PipelexExecutionMode.DIRECT, stub=stub)
+        _register_stub(mocker, mode="direct", stub=stub)
 
         client = _build_client()
         response = client.post(
@@ -99,9 +101,11 @@ class TestExecuteDispatch:
         # rehydrated working memory the /execute response wraps.
         root = body["pipe_output"]["working_memory"]["root"]
         assert root["text"]["content"]["text"] == "hello"
-        # The dispatch reached the registered orchestrator; /execute is synchronous, so no delivery.
+        # The dispatch reached the registered orchestrator; /execute is synchronous, so no delivery
+        # target and BLOCKING delivery (never the caller's to choose).
         assert len(stub.calls) == 1
         assert stub.calls[0]["delivery_assignment"] is None
+        assert stub.calls[0]["delivery"] is DeliveryMode.BLOCKING
 
     def test_graph_spec_survives_strict_false_rehydration(self, mocker: MockerFixture) -> None:
         """A non-None graph_spec round-trips through the helper's `strict=False` reverse of `model_dump(mode="json")`.
@@ -113,7 +117,7 @@ class TestExecuteDispatch:
         """
         graph_spec = GraphSpec(graph_id="g-1", created_at=datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC))
         stub = _StubOrchestrator(graph_spec=graph_spec)
-        _register_stub(mocker, mode=PipelexExecutionMode.DIRECT, stub=stub)
+        _register_stub(mocker, mode="direct", stub=stub)
 
         client = _build_client()
         response = client.post(
@@ -126,10 +130,10 @@ class TestExecuteDispatch:
         assert response.json()["pipe_output"]["graph_spec"]["graph_id"] == "g-1"
 
     def test_per_request_override_honored_when_policy_allows(self, mocker: MockerFixture) -> None:
-        """With override ON, a per-request execution_mode is resolved and dispatched (symmetric with /start)."""
-        _force_config(mocker, mode=PipelexExecutionMode.DIRECT, allow_override=True)
+        """With override ON, a per-request orchestration_mode is resolved and dispatched (symmetric with /start)."""
+        _force_config(mocker, mode="direct", allow_override=True)
         stub = _StubOrchestrator()
-        _register_stub(mocker, mode=PipelexExecutionMode.TEMPORAL_BLOCKING, stub=stub)
+        _register_stub(mocker, mode="temporal", stub=stub)
 
         client = _build_client()
         response = client.post(
@@ -138,50 +142,31 @@ class TestExecuteDispatch:
                 "pipe_code": "echo",
                 "mthds_contents": [VALID_MTHDS],
                 "inputs": {"text": "hello"},
-                "execution_mode": PipelexExecutionMode.TEMPORAL_BLOCKING,
+                "orchestration_mode": "temporal",
             },
         )
 
         assert response.status_code == 200, response.text
-        # The requested (non-default) mode was honored: dispatch reached the temporal-keyed stub.
+        # The requested (non-default) backend was honored: dispatch reached the temporal-keyed stub.
         assert len(stub.calls) == 1
 
-    def test_forbidden_execution_mode_override_is_a_403(self) -> None:
-        """The route threads execution_mode into the same override policy /start uses: a forbidden override is a 403."""
+    def test_forbidden_orchestration_mode_override_is_a_403(self) -> None:
+        """The route threads orchestration_mode into the same override policy /start uses: a forbidden override is a 403."""
         client = _build_client()
-        # Packaged default is DIRECT with override OFF; forcing a different mode is refused before dispatch.
+        # Packaged default is `direct` with override OFF; forcing a different backend is refused before dispatch.
         response = client.post(
             "/v1/execute",
             json={
                 "pipe_code": "echo",
                 "mthds_contents": [VALID_MTHDS],
                 "inputs": {"text": "hello"},
-                "execution_mode": PipelexExecutionMode.TEMPORAL_BLOCKING,
+                "orchestration_mode": "temporal",
             },
         )
 
         assert response.status_code == 403, response.text
         assert response.headers["content-type"].startswith("application/problem+json")
-        assert response.json()["error_type"] == "ExecutionModeOverrideForbidden"
-
-    def test_fire_and_forget_is_rejected_with_400(self, mocker: MockerFixture) -> None:
-        """A resolved fire-and-forget mode on /execute is refused with a 400 — /execute is synchronous."""
-        # Override ON so the requested f&f passes the policy check; /execute itself then refuses it.
-        _force_config(mocker, mode=PipelexExecutionMode.DIRECT, allow_override=True)
-        client = _build_client()
-        response = client.post(
-            "/v1/execute",
-            json={
-                "pipe_code": "echo",
-                "mthds_contents": [VALID_MTHDS],
-                "inputs": {"text": "hello"},
-                "execution_mode": PipelexExecutionMode.TEMPORAL_FIRE_AND_FORGET,
-            },
-        )
-
-        assert response.status_code == 400, response.text
-        assert response.headers["content-type"].startswith("application/problem+json")
-        assert response.json()["error_type"] == "FireAndForgetNotSupported"
+        assert response.json()["error_type"] == "OrchestrationModeOverrideForbidden"
 
     @pytest.mark.asyncio
     async def test_missing_orchestrator_for_resolved_mode_raises(self, mocker: MockerFixture) -> None:
@@ -194,5 +179,5 @@ class TestExecuteDispatch:
                 mthds_contents=[VALID_MTHDS],
                 inputs={"text": "hello"},
             )
-        # The packaged default is DIRECT; the empty registry holds no orchestrator for it.
-        assert exc_info.value.mode is PipelexExecutionMode.DIRECT
+        # The packaged default is `direct`; the empty registry holds no orchestrator for it.
+        assert exc_info.value.mode == "direct"

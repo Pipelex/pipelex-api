@@ -5,7 +5,6 @@ from fastapi.responses import JSONResponse
 from pipelex.base_exceptions import ErrorReport, ValidationErrorItem
 from pipelex.pipeline.validation_render import format_validate_markdown, render_invalid_validation_markdown
 from pipelex.pipeline.validation_report import PipelexValidationReport
-from pipelex.runtime_bridge.execution_mode import PipelexExecutionMode
 from pipelex.tools.typing.pydantic_utils import empty_list_factory_of
 from pipelex.types import StrEnum
 from pydantic import BaseModel, Field, model_validator
@@ -64,13 +63,14 @@ class ValidateRequest(MthdsContentsRequest):
             "part of the verdict contract); the default empty list renders nothing and the response is unchanged."
         ),
     )
-    execution_mode: PipelexExecutionMode | None = Field(
+    orchestration_mode: str | None = Field(
         default=None,
         description=(
-            "Optional per-request execution-mode override for the validation backend (same plumbing as `/start`). "
-            "`direct` validates in-process; a `temporal_*` mode dispatches the whole job to a worker. Honored only "
-            "when the deployment sets `allow_request_execution_mode_override = true` in its `api.toml`; otherwise a "
-            "mode that differs from the deployment default is refused with a 403. Omitted → the deployment default."
+            "Optional per-request orchestration-mode (backend) override for the validation dispatch (same plumbing as "
+            "`/start`). An OPEN string token: `direct` validates in-process; a `temporal` mode dispatches the whole "
+            "job to a worker; any plugin-provided token is accepted and an unregistered one is refused at dispatch. "
+            "Honored only when the deployment sets `allow_request_orchestration_mode_override = true` in its `api.toml`; "
+            "otherwise a token that differs from the deployment default is refused with a 403. Omitted → the default."
         ),
     )
 
@@ -170,7 +170,7 @@ async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
       bundle's `ValidateBundleError`, the dispatched arm recovered from the worker — so the route
       maps it to a 200 by matching the returned verdict, never by catching an exception.
     - **No verdict (non-2xx):** a malformed request body or an `mthds_sources` length mismatch is a
-      request-shape **422**; a forbidden `execution_mode` override is a **403**; a host-wiring
+      request-shape **422**; a forbidden `orchestration_mode` override is a **403**; a host-wiring
       programmer error or a genuine orchestrator fault is a **5xx**; auth is **401/403**. All are
       RFC 7807 `application/problem+json` rendered by the global handler in
       `api.exception_handlers` — routes never shape them.
@@ -178,14 +178,14 @@ async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
     # Opt-in presentation formats (D-D): resolved once, threaded into both 200 arms. Empty by
     # default → no `rendered_*` field, response byte-identical to the no-`render` request.
     requested_formats = _resolve_render_formats(request_data.render)
-    # Verdict-as-value: the runner resolves the execution mode and dispatches through the bundle
+    # Verdict-as-value: the runner resolves the orchestration mode and dispatches through the bundle
     # validator registry, returning the verdict. A produced invalid verdict is an `ErrorReport`
     # (→ 200 InvalidReport); only a no-verdict fault propagates to the global problem+json handler.
     verdict = await ApiRunner().validate_verdict(
         mthds_contents=request_data.mthds_contents,
         mthds_sources=request_data.mthds_sources,
         allow_signatures=request_data.allow_signatures,
-        requested_execution_mode=request_data.execution_mode,
+        requested_orchestration_mode=request_data.orchestration_mode,
     )
     if not isinstance(verdict, PipelexValidationReport):
         return _invalid_report_response(verdict, requested_formats=requested_formats)

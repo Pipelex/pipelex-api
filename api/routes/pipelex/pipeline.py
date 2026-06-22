@@ -18,14 +18,14 @@ from pipelex.pipe_run.pipe_run_protocol import PipeRunProtocol
 from pipelex.pipeline.pipeline_response import PipelexRunResultExecute, PipelexRunResultStart, RunState
 from pipelex.pipeline.pipeline_run_setup import pipeline_run_setup
 from pipelex.pipeline.runner import PipelexMTHDSProtocol
+from pipelex.runtime_bridge.delivery_mode import DeliveryMode
 from pipelex.runtime_bridge.exceptions import MissingBundleValidatorError, MissingOrchestratorError
-from pipelex.runtime_bridge.execution_mode import PipelexExecutionMode
 from pipelex.runtime_bridge.primitives.hydration import hydrate_working_memory
 from pipelex.system.environment import get_required_env
 from pydantic import ValidationError
 from typing_extensions import override
 
-from api.api_config import get_api_config, resolve_execution_mode
+from api.api_config import get_api_config, resolve_orchestration_mode
 from api.error_types import ErrorType
 from api.errors import raise_bad_request, raise_validation_error
 from api.logging_context import get_request_id
@@ -106,67 +106,43 @@ def _pipe_output_from_run_output(run_output: PipelexPipeRunOutput) -> PipeOutput
     )
 
 
-def _async_start_mode(mode: PipelexExecutionMode) -> PipelexExecutionMode:
-    """The execution mode `POST /start` dispatches for a deployment configured with `mode`.
-
-    Fire-and-forget vs blocking is a property of the *endpoint*, not of the deployment:
-    `/execute` and `/validate` are synchronous and dispatch `execution_mode` as-is, while
-    `/start` is asynchronous and dispatches the *fire-and-forget* sibling of the configured
-    backend when one exists. Today only Temporal has a fire-and-forget variant, so
-    `temporal_blocking` maps to `temporal_fire_and_forget`; `direct` and `mistral_native` have
-    none, so `/start` dispatches them unchanged and blocks until completion — `direct` runs
-    in-process and answers `202` with `workflow_id=None`, while `mistral_native` runs per-call and
-    answers with the non-null `workflow_id` its orchestrator returns (the run id). This keeps a
-    deployment's single `execution_mode` coherent across every endpoint — it names the synchronous
-    backend, and the async variant is derived here rather than configured.
-
-    A `temporal_fire_and_forget` input maps to itself (idempotent), but it is rejected as a
-    *configured* `execution_mode` (`ApiConfig`); this arm therefore only fires for a per-request
-    override that the deployment policy allows.
-
-    Kept a route-local mapping (not a core enum property) to stay a pipelex-api-only concern;
-    promote it onto `PipelexExecutionMode` if another consumer ever needs the same derivation.
-    """
-    match mode:
-        case PipelexExecutionMode.TEMPORAL_BLOCKING | PipelexExecutionMode.TEMPORAL_FIRE_AND_FORGET:
-            return PipelexExecutionMode.TEMPORAL_FIRE_AND_FORGET
-        case PipelexExecutionMode.DIRECT | PipelexExecutionMode.MISTRAL_NATIVE:
-            return mode
-
-
 class _OrchestratorPipeRun(PipeRunProtocol):
     """Adapts a mode-selected orchestrator to the `PipeRunProtocol` the base `execute` drives.
 
     `ApiRunner.execute` injects one of these as `self._pipe_run` so the base `execute` retains
     ALL of its run lifecycle (library setup/teardown, tracer close, pipeline-manager cleanup,
     telemetry, error mapping) while the actual dispatch goes through the per-request
-    `execution_mode`'s orchestrator instead of the boot-global pipe-run slot. The orchestrator's
-    JSON-safe output is rehydrated back into the rich `PipeOutput` the base expects.
+    `orchestration_mode`'s orchestrator instead of the boot-global pipe-run slot. The
+    orchestrator's JSON-safe output is rehydrated back into the rich `PipeOutput` the base expects.
+
+    `delivery` is the endpoint-chosen wait-semantics axis threaded into `orchestrator.run`;
+    `/execute` always constructs this with `DeliveryMode.BLOCKING` (it returns the full output).
     """
 
-    def __init__(self, *, orchestrator: OrchestratorProtocol) -> None:
+    def __init__(self, *, orchestrator: OrchestratorProtocol, delivery: DeliveryMode) -> None:
         self._orchestrator = orchestrator
+        self._delivery = delivery
 
     @override
     async def run(self, pipe_job: PipeJob, *, delivery_assignment: DeliveryAssignment | None = None) -> PipeOutput:
-        run_output = await self._orchestrator.run(pipe_job=pipe_job, delivery_assignment=delivery_assignment)
+        run_output = await self._orchestrator.run(pipe_job=pipe_job, delivery_assignment=delivery_assignment, delivery=self._delivery)
         return _pipe_output_from_run_output(run_output)
 
 
 class ApiRunner(PipelexMTHDSProtocol):
     """API runner that dispatches `execute`, `start`, and `validate` through the per-call plugin registries.
 
-    Every surface resolves the deployment's `execution_mode` (config default + optional
+    Every surface resolves the deployment's `orchestration_mode` (config default + optional
     per-request override) and dispatches through a per-call hub registry: `execute` runs a
-    top-level pipe synchronously through the `OrchestratorRegistry` and returns the full
-    output, `start` runs one asynchronously through the same registry, `validate_verdict`
-    produces a validation verdict through the `BundleValidatorRegistry`. On the
-    orchestrator-agnostic base that means DIRECT in-process; a `temporal_*` mode dispatches
-    to a worker when `pipelex-temporal` is installed and selected. The base names no
-    orchestrator and imports no orchestrator SDK; a mode with no registered arm fails loud
-    with the matching `Missing*Error` (carrying the install hint). Dispatch changes the
-    BACKEND, never the artifact shapes — every operation answers with the same canonical
-    models as the local runtime.
+    top-level pipe through the `OrchestratorRegistry` with `DeliveryMode.BLOCKING` and returns the
+    full output, `start` runs one with `DeliveryMode.FIRE_AND_FORGET` through the same registry,
+    `validate_verdict` produces a validation verdict through the `BundleValidatorRegistry`. On the
+    orchestrator-agnostic base that means `direct` in-process; a `temporal` mode dispatches to a
+    worker when `pipelex-temporal` is installed and selected. The base names no orchestrator and
+    imports no orchestrator SDK; a mode with no registered arm fails loud with the matching
+    `Missing*Error` (carrying the install hint). Delivery is endpoint-intrinsic — the caller never
+    chooses it; only the backend is resolved per request. Dispatch changes the BACKEND, never the
+    artifact shapes — every operation answers with the same canonical models as the local runtime.
     """
 
     @override
@@ -180,46 +156,40 @@ class ApiRunner(PipelexMTHDSProtocol):
         dynamic_output_concept_ref: str | None = None,
         extra: dict[str, Any] | None = None,
         delivery_assignment: DeliveryAssignment | None = None,
-        requested_execution_mode: PipelexExecutionMode | None = None,
+        requested_orchestration_mode: str | None = None,
     ) -> PipelexRunResultExecute:
-        """Execute a method synchronously, dispatching by the resolved `execution_mode`.
+        """Execute a method synchronously, dispatching by the resolved `orchestration_mode`.
 
-        Symmetric with `start`: the effective `execution_mode` is resolved FIRST (config default
+        Symmetric with `start`: the effective `orchestration_mode` is resolved FIRST (config default
         + optional per-request override, so a forbidden override is refused with a 403 before any
         library load), then the run is dispatched through the hub's `OrchestratorRegistry` instead
-        of the boot-global pipe-run slot. DIRECT runs in-process on this agnostic base; a
-        `temporal_blocking` / `mistral_native` mode dispatches the whole job to a worker and awaits
-        it. A mode with no registered orchestrator fails loud with `MissingOrchestratorError`
-        (carrying the install hint).
+        of the boot-global pipe-run slot. `direct` runs in-process on this agnostic base; a
+        `temporal` mode dispatches the whole job to a worker and awaits it. A mode with no registered
+        orchestrator fails loud with `MissingOrchestratorError` (carrying the install hint).
 
-        `/execute` is synchronous — it returns the full output — so a fire-and-forget resolution is
-        meaningless and is refused with a 400 (`FIRE_AND_FORGET_NOT_SUPPORTED`): use `/start` for
-        fire-and-forget. The refusal comes AFTER the override-policy check, so a forbidden override
-        still 403s first.
+        `/execute` is synchronous — it returns the full output — so it dispatches with
+        `DeliveryMode.BLOCKING` regardless of backend. Wait-semantics is endpoint-intrinsic, never
+        requestable, so there is nothing for the caller to get wrong here (the fire-and-forget axis
+        is `/start`'s, gated there by an honest capability check).
 
         The orchestrator is injected as this runner's `_pipe_run` so the inherited base `execute`
         keeps the entire run lifecycle (library setup/teardown, tracer close, pipeline-manager
         cleanup, telemetry, error mapping); only the dispatch backend and the output rehydration
-        (`_OrchestratorPipeRun`) change. `requested_execution_mode` is the optional per-request mode
-        override (`PipelineApiExtras.execution_mode`).
+        (`_OrchestratorPipeRun`) change. `requested_orchestration_mode` is the optional per-request
+        backend override (`PipelineApiExtras.orchestration_mode`).
         """
-        # Resolve the effective execution mode FIRST — a per-request override the deployment policy
-        # forbids is refused (403) here, before any library load / run registration. Mirrors start().
-        execution_mode = resolve_execution_mode(requested_execution_mode, config=get_api_config())
-        if execution_mode.is_fire_and_forget:
-            msg = (
-                "/execute is synchronous and returns the full output; a fire-and-forget execution_mode "
-                "is not supported here. Use /start for fire-and-forget."
-            )
-            raise_bad_request(msg, error_type=ErrorType.FIRE_AND_FORGET_NOT_SUPPORTED)
-        orchestrator = get_orchestrator_registry().get_optional(mode=execution_mode)
+        # Resolve the effective orchestration mode FIRST — a per-request override the deployment
+        # policy forbids is refused (403) here, before any library load / run registration. Mirrors start().
+        orchestration_mode = resolve_orchestration_mode(requested_orchestration_mode, config=get_api_config())
+        orchestrator = get_orchestrator_registry().get_optional(mode=orchestration_mode)
         if orchestrator is None:
-            raise MissingOrchestratorError(mode=execution_mode)
+            raise MissingOrchestratorError(mode=orchestration_mode)
 
         # Dispatch the run through the mode-selected orchestrator by injecting it as this runner's
         # PipeRun, then delegate to the base execute, which owns the full run lifecycle. The
         # ApiRunner is constructed per request, so mutating _pipe_run here is request-scoped.
-        self._pipe_run = _OrchestratorPipeRun(orchestrator=orchestrator)
+        # `/execute` is synchronous, so delivery is BLOCKING.
+        self._pipe_run = _OrchestratorPipeRun(orchestrator=orchestrator, delivery=DeliveryMode.BLOCKING)
         return await super().execute(
             pipe_code=pipe_code,
             mthds_contents=mthds_contents,
@@ -244,19 +214,25 @@ class ApiRunner(PipelexMTHDSProtocol):
         pipeline_run_id: str | None = None,
         callback_urls: list[str] | None = None,
         request_id: str | None = None,
-        requested_execution_mode: PipelexExecutionMode | None = None,
+        requested_orchestration_mode: str | None = None,
     ) -> PipelexRunResultStart:
         """Start a method execution asynchronously without waiting for completion.
 
         Dispatch is orchestrator-agnostic: the rich `PipeJob` is built locally (so
         `request_id`, `output_multiplicity`, `dynamic_output_concept_ref`, the run
-        registration, and telemetry all survive) and then handed to the orchestrator selected
-        by the fire-and-forget VARIANT of the deployment's resolved `execution_mode`
-        (`_async_start_mode` — `/start` is asynchronous), through the hub's
-        `OrchestratorRegistry`. The base imports no `temporalio` / orchestrator SDK; the
-        Temporal fire-and-forget arm (returning a `workflow_id` immediately) is contributed
-        by the `pipelex-temporal` plugin when installed. A mode with no registered
-        orchestrator fails loud with `MissingOrchestratorError` (carrying the install hint).
+        registration, and telemetry all survive) and then handed to the resolved
+        `orchestration_mode`'s orchestrator with `DeliveryMode.FIRE_AND_FORGET`, through the
+        hub's `OrchestratorRegistry`. The base imports no `temporalio` / orchestrator SDK; the
+        async-capable Temporal arm (returning a `workflow_id` immediately) is contributed by the
+        `pipelex-temporal` plugin when installed.
+
+        `/start` is genuinely fire-and-forget, so it is HONEST about its capability: the resolved
+        mode's orchestrator is looked up and its `supports_fire_and_forget` checked BEFORE any
+        library load. A blocking-only orchestrator (the in-process `direct` base) cannot honor
+        async delivery, so it is refused with a 400 (`START_REQUIRES_ASYNC_ORCHESTRATION`) — use
+        `/execute` — rather than silently running blocking and acking. A mode with no registered
+        orchestrator fails loud with `MissingOrchestratorError` (carrying the install hint), also
+        before any library load.
 
         `pipeline_run_id` is the client-supplied run identifier — this open-source runner
         honors it (protocol: implementations MAY decline it, but then MUST 422;
@@ -267,20 +243,28 @@ class ApiRunner(PipelexMTHDSProtocol):
         extras are parsed by the route layer, so nothing reaches it — a
         non-empty value is an in-process misuse and is rejected. `request_id`
         is an API-layer extra threaded into `JobMetadata.request_id` for log
-        correlation. `requested_execution_mode` is the optional per-request mode override
-        (`PipelineApiExtras.execution_mode`); it is resolved against the deployment's
+        correlation. `requested_orchestration_mode` is the optional per-request backend override
+        (`PipelineApiExtras.orchestration_mode`); it is resolved against the deployment's
         `api.toml` policy and a forbidden override is refused with a 403.
         """
         if extra:
             msg = f"ApiRunner defines no extension args beyond its named ones; got {sorted(extra)}."
             raise PipelineRequestError(msg)
-        # Resolve the effective execution mode FIRST — a per-request override the deployment policy
-        # forbids is refused (403) here, before any library load / run registration is done. `/start`
-        # is asynchronous, so dispatch the fire-and-forget VARIANT of the resolved backend (Temporal
-        # gets its f&f arm; direct/mistral have none and dispatch unchanged, blocking until done —
-        # direct answers 202 with workflow_id=None, mistral with its run id) — the policy gate above
-        # still ran against the configured synchronous mode.
-        execution_mode = _async_start_mode(resolve_execution_mode(requested_execution_mode, config=get_api_config()))
+        # Resolve the effective orchestration mode FIRST — a per-request override the deployment
+        # policy forbids is refused (403) here. Then look up the orchestrator and check its async
+        # capability: `/start` is fire-and-forget, so a blocking-only orchestrator (direct on the
+        # agnostic base) is refused HONESTLY with a 400 instead of silently running blocking and
+        # acking. Both gates run BEFORE pipeline_run_setup so a doomed request never loads a library.
+        orchestration_mode = resolve_orchestration_mode(requested_orchestration_mode, config=get_api_config())
+        orchestrator = get_orchestrator_registry().get_optional(mode=orchestration_mode)
+        if orchestrator is None:
+            raise MissingOrchestratorError(mode=orchestration_mode)
+        if not orchestrator.supports_fire_and_forget:
+            msg = (
+                f"Orchestration mode '{orchestration_mode}' cannot honor fire-and-forget delivery: /start requires an "
+                f"async-capable orchestration, and this deployment has none. Use /execute (synchronous) instead."
+            )
+            raise_bad_request(msg, error_type=ErrorType.START_REQUIRES_ASYNC_ORCHESTRATION)
         created_at = get_current_iso_timestamp()
         pipelex_inputs: PipelineInputs | WorkingMemory | None = cast("PipelineInputs | WorkingMemory | None", inputs)
 
@@ -322,16 +306,13 @@ class ApiRunner(PipelexMTHDSProtocol):
             else [],
         )
 
-        # Dispatch the locally-built job through the hub's OrchestratorRegistry under the resolved
-        # mode — the same final dispatch `run_pipe_via_bridge` performs, but fed the rich PipeJob
-        # instead of the lossy `PipelexPipeRunInput` (which carries no request_id /
-        # output_multiplicity / dynamic_output_concept_ref and skips run registration + telemetry).
-        # DIRECT runs the pipe in-process and answers with workflow_id=None; the Temporal
-        # fire-and-forget arm enqueues and returns the workflow_id immediately.
-        orchestrator = get_orchestrator_registry().get_optional(mode=execution_mode)
-        if orchestrator is None:
-            raise MissingOrchestratorError(mode=execution_mode)
-        run_output = await orchestrator.run(pipe_job=pipe_job, delivery_assignment=delivery_assignment)
+        # Dispatch the locally-built job through the resolved mode's orchestrator (looked up and
+        # capability-checked above) with FIRE_AND_FORGET delivery — the same final dispatch
+        # `run_pipe_via_bridge` performs, but fed the rich PipeJob instead of the lossy
+        # `PipelexPipeRunInput` (which carries no request_id / output_multiplicity /
+        # dynamic_output_concept_ref and skips run registration + telemetry). The async-capable arm
+        # enqueues and returns the workflow_id immediately.
+        run_output = await orchestrator.run(pipe_job=pipe_job, delivery_assignment=delivery_assignment, delivery=DeliveryMode.FIRE_AND_FORGET)
 
         return PipelexRunResultStart(
             pipeline_run_id=resolved_pipeline_run_id,
@@ -346,16 +327,17 @@ class ApiRunner(PipelexMTHDSProtocol):
         mthds_contents: list[str],
         mthds_sources: list[str] | None,
         allow_signatures: bool,
-        requested_execution_mode: PipelexExecutionMode | None,
+        requested_orchestration_mode: str | None,
     ) -> PipelexValidationReport | ErrorReport:
         """Validate MTHDS bundles, returning the verdict as a value (the route maps it to a 200).
 
-        Mode-aware, mirroring `start`: the effective `execution_mode` is resolved FIRST (config
+        Mode-aware, mirroring `start`: the effective `orchestration_mode` is resolved FIRST (config
         default + optional per-request override, so a forbidden override is refused with a 403
         before any library load), then dispatched through the hub's `BundleValidatorRegistry`.
-        DIRECT validates in-process on this agnostic base; a `temporal_*` mode dispatches the
+        `direct` validates in-process on this agnostic base; a `temporal` mode dispatches the
         whole job to a worker (`pipelex-temporal`). A mode with no registered validator fails
-        loud with `MissingBundleValidatorError` (carrying the install hint).
+        loud with `MissingBundleValidatorError` (carrying the install hint). Validation is inherently
+        blocking, so there is no delivery axis here — the registry holds one validator per mode.
 
         Returns the verdict, not a raise: the valid `PipelexValidationReport`, or the structured
         `ErrorReport` an invalid bundle produces (carrying `validation_errors`). A genuine
@@ -372,10 +354,10 @@ class ApiRunner(PipelexMTHDSProtocol):
         """
         # Resolve the effective mode FIRST — a per-request override the deployment policy forbids
         # is refused (403) here, before any validator dispatch / library load. Mirrors start().
-        execution_mode = resolve_execution_mode(requested_execution_mode, config=get_api_config())
-        validator = get_bundle_validator_registry().get_optional(mode=execution_mode)
+        orchestration_mode = resolve_orchestration_mode(requested_orchestration_mode, config=get_api_config())
+        validator = get_bundle_validator_registry().get_optional(mode=orchestration_mode)
         if validator is None:
-            raise MissingBundleValidatorError(mode=execution_mode)
+            raise MissingBundleValidatorError(mode=orchestration_mode)
         library_dirs = [Path(library_dir) for library_dir in self.library_dirs] if self.library_dirs else None
         verdict = await validator.validate_bundles(
             mthds_contents=mthds_contents,
@@ -432,13 +414,13 @@ def _decode_body(body: bytes) -> dict[str, Any]:
 
 
 def _validate_extras(request_data: dict[str, Any]) -> PipelineApiExtras:
-    """Validate API-server-only fields (pipeline_run_id, callback_urls, execution_mode)."""
+    """Validate API-server-only fields (pipeline_run_id, callback_urls, orchestration_mode)."""
     try:
         return PipelineApiExtras.model_validate(
             {
                 "pipeline_run_id": request_data.get("pipeline_run_id"),
                 "callback_urls": request_data.get("callback_urls"),
-                "execution_mode": request_data.get("execution_mode"),
+                "orchestration_mode": request_data.get("orchestration_mode"),
             }
         )
     except ValidationError as exc:
@@ -514,7 +496,7 @@ async def _parse_request(request: Request) -> tuple[RunRequest, PipelineApiExtra
     "/execute",
     response_model=PipelexRunResultExecute,
     # Documented body = the protocol's RunRequest plus THIS server's own
-    # `execution_mode` extension (the route honors a per-request override). The
+    # `orchestration_mode` extension (the route honors a per-request override). The
     # body is read through the raw Request (kajson decoding — see
     # `_parse_request`), so FastAPI cannot infer a typed body parameter;
     # document it explicitly so the committed OpenAPI artifact (and protocol
@@ -530,11 +512,12 @@ async def _parse_request(request: Request) -> tuple[RunRequest, PipelineApiExtra
 async def execute(request: Request) -> JSONResponse:
     """Execute a method synchronously and return its full output (MTHDS Protocol `POST /execute`).
 
-    The backend is selected by the resolved `execution_mode` (deployment default + optional
-    policy-gated per-request override via the `execution_mode` extra), symmetric with `/start` —
-    not by `boot_orchestrator`. A fire-and-forget mode is refused with a 400 (`/execute` is
-    synchronous). Pipelex domain failures propagate untouched: the global `PipelexError` handler
-    in `api.exception_handlers` turns them into an RFC 7807 problem response.
+    The backend is selected by the resolved `orchestration_mode` (deployment default + optional
+    policy-gated per-request override via the `orchestration_mode` extra), symmetric with `/start` —
+    not by `boot_orchestrator`. `/execute` is synchronous, so it dispatches with `BLOCKING` delivery
+    regardless of backend (wait-semantics is endpoint-set, never requestable). Pipelex domain
+    failures propagate untouched: the global `PipelexError` handler in `api.exception_handlers`
+    turns them into an RFC 7807 problem response.
     """
     run_request, extras = await _parse_request(request)
     runner = ApiRunner(user_id=_get_user_id(request))
@@ -545,7 +528,7 @@ async def execute(request: Request) -> JSONResponse:
         output_name=run_request.output_name,
         output_multiplicity=run_request.output_multiplicity,
         dynamic_output_concept_ref=run_request.dynamic_output_concept_ref,
-        requested_execution_mode=extras.execution_mode,
+        requested_orchestration_mode=extras.orchestration_mode,
     )
     return JSONResponse(
         content=response.model_dump(mode="json", serialize_as_any=True, by_alias=True),
@@ -581,14 +564,14 @@ async def start(
     `PipelexError` handler in `api.exception_handlers` turns them into an
     RFC 7807 problem response.
 
-    Non-blocking (fire-and-forget) is a property of THIS endpoint, not of the deployment: a
-    deployment configures the synchronous backend (`execution_mode`) once, and `/start` derives
-    its fire-and-forget variant. A Temporal deployment (`execution_mode = "temporal_blocking"`)
-    therefore enqueues the run and returns immediately with a `workflow_id`; on the
-    orchestrator-agnostic base (`execution_mode = "direct"`, the default) there is no async
-    backend, so the run executes in-process and the request blocks until it completes, then
-    answers `202` with `workflow_id: null`. The completion callback (`callback_urls` / storage
-    delivery) fires on the same path in both cases.
+    Fire-and-forget is a property of THIS endpoint (its delivery axis), honored only by an
+    async-capable backend. A deployment configures the backend (`orchestration_mode`) once; `/start`
+    sets `FIRE_AND_FORGET` delivery and checks the resolved orchestrator can honor it. A Temporal
+    deployment (`orchestration_mode = "temporal"`) enqueues the run and returns immediately with a
+    `workflow_id`. On the orchestrator-agnostic base (`orchestration_mode = "direct"`, the default)
+    the in-process orchestrator is blocking-only, so `/start` is HONEST: it refuses with a `400`
+    (`StartRequiresAsyncOrchestration`) — use `/execute` — rather than silently blocking and acking.
+    The completion callback (`callback_urls` / storage delivery) fires on the async path.
     """
     run_request, extras = parsed
     runner = ApiRunner(user_id=_get_user_id(request))
@@ -602,5 +585,5 @@ async def start(
         pipeline_run_id=extras.pipeline_run_id,
         callback_urls=extras.callback_urls,
         request_id=get_request_id(),
-        requested_execution_mode=extras.execution_mode,
+        requested_orchestration_mode=extras.orchestration_mode,
     )

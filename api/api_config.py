@@ -1,18 +1,20 @@
-"""Pipelex-API deployment config: the top-level execution mode + override policy.
+"""Pipelex-API deployment config: the top-level orchestration mode + override policy.
 
-The runner is orchestrator-agnostic. WHICH mode a top-level ``POST /start``
-dispatches as — ``direct`` in-process (the base default), Temporal
-fire-and-forget, Mistral-native, … — is a *deployment* choice, never a property
-of this open-source base. It is read from a packaged ``api.toml`` (keys at the
-file root — no ``[api]`` wrapper, since :meth:`load_plugin_config` validates the
-whole document against the schema, exactly like ``temporal.toml``), env-layered
-like the main pipelex config and every plugin config (D2): the packaged default
-``api.toml`` (shipped in this wheel) is deep-merged with the env-selected
-``api_{environment}.toml`` and ``api_override.toml`` from ``~/.pipelex`` then the
-project ``.pipelex``, with ``PIPELEX_ENV`` (``runtime_manager.environment``)
-choosing the env file. One image bakes every env file; a deployment flavor (e.g.
-``pipelex-api-hosted``) bakes ``.pipelex/api_{env}.toml`` to flip the default.
-The base names no orchestrator and ships ``execution_mode = "direct"``.
+The runner is orchestrator-agnostic. WHICH orchestrator a top-level run dispatches
+to — ``direct`` in-process (the base default), ``temporal``, ``mistralai-workflows``,
+… — is a *deployment* choice, never a property of this open-source base.
+``orchestration_mode`` is an open string token (core owns ``"direct"``; each plugin
+owns its own); the *delivery* axis (blocking vs fire-and-forget) is endpoint-set, not
+configured here. It is read from a packaged ``api.toml`` (keys at the file root — no
+``[api]`` wrapper, since :meth:`load_plugin_config` validates the whole document
+against the schema, exactly like ``temporal.toml``), env-layered like the main pipelex
+config and every plugin config (D2): the packaged default ``api.toml`` (shipped in this
+wheel) is deep-merged with the env-selected ``api_{environment}.toml`` and
+``api_override.toml`` from ``~/.pipelex`` then the project ``.pipelex``, with
+``PIPELEX_ENV`` (``runtime_manager.environment``) choosing the env file. One image
+bakes every env file; a deployment flavor (e.g. ``pipelex-api-hosted``) bakes
+``.pipelex/api_{env}.toml`` to flip the default. The base names no orchestrator and
+ships ``orchestration_mode = "direct"``.
 
 Why a separate ``api.toml`` and not the core ``pipelex_{env}.toml``: core's
 config is ``extra="forbid"``, so an ``[api]`` section there is rejected at load.
@@ -24,9 +26,8 @@ keeps it symmetric with how ``pipelex-temporal`` self-loads ``temporal.toml``.
 from functools import cache
 from pathlib import Path
 
-from pipelex.runtime_bridge.execution_mode import PipelexExecutionMode
 from pipelex.system.configuration.config_loader import config_manager
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict
 
 from api.error_types import ErrorType
 from api.errors import raise_forbidden
@@ -38,40 +39,24 @@ _PACKAGE_DIR = Path(__file__).resolve().parent
 
 
 class ApiConfig(BaseModel):
-    """The ``[api]`` deployment config: default execution mode + override policy.
+    """The ``[api]`` deployment config: default orchestration mode + override policy.
 
     No field defaults — the packaged ``api.toml`` is the single source of the
     base defaults (mirroring core's "defaults live in the TOML, never in the
     model" discipline). ``extra="forbid"`` so a typo'd key in a baked override
     fails loud at load instead of being silently ignored.
+
+    ``orchestration_mode`` is an open string token (core owns ``"direct"``; each
+    plugin owns its own). It is NOT validated against a closed enum here — an
+    unregistered token is refused at dispatch by ``MissingOrchestratorError``,
+    the single validation point. The delivery axis (blocking vs fire-and-forget)
+    is endpoint-set, never configured, so nothing about wait-semantics lives here.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    execution_mode: PipelexExecutionMode
-    allow_request_execution_mode_override: bool
-
-    @field_validator("execution_mode")
-    @classmethod
-    def _reject_fire_and_forget_default(cls, value: PipelexExecutionMode) -> PipelexExecutionMode:
-        """``execution_mode`` names the deployment's SYNCHRONOUS backend, never a fire-and-forget one.
-
-        Fire-and-forget is derived per-endpoint, not configured: ``/start`` derives the f&f sibling
-        of this mode while ``/execute`` and ``/validate`` dispatch it as-is. A *configured* f&f mode
-        would silently half-break the deployment — every ``/execute`` would ``400``
-        (``FireAndForgetNotSupported``) and ``/validate`` would dispatch f&f to the validator
-        registry. Reject it at load so a baked override fails fast (matching ``extra="forbid"``)
-        instead of booting a broken deployment. A caller may still *request* f&f per request on
-        ``/start`` — that path is gated by the override policy, not by this field.
-        """
-        if value.is_fire_and_forget:
-            msg = (
-                f"execution_mode '{value}' is fire-and-forget, which is derived per-endpoint, not configured. "
-                f"Set the synchronous backend instead (e.g. 'temporal_blocking') — '/start' derives its "
-                f"fire-and-forget variant."
-            )
-            raise ValueError(msg)
-        return value
+    orchestration_mode: str
+    allow_request_orchestration_mode_override: bool
 
 
 def load_api_config() -> ApiConfig:
@@ -94,28 +79,31 @@ def get_api_config() -> ApiConfig:
     at boot), so it is loaded once and cached. ``api.main`` warms this at startup
     so a malformed ``api.toml`` / baked override fails the app fast — the same
     fail-fast posture as ``ERROR_DISCLOSURE``. Tests that need a different mode
-    patch this getter (or call :func:`resolve_execution_mode` with a hand-built
+    patch this getter (or call :func:`resolve_orchestration_mode` with a hand-built
     config) rather than mutating the cache.
     """
     return load_api_config()
 
 
-def resolve_execution_mode(requested: PipelexExecutionMode | None, *, config: ApiConfig) -> PipelexExecutionMode:
-    """Resolve the effective execution mode for a top-level run, applying policy.
+def resolve_orchestration_mode(requested: str | None, *, config: ApiConfig) -> str:
+    """Resolve the effective orchestration mode for a top-level run, applying policy.
 
-    The deployment default (``config.execution_mode``) wins unless the caller
-    supplied a *different* mode AND the deployment opted into per-request
-    override (``allow_request_execution_mode_override``). A caller-supplied mode
-    equal to the default is always honored (it changes nothing). A caller trying
-    to FORCE a different mode on a runner whose policy forbids it is refused with
-    a 403 — so a locked-down Temporal runner can never be coerced into ``direct``
-    (whose whole point would be to bypass distributed execution), and vice versa.
+    The deployment default (``config.orchestration_mode``) wins unless the caller
+    supplied a *different* token AND the deployment opted into per-request
+    override (``allow_request_orchestration_mode_override``). A caller-supplied
+    token equal to the default is always honored (it changes nothing). A caller
+    trying to FORCE a different mode on a runner whose policy forbids it is refused
+    with a 403 — so a locked-down Temporal runner can never be coerced into
+    ``direct`` (whose whole point would be to bypass distributed execution), and
+    vice versa. The token is a plain string compare; an *unregistered* token is
+    not rejected here — that surfaces at dispatch as ``MissingOrchestratorError``.
     """
-    if requested is None or requested == config.execution_mode:
-        return config.execution_mode
-    if config.allow_request_execution_mode_override:
+    if requested is None or requested == config.orchestration_mode:
+        return config.orchestration_mode
+    if config.allow_request_orchestration_mode_override:
         return requested
     msg = (
-        f"This deployment does not allow overriding execution_mode per request (configured mode '{config.execution_mode}', requested '{requested}')."
+        f"This deployment does not allow overriding orchestration_mode per request "
+        f"(configured mode '{config.orchestration_mode}', requested '{requested}')."
     )
-    raise_forbidden(msg, error_type=ErrorType.EXECUTION_MODE_OVERRIDE_FORBIDDEN)
+    raise_forbidden(msg, error_type=ErrorType.ORCHESTRATION_MODE_OVERRIDE_FORBIDDEN)

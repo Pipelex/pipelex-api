@@ -1,11 +1,11 @@
-"""`/validate` dispatches by execution_mode through the BundleValidatorRegistry (verdict-as-value).
+"""`/validate` dispatches by orchestration_mode through the BundleValidatorRegistry (verdict-as-value).
 
 Pins the dispatch+route mapping independent of any real backend, with a stub validator registered
-for a non-direct mode (no `temporalio` import): the runner resolves the deployment's execution_mode,
+for a non-direct mode (no `temporalio` import): the runner resolves the deployment's orchestration_mode,
 dispatches to the validator the registry holds for it, and the route maps the *returned* verdict —
 an `ErrorReport` to a 200 `InvalidReport`, a raised fault to a 5xx. Also pins the no-validator case
-(`MissingBundleValidatorError`) and that the route threads `execution_mode` into the same override
-policy `/start` uses (a forbidden override is a 403). The DIRECT path is covered end-to-end by the
+(`MissingBundleValidatorError`) and that the route threads `orchestration_mode` into the same override
+policy `/start` uses (a forbidden override is a 403). The `direct` path is covered end-to-end by the
 existing `/validate` suite; this proves the dispatch is backend-agnostic, not direct-only.
 """
 
@@ -19,7 +19,6 @@ from fastapi.testclient import TestClient
 from pipelex.base_exceptions import ErrorReport, PipelexConfigError, ValidationErrorCategory, ValidationErrorItem
 from pipelex.plugins.bundle_validator_registry import BundleValidatorRegistry
 from pipelex.runtime_bridge.exceptions import MissingBundleValidatorError
-from pipelex.runtime_bridge.execution_mode import PipelexExecutionMode
 from pytest_mock import MockerFixture
 
 from api.api_config import ApiConfig
@@ -69,14 +68,14 @@ def _build_client() -> TestClient:
 
 
 def _register_stub_for_temporal(mocker: MockerFixture, stub: _StubBundleValidator) -> None:
-    """Make the deployment default to a temporal mode and register `stub` for it — no temporalio import.
+    """Make the deployment default to the `temporal` mode and register `stub` for it — no temporalio import.
 
-    Patches the api config (so the real `resolve_execution_mode` returns the temporal mode by default)
+    Patches the api config (so the real `resolve_orchestration_mode` returns the temporal mode by default)
     and the bundle-validator registry (so the route's mode lookup finds the stub).
     """
-    temporal_config = ApiConfig(execution_mode=PipelexExecutionMode.TEMPORAL_BLOCKING, allow_request_execution_mode_override=False)
+    temporal_config = ApiConfig(orchestration_mode="temporal", allow_request_orchestration_mode_override=False)
     mocker.patch(f"{_PIPELINE_NS}.get_api_config", return_value=temporal_config)
-    registry = BundleValidatorRegistry({PipelexExecutionMode.TEMPORAL_BLOCKING: stub})
+    registry = BundleValidatorRegistry({"temporal": stub})
     mocker.patch(f"{_PIPELINE_NS}.get_bundle_validator_registry", return_value=registry)
 
 
@@ -127,18 +126,19 @@ class TestValidateDispatch:
                 mthds_contents=[VALID_MTHDS],
                 mthds_sources=None,
                 allow_signatures=False,
-                requested_execution_mode=None,
+                requested_orchestration_mode=None,
             )
-        assert exc_info.value.mode is PipelexExecutionMode.DIRECT
+        assert exc_info.value.mode == "direct"
 
-    def test_forbidden_execution_mode_override_is_a_403(self) -> None:
-        """The route threads execution_mode into the same override policy /start uses: a forbidden override is a 403."""
+    def test_forbidden_orchestration_mode_override_is_a_403(self) -> None:
+        """The route threads orchestration_mode into the same override policy /start uses: a forbidden override is a 403."""
         client = _build_client()
-        # Packaged default is DIRECT with override OFF; forcing a different mode is refused before dispatch.
+        # Packaged default is `direct` with override OFF; forcing a different backend is refused before dispatch.
         response = client.post(
             "/v1/validate",
-            json={"mthds_contents": [VALID_MTHDS], "execution_mode": PipelexExecutionMode.TEMPORAL_BLOCKING},
+            json={"mthds_contents": [VALID_MTHDS], "orchestration_mode": "temporal"},
         )
 
         assert response.status_code == 403, response.text
         assert response.headers["content-type"].startswith("application/problem+json")
+        assert response.json()["error_type"] == "OrchestrationModeOverrideForbidden"
