@@ -10,6 +10,8 @@ Execute a Pipelex pipeline with flexible inputs and wait for completion.
 
 **Endpoint:** `POST /v1/execute`
 
+> **Backend selected by `orchestration_mode`.** `/execute` dispatches through the deployment's `orchestration_mode` (config default + optional policy-gated per-request `orchestration_mode` override), symmetric with `/start` — see [Configuration → Orchestration mode](configuration.md). On the orchestrator-agnostic base (`direct`, the default) it runs **in-process**; a `temporal` flavor dispatches the run to a worker and awaits it. `/execute` is **synchronous** (it returns the full output) and always uses `BLOCKING` delivery — wait-semantics is endpoint-set, never requestable, so there is no fire-and-forget option here (use `POST /v1/start`). A per-request backend override is honored only where the deployment sets `allow_request_orchestration_mode_override = true`; otherwise a token differing from the default is refused with a `403`.
+
 **Request Body:**
 
 ```json
@@ -74,9 +76,11 @@ Execute a Pipelex pipeline with flexible inputs and wait for completion.
 
 ### Start Pipeline
 
-Start a pipeline execution without waiting for completion (non-blocking).
+Start a pipeline execution and get its `pipeline_run_id` back with a `202` ack.
 
 **Endpoint:** `POST /v1/start`
+
+> **Fire-and-forget is a property of this endpoint, honored only by an async-capable backend.** `orchestration_mode` names only the deployment's backend; `/start` sets `FIRE_AND_FORGET` delivery and requires an orchestrator that can honor it. A Temporal deployment (`orchestration_mode = "temporal"`) enqueues the run and returns immediately with a `workflow_id`. On the orchestrator-agnostic base (`orchestration_mode = "direct"`, the default — see [Configuration → Orchestration mode](configuration.md)) the in-process orchestrator is blocking-only, so `/start` is **HONEST**: it refuses with a `400` (`StartRequiresAsyncOrchestration`) — use `POST /v1/execute` — rather than silently running blocking and acking. The completion callback fires on the async path.
 
 **Request Body:**
 
@@ -138,7 +142,7 @@ Start a pipeline execution without waiting for completion (non-blocking).
 - `finished_at` (null): Always `null`; the pipeline hasn't completed.
 - `main_stuff_name` (null): Always `null`; populated only on the eventual completion callback.
 - `pipe_output` (null): Always `null`; the result isn't ready yet.
-- `workflow_id` (string | null): The Temporal workflow ID, when Temporal is enabled. `null` otherwise.
+- `workflow_id` (string | null): The async orchestrator's workflow ID. A `202` ack is only ever returned by an async-capable backend (e.g. a Temporal flavor), so this carries that orchestrator's id; the in-process `direct` base never acks here — it returns a `400` (`StartRequiresAsyncOrchestration`) instead.
 
 **Errors** follow the same convention as `/execute`: HTTP 4xx/5xx with an [RFC 7807 `application/problem+json`](error-responses.md) body.
 

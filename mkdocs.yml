@@ -105,6 +105,7 @@ nav:
     - Pipe Builder: pipe-builder.md
     - Pipe Run: pipe-run.md
     - Pipe Validate: pipe-validate.md
+    - MTHDS Tools: mthds-tools.md
     - Error Responses: error-responses.md
     - Contribute:
       - Contributing: contributing.md

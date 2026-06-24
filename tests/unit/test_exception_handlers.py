@@ -2,8 +2,10 @@
 
 These tests register the production handlers on a throwaway FastAPI app whose
 routes raise straight through — `ApiError`, `RequestValidationError`,
-`PipelexError`, bare `TemporalError`, and uncaught `Exception` each end up at
-their respective handler exactly the way the real app routes them.
+`PipelexError`, a bare orchestrator-SDK transport error (handled via a synthetic
+plugin-contributed mapper, proving the F3 seam without importing any orchestrator
+SDK), and uncaught `Exception` each end up at their respective handler exactly
+the way the real app routes them.
 """
 
 import re
@@ -22,13 +24,14 @@ from pipelex.base_exceptions import (
 )
 from pipelex.cogt.inference.error_classification import ProviderErrorMetadata, UserAction, UserActionKind
 from pipelex.cogt.inference.provider_name import ProviderName
+from pipelex.config import get_config
 from pipelex.pipe_run.exceptions import AsyncExecutionNotEnabledError
 from pipelex.pipeline.exceptions import PipelineManagerAlreadyExistsError
+from pipelex.plugins.contract import PLUGIN_API_VERSION
+from pipelex.plugins.registrar import HttpErrorMapperFn, PluginOrigin, PluginRegistrar
 from pipelex.system.exceptions import EnvVarNotFoundError
-from pipelex.temporal.exceptions import WorkflowExecutionError
 from pydantic import BaseModel, ConfigDict
 from pytest_mock import MockerFixture
-from temporalio.exceptions import TemporalError
 from typing_extensions import override
 
 from api.error_types import ErrorType
@@ -132,8 +135,53 @@ class _CallerFacingInputError(PipelexError):
     _authors_caller_facing_message = True
 
 
-class _FakeTemporalTransportError(TemporalError):
-    """A non-`PipelexError` `TemporalError` subclass — a Temporal transport failure."""
+class _SyntheticTransportError(Exception):
+    """A bare orchestrator-SDK-style transport error — NOT a `PipelexError`, no `temporalio`.
+
+    Stands in for the kind of exception an orchestrator plugin contributes a mapper for (e.g.
+    `temporalio.TemporalError`), so the F3 seam — plugin maps a bare transport exception to a
+    structured `ErrorReport`, the API renders it — is exercised without importing any orchestrator SDK.
+    """
+
+
+class _SyntheticOrchestratorError(PipelexError):
+    """An orchestrator failure that IS a `PipelexError` (carries its own `ErrorReport`).
+
+    Stands in for e.g. the Temporal plugin's `WorkflowExecutionError`: Starlette's MRO walk resolves
+    it to `handle_pipelex_error`, never to the transport mapper handler registered for a bare
+    transport exception.
+    """
+
+
+def _synthetic_transport_to_report(exc: Exception) -> ErrorReport:
+    """The mapper an orchestrator plugin would contribute: classify the bare transport fault.
+
+    Mirrors the classification the (now plugin-owned) Temporal transport mapper produces — a
+    retryable, `RUNTIME`-domain `transient` failure.
+    """
+    return ErrorReport(
+        error_type="SyntheticTransportError",
+        message=str(exc),
+        title="Synthetic transport error",
+        type_uri="https://docs.pipelex.com/latest/errors/synthetic-transport-error/",
+        error_category="transient",
+        error_domain=ErrorDomain.RUNTIME,
+        retryable=True,
+    )
+
+
+def _synthetic_http_error_mappers() -> dict[type[Exception], HttpErrorMapperFn]:
+    """Resolve a mapper the way an installed orchestrator plugin would — through the registrar SPI.
+
+    Builds a `PluginRegistrar`, has a synthetic plugin contribute the mapper via
+    `add_http_error_mapper`, and reads it back with `get_http_error_mappers` — exercising the real
+    producer→consumer seam (the same one `api.main` drives at app construction) without installing a
+    plugin or importing an orchestrator SDK.
+    """
+    registrar = PluginRegistrar(config=get_config())
+    registrar.begin_plugin(name="synthetic-transport-plugin", origin=PluginOrigin.BUILTIN, targets_api=PLUGIN_API_VERSION)
+    registrar.add_http_error_mapper(exc_type_provider=lambda: _SyntheticTransportError, to_error_report=_synthetic_transport_to_report)
+    return registrar.get_http_error_mappers()
 
 
 def _report_with_retry(*, status_code: int, retry_after_seconds: float | None) -> ErrorReport:
@@ -214,10 +262,10 @@ async def corrupt_error_route() -> None:
     raise _CorruptReportError(msg)
 
 
-@_router.get("/workflow-error")
-async def workflow_error_route() -> None:
+@_router.get("/orchestrator-pipelex-error")
+async def orchestrator_pipelex_error_route() -> None:
     msg = "the workflow failed"
-    raise WorkflowExecutionError(msg)
+    raise _SyntheticOrchestratorError(msg)
 
 
 @_router.get("/async-execution-not-enabled")
@@ -239,10 +287,10 @@ async def pipeline_run_id_conflict_route() -> None:
     raise PipelineManagerAlreadyExistsError(msg)
 
 
-@_router.get("/temporal-transport-error")
-async def temporal_transport_error_route() -> None:
-    msg = "temporal cluster unreachable"
-    raise _FakeTemporalTransportError(msg)
+@_router.get("/synthetic-transport-error")
+async def synthetic_transport_error_route() -> None:
+    msg = "orchestrator cluster unreachable"
+    raise _SyntheticTransportError(msg)
 
 
 @_router.get("/unexpected-error")
@@ -376,7 +424,12 @@ async def run_state_unexpected_error_route(request: Request) -> None:
     raise RuntimeError(msg)
 
 
-def _build_client(*, raise_server_exceptions: bool = True, disclosure_mode: DisclosureMode = DisclosureMode.VERBOSE) -> TestClient:
+def _build_client(
+    *,
+    raise_server_exceptions: bool = True,
+    disclosure_mode: DisclosureMode = DisclosureMode.VERBOSE,
+    http_error_mappers: dict[type[Exception], HttpErrorMapperFn] | None = None,
+) -> TestClient:
     """Wire a throwaway app with the production handlers and request-id middleware.
 
     `raise_server_exceptions` must be `False` for tests that hit the catch-all
@@ -384,11 +437,13 @@ def _build_client(*, raise_server_exceptions: bool = True, disclosure_mode: Disc
     its handler, so the `TestClient` would otherwise surface the exception
     instead of the sanitized response. `disclosure_mode` is the value
     `register_exception_handlers` captures in the closures it registers for
-    `PipelexError` / `TemporalError`; the default mirrors production
+    `PipelexError` / the mapper handlers; the default mirrors production
     (VERBOSE), tests that exercise STRICT redaction pass it explicitly.
+    `http_error_mappers` are the orchestrator-plugin mappers to register a
+    transport handler per `exc_type` for — defaults to none (the agnostic base).
     """
     app = FastAPI()
-    register_exception_handlers(app, disclosure_mode=disclosure_mode)
+    register_exception_handlers(app, disclosure_mode=disclosure_mode, http_error_mappers=http_error_mappers)
     app.include_router(_router)
     return TestClient(RequestIdMiddleware(app), raise_server_exceptions=raise_server_exceptions)
 
@@ -476,23 +531,37 @@ class TestExceptionHandlers:
         assert "RuntimeError" not in response.text
         assert "something nobody anticipated" not in response.text
 
-    def test_temporal_error_dispatch(self):
-        client = _build_client()
+    def test_orchestrator_error_dispatch(self):
+        # The F3 seam: a synthetic plugin contributes a transport mapper through the registrar SPI,
+        # the app registers one handler per mapped exc_type, and a bare transport error renders the
+        # plugin's classified ErrorReport — all without importing any orchestrator SDK.
+        client = _build_client(http_error_mappers=_synthetic_http_error_mappers())
 
-        # WorkflowExecutionError IS a PipelexError — routed to the PipelexError
-        # handler, so its error_type is the class name, not the transport label.
-        workflow_response = client.get("/workflow-error")
-        assert workflow_response.status_code == 500
-        assert workflow_response.json()["error_type"] == "WorkflowExecutionError"
+        # An orchestrator failure that IS a PipelexError — routed to the PipelexError handler (its
+        # error_type is the class name), NOT the transport mapper handler.
+        pipelex_response = client.get("/orchestrator-pipelex-error")
+        assert pipelex_response.status_code == 500
+        assert pipelex_response.json()["error_type"] == "_SyntheticOrchestratorError"
 
-        # A bare temporalio TemporalError — routed to the dedicated handler,
-        # which authors the transport-transient classification.
-        transport_response = client.get("/temporal-transport-error")
+        # A bare transport error — routed to the plugin's mapper-backed handler, which renders the
+        # transport-transient classification the mapper produced.
+        transport_response = client.get("/synthetic-transport-error")
         assert transport_response.status_code == 500
         transport_body = transport_response.json()
-        assert transport_body["error_type"] == "TemporalTransportError"
+        assert transport_body["error_type"] == "SyntheticTransportError"
         assert transport_body["error_category"] == "transient"
         assert transport_body["retryable"] is True
+
+    def test_unmapped_transport_error_falls_back_to_sanitized_500(self):
+        # Without the orchestrator plugin's mapper (the agnostic base), the same bare transport error
+        # has no dedicated handler and collapses to the sanitized catch-all 500 — never leaking its
+        # class name or message.
+        response = _build_client(raise_server_exceptions=False).get("/synthetic-transport-error")
+        assert response.status_code == 500
+        body = response.json()
+        assert body["error_type"] == "InternalServerError"
+        assert "_SyntheticTransportError" not in response.text
+        assert "orchestrator cluster unreachable" not in response.text
 
     def test_handler_of_handlers_catches_corrupt_report(self):
         # When to_error_report() itself raises, the failure escapes the
@@ -512,8 +581,8 @@ class TestExceptionHandlers:
             ("GET", "/env-error", None, 500),
             ("GET", "/input-error", None, 422),
             ("GET", "/llm-error", None, 429),
-            ("GET", "/workflow-error", None, 500),
-            ("GET", "/temporal-transport-error", None, 500),
+            ("GET", "/orchestrator-pipelex-error", None, 500),
+            ("GET", "/synthetic-transport-error", None, 500),
             ("GET", "/corrupt-error", None, 500),
             ("GET", "/unexpected-error", None, 500),
             # Cover the API-authored paths (`handle_api_error`) and FastAPI's

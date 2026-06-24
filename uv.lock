@@ -1,9 +1,8 @@
 version = 1
 revision = 3
-requires-python = ">=3.11, <4.0"
+requires-python = ">=3.11, <3.15"
 resolution-markers = [
-    "python_full_version >= '3.15'",
-    "python_full_version == '3.14.*'",
+    "python_full_version >= '3.14'",
     "python_full_version >= '3.12' and python_full_version < '3.14'",
     "python_full_version < '3.12'",
 ]
@@ -1988,18 +1987,6 @@ wheels = [
 ]
 
 [[package]]
-name = "nexus-rpc"
-version = "1.4.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/35/d5/cd1ffb202b76ebc1b33c1332a3416e55a39929006982adc2b1eb069aaa9b/nexus_rpc-1.4.0.tar.gz", hash = "sha256:3b8b373d4865671789cc43623e3dc0bcbf192562e40e13727e17f1c149050fba", size = 82367, upload-time = "2026-02-25T22:01:34.053Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/11/52/6327a5f4fda01207205038a106a99848a41c83e933cd23ea2cab3d2ebc6c/nexus_rpc-1.4.0-py3-none-any.whl", hash = "sha256:14c953d3519113f8ccec533a9efdb6b10c28afef75d11cdd6d422640c40b3a49", size = 29645, upload-time = "2026-02-25T22:01:33.122Z" },
-]
-
-[[package]]
 name = "nodeenv"
 version = "1.10.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2324,8 +2311,8 @@ wheels = [
 
 [[package]]
 name = "pipelex"
-version = "0.35.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.35.1"
+source = { git = "https://github.com/Pipelex/pipelex.git?rev=3a8ffcf96626bdd14f3270b376919e2ad0dddc0f#3a8ffcf96626bdd14f3270b376919e2ad0dddc0f" }
 dependencies = [
     { name = "aiofiles" },
     { name = "datamodel-code-generator" },
@@ -2364,10 +2351,6 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0e/b2/1d2efb7c17e5b7a1c3423fe6e4c81e8a3a364212a04dd8a8b05aafc64d13/pipelex-0.35.0.tar.gz", hash = "sha256:27bffd7a570613039a970dcaa6b79319ef1244cea3180bd750167cfec0537f92", size = 1030986, upload-time = "2026-06-18T21:40:49.787Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/63/ec/66339936126225e3aa9c919dd3c0dc994122c402261e48851942fb718daf/pipelex-0.35.0-py3-none-any.whl", hash = "sha256:8e74510fd8040fbf269811803a8cbd6452cafba6c2acb7743904c5004cb6938d", size = 1464272, upload-time = "2026-06-18T21:40:47.683Z" },
-]
 
 [package.optional-dependencies]
 anthropic = [
@@ -2392,10 +2375,6 @@ google-genai = [
 mistralai = [
     { name = "mistralai" },
 ]
-temporal = [
-    { name = "aiohttp" },
-    { name = "temporalio" },
-]
 
 [[package]]
 name = "pipelex-api"
@@ -2404,7 +2383,8 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "mthds" },
-    { name = "pipelex", extra = ["anthropic", "bedrock", "fal", "google", "google-genai", "mistralai", "temporal"] },
+    { name = "pipelex", extra = ["anthropic", "bedrock", "fal", "google", "google-genai", "mistralai"] },
+    { name = "pipelex-tools-py" },
     { name = "pyjwt" },
     { name = "uvicorn" },
 ]
@@ -2453,7 +2433,8 @@ requires-dist = [
     { name = "mthds", specifier = ">=0.5.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.2" },
     { name = "pandas-stubs", marker = "extra == 'dev'", specifier = ">=2.2.3.241126" },
-    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal", "temporal"], specifier = "==0.35.0" },
+    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal"], git = "https://github.com/Pipelex/pipelex.git?rev=3a8ffcf96626bdd14f3270b376919e2ad0dddc0f" },
+    { name = "pipelex-tools-py", specifier = ">=0.1.0" },
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.3.8" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.405" },
@@ -2476,6 +2457,21 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.37.0" },
 ]
 provides-extras = ["dev", "docs"]
+
+[[package]]
+name = "pipelex-tools-py"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3e/73/4700e5b67e18260b277e266f8bad24a390c633014c753209425cf962b22b/pipelex_tools_py-0.1.0.tar.gz", hash = "sha256:d0429f1629cf547689781ed7fb80300492d0beb4ab9b087bb6e49a7feb29f4d9", size = 112896, upload-time = "2026-06-24T11:17:40.441Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b1/9b/186425a2801630a09acb9b5427f975b71e258cba069d9dce296bc31561a6/pipelex_tools_py-0.1.0-cp38-abi3-macosx_10_12_x86_64.whl", hash = "sha256:188a8bc89580668455cb4394f81f2dadb8a8ceb47225d776999cc8dda28b9068", size = 2486377, upload-time = "2026-06-24T11:17:28.096Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/d7/c030ee6ecb391a09e2dd46cae01a7b24925d263c73857e855040e1c8d6bb/pipelex_tools_py-0.1.0-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:0755c4b68ef7ef82de5f730d750183a8ebd7b2972e8f0ebdfa96eb353ff6717c", size = 2387958, upload-time = "2026-06-24T11:17:29.772Z" },
+    { url = "https://files.pythonhosted.org/packages/44/aa/a45055aba32b19beaaa94669357971e1bfb7ada3db8d48070ca6f0147378/pipelex_tools_py-0.1.0-cp38-abi3-manylinux_2_12_i686.manylinux2010_i686.whl", hash = "sha256:385f4068c02c8af7ed7d12c72da04e63d4e691c12061e2834abff68fa23d7864", size = 2716557, upload-time = "2026-06-24T11:17:31.921Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/6a/b7b99a19728ed823cadbd22ad0b444597c49a505553db1385c92ff84df67/pipelex_tools_py-0.1.0-cp38-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:38fcdd311d98ccde3b42eeacb9ca57e6b20d5c7fda1d06399417b2fc02e5dbf0", size = 2504478, upload-time = "2026-06-24T11:17:33.56Z" },
+    { url = "https://files.pythonhosted.org/packages/9a/4e/d8417fe30ad2f2058f80e8a40716ee014820c9be59553d6dd1167b2582d2/pipelex_tools_py-0.1.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3c329af0fbcf887c7a2e2bbf4b36c2247798c85765550e865d0621b3c9d4317e", size = 2629087, upload-time = "2026-06-24T11:17:35.239Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/3a/eee68ebf310c2193c99105466f760c1cc662972052f9b94bb3623c5fc498/pipelex_tools_py-0.1.0-cp38-abi3-win32.whl", hash = "sha256:64facac1934b0ab702ae8f9f9d3b536126bb11acb4cf0b22013842eb6ffd51cd", size = 2395853, upload-time = "2026-06-24T11:17:36.917Z" },
+    { url = "https://files.pythonhosted.org/packages/8c/1a/15ce89a940a16f9a210a228da924511efd5f81e4f5c987f1bbe71c5a9fa6/pipelex_tools_py-0.1.0-cp38-abi3-win_amd64.whl", hash = "sha256:10affd1cf72be5a1726817df0d51269b28c57356269dc218dcbe516da21af7b7", size = 2632513, upload-time = "2026-06-24T11:17:38.847Z" },
+]
 
 [[package]]
 name = "platformdirs"
@@ -3252,25 +3248,6 @@ wheels = [
 ]
 
 [[package]]
-name = "temporalio"
-version = "1.24.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "nexus-rpc" },
-    { name = "protobuf" },
-    { name = "types-protobuf" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/a7/b1/7d9b3104ab7994e7d49e765b92495aaff44810b1e066c874c284a93ebd55/temporalio-1.24.0.tar.gz", hash = "sha256:e534e2e71b4a721193ec4ff3dae521146d093554bd47a64f5605d4ca33e56718", size = 2040485, upload-time = "2026-03-23T15:33:33.638Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/84/a9/30517c21d6155bce1c3dc0e420db48da0231230dbc683f40ab6d5fe22b37/temporalio-1.24.0-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:7f11e7b4f4d09bafba499b43188353e23dc128b1fe3f3160014476e3dce70760", size = 12223918, upload-time = "2026-03-23T15:33:05.045Z" },
-    { url = "https://files.pythonhosted.org/packages/73/d0/11aa103bde794524008c1850a84e06cde98698395ca1f8b12e1bd2390aa8/temporalio-1.24.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:5cff75a0ca922575b808a7fca1b0de38f6eea061f49e026664b8be9d5bb06ab8", size = 11708887, upload-time = "2026-03-23T15:33:11.67Z" },
-    { url = "https://files.pythonhosted.org/packages/1d/f4/774b56100e6bb94e3757ec96fb5c2bc62d42defc7d6de0ee35a12273827a/temporalio-1.24.0-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:ee7c13b6724dd0c304aa846aecf6da72a8550f4ade40a0a7f6dcc1c92ef35710", size = 12028303, upload-time = "2026-03-23T15:33:18.022Z" },
-    { url = "https://files.pythonhosted.org/packages/e5/91/c05d0e9c2432fe8b1ea0d6fae321866ee49a320ad5e494e6ec9424ca5c28/temporalio-1.24.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:aa71b9bfa42f951dd04ade97ce7f92ecedee8903047b4b41b122bb8cbd87a337", size = 12375155, upload-time = "2026-03-23T15:33:24.234Z" },
-    { url = "https://files.pythonhosted.org/packages/c4/97/5c939e4609c164c8690a3b5a135eb828d531de8ef63ff447a2a439c0b0fb/temporalio-1.24.0-cp310-abi3-win_amd64.whl", hash = "sha256:52f6833647eceddbebcc376e2ea663a9f73b2b3a42675f503aeb27c98fd4daeb", size = 12720174, upload-time = "2026-03-23T15:33:30.826Z" },
-]
-
-[[package]]
 name = "tenacity"
 version = "9.1.4"
 source = { registry = "https://pypi.org/simple" }
@@ -3529,15 +3506,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f5/d1/a1e23040a758746ad5bb6b8849a011c3c901775618bc7e1fec3a1a8b7142/types_openpyxl-3.1.5.20260518.tar.gz", hash = "sha256:da9cd644e4e80215a3f60a8c2c2c8e980e941a9b581cffa3876285aa791ca5af", size = 101550, upload-time = "2026-05-18T06:03:57.59Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/96/0e/d745ce95fc74e34df802010fd0387e33db468179e6ff42b708280ab268c7/types_openpyxl-3.1.5.20260518-py3-none-any.whl", hash = "sha256:e6ca4b116c8b979ed57f3045edcd3d49c25917d6dae99e90358f41322a19d375", size = 165744, upload-time = "2026-05-18T06:03:56.036Z" },
-]
-
-[[package]]
-name = "types-protobuf"
-version = "7.34.1.20260518"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/29/59/e2b13b499d15e6720150c4b1a8d91e31fcacf716b432397475b3151ff7e4/types_protobuf-7.34.1.20260518.tar.gz", hash = "sha256:28cfaded25889cb83ebfb63cfb0a43628f0b6f3785767bec17287dc6468795f2", size = 68936, upload-time = "2026-05-18T06:01:47.332Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/2a/1f/ec5caf72c2e3b688ca3927e0979a04ddad19e1afc4bf1c199bd743e0f419/types_protobuf-7.34.1.20260518-py3-none-any.whl", hash = "sha256:a0a5337413347166439c0e07cbc26c6164d091401c6f01b1dfd8cdb966c4dd8f", size = 85992, upload-time = "2026-05-18T06:01:45.696Z" },
 ]
 
 [[package]]
