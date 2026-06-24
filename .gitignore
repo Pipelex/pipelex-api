@@ -51,7 +51,11 @@ temp/
 
 gcp_credentials.json
 
-results/*
+.pipelex/storage
+
+# personnal pipelex config files that overrides the default one
+pipelex_super.toml
 pipelex_override.toml
 telemetry_override.toml
-.pipelex/storage
+
+.worktreeinclude
