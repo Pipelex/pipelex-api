@@ -79,14 +79,8 @@ packages = ["api"]
 [tool.uv]
 required-version = ">=0.7.2"
 
-# The orchestration_mode / delivery split (open `orchestration_mode` token + closed
-# `DeliveryMode`, per-call OrchestratorRegistry / BundleValidatorRegistry dispatch) is
-# developed against the unreleased `pipelex` core in the sibling `../_plugins` worktree.
-# Pinned to the pushed core orchestration-mode/delivery split git rev so CI can resolve it
-# (an editable local path is unresolvable in CI). For local co-development, repoint this to
-# the editable `../_plugins` path; flip to the `==<ver>` PyPI pin once the core change ships.
 [tool.uv.sources]
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "5d729a1d366912b45b5b215727f723201157ae80" }
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "3a8ffcf96626bdd14f3270b376919e2ad0dddc0f" }
 
 [tool.mypy]
 check_untyped_defs = true
