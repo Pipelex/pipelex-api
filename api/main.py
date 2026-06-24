@@ -113,7 +113,8 @@ fastapi_app = FastAPI(
     description=(
         f"This server implements the [MTHDS Protocol](https://mthds.ai) v{PROTOCOL_VERSION} "
         "(`POST /execute`, `POST /start`, `POST /validate`, `GET /models`, `GET /version` — "
-        "marked `x-mthds-protocol: true`) plus the Pipelex build tooling extensions (`/build/*`). "
+        "marked `x-mthds-protocol: true`) plus the Pipelex build tooling extensions (`/build/*`) "
+        "and editor tooling extensions (`/lint`, `/format`). "
         "Contract layering: MTHDS Protocol ⊂ Pipelex API (this server) ⊂ Pipelex hosted API. "
         "Routes not in the published contract (`/upload`, `/resolve-storage-url`) are documented "
         "as non-contract in their descriptions. All endpoints are served under the `/v1` base path; "

@@ -12,7 +12,7 @@ MTHDS Protocol  ⊂  Pipelex API (this server)  ⊂  Pipelex hosted API
 ```
 
 - **MTHDS Protocol** — five routes: `POST /execute`, `POST /start`, `POST /validate`, `GET /models`, `GET /version`. Tagged `x-mthds-protocol: true` in the [committed OpenAPI artifact](openapi/pipelex-api.openapi.yaml).
-- **Pipelex API (this server)** — the protocol verbatim, plus the build tooling extensions (`/build/*`). `/upload` and `/resolve-storage-url` exist but are NOT part of the published contract.
+- **Pipelex API (this server)** — the protocol verbatim, plus the build tooling extensions (`/build/*`) and editor tooling (`/lint`, `/format`). `/upload` and `/resolve-storage-url` exist but are NOT part of the published contract.
 - **Pipelex hosted API** (`api.pipelex.com/v1`) — everything here, same shapes, plus durable runs, the method catalog, and account management.
 
 All routes are served under the `/v1` base path (clients compose `{base}/v1/{endpoint}`).
@@ -24,8 +24,9 @@ The API currently allows you to:
 1. **Run** any Pipelex pipeline with flexible inputs (sync or async)
 2. **Validate** any Pipelex pipeline to ensure correctness
 3. **Build** pipeline components — generate input schemas, output representations, runner code, concepts, and pipe specs
-4. **List** available model presets and configurations
-5. **Upload** files via presigned URLs
+4. **Lint and format** single `.mthds` files for editor workflows
+5. **List** available model presets and configurations
+6. **Upload** files via presigned URLs
 
 ## Deployment
 
@@ -144,6 +145,14 @@ Validate MTHDS content to ensure pipelines are correctly defined before executio
 - `POST /v1/validate` — Parse, validate, and dry-run pipelines
 
 [Learn more →](pipe-validate.md)
+
+### Pipe Tools
+Lint and format single `.mthds` files without loading or executing a pipeline.
+
+- `POST /v1/lint` — Return syntax, semantic, or schema diagnostics
+- `POST /v1/format` — Return formatted content, changed status, and blocking syntax diagnostics
+
+[Learn more →](pipe-tools.md)
 
 ### Pipe Builder
 Generate input schemas, output representations, and runner code for pipelines.

@@ -5,9 +5,9 @@ info:
   summary: The open-source Pipelex runner — implements MTHDS Protocol v0.6.0.
   description: 'This server implements the [MTHDS Protocol](https://mthds.ai) v0.6.0 (`POST /execute`, `POST /start`, `POST
     /validate`, `GET /models`, `GET /version` — marked `x-mthds-protocol: true`) plus the Pipelex build tooling extensions
-    (`/build/*`). Contract layering: MTHDS Protocol ⊂ Pipelex API (this server) ⊂ Pipelex hosted API. Routes not in the published
-    contract (`/upload`, `/resolve-storage-url`) are documented as non-contract in their descriptions. All endpoints are served
-    under the `/v1` base path; errors are RFC 7807 `application/problem+json`.'
+    (`/build/*`) and editor tooling extensions (`/lint`, `/format`). Contract layering: MTHDS Protocol ⊂ Pipelex API (this
+    server) ⊂ Pipelex hosted API. Routes not in the published contract (`/upload`, `/resolve-storage-url`) are documented
+    as non-contract in their descriptions. All endpoints are served under the `/v1` base path; errors are RFC 7807 `application/problem+json`.'
   license:
     name: MIT
     identifier: MIT
@@ -498,6 +498,70 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
       x-mthds-protocol: true
+  /v1/lint:
+    post:
+      tags:
+      - tools
+      summary: Lint Mthds
+      description: 'Lint one .mthds file with the embedded MTHDS schema.
+
+
+        Malformed .mthds content is a produced diagnostic verdict and returns 200.
+
+        Request-shape problems remain RFC 7807 422 responses through the global handlers.'
+      operationId: lint_mthds_v1_lint_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LintRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LintResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/problem+json:
+              schema:
+                additionalProperties: true
+                type: object
+  /v1/format:
+    post:
+      tags:
+      - tools
+      summary: Format Mthds
+      description: 'Format one .mthds file with the canonical MTHDS formatter.
+
+
+        Syntax errors return 200 with diagnostics and unchanged content. Malformed
+
+        formatter options are caller input errors and return RFC 7807 422.'
+      operationId: format_mthds_v1_format_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FormatRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FormatResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/problem+json:
+              schema:
+                additionalProperties: true
+                type: object
   /v1/models:
     get:
       tags:
@@ -1148,6 +1212,39 @@ components:
       - pipe_and_concept_registry
       title: DataInclusionConfig
       description: Controls which data is included in graph outputs.
+    Diagnostic:
+      properties:
+        kind:
+          type: string
+          enum:
+          - syntax
+          - semantic
+          - schema
+          title: Kind
+        severity:
+          type: string
+          title: Severity
+        message:
+          type: string
+          title: Message
+        location:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Location
+        range:
+          anyOf:
+          - $ref: '#/components/schemas/Range'
+          - type: 'null'
+      type: object
+      required:
+      - kind
+      - severity
+      - message
+      - location
+      - range
+      title: Diagnostic
+      description: Structured lint/format diagnostic returned by `pipelex-tools-py`.
     DryRunStatus:
       type: string
       enum:
@@ -1308,6 +1405,45 @@ components:
       - inference_model_id
       - nb_tokens_by_category
       title: ExtractTokensUsage
+    FormatRequest:
+      properties:
+        content:
+          type: string
+          title: Content
+          description: Single .mthds file content to lint or format.
+        options:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Options
+          description: Optional formatter options passed through to `pipelex_tools.format_mthds`, such as `column_width`.
+            Malformed option values return a 422 problem response.
+      type: object
+      required:
+      - content
+      title: FormatRequest
+      description: Body of `POST /format`.
+    FormatResponse:
+      properties:
+        formatted:
+          type: string
+          title: Formatted
+        changed:
+          type: boolean
+          title: Changed
+        diagnostics:
+          items:
+            $ref: '#/components/schemas/Diagnostic'
+          type: array
+          title: Diagnostics
+      type: object
+      required:
+      - formatted
+      - changed
+      - diagnostics
+      title: FormatResponse
+      description: Response body of `POST /format`.
     GraphSpec:
       properties:
         graph_id:
@@ -1754,6 +1890,36 @@ components:
       - inference_model_id
       - nb_tokens_by_category
       title: LLMTokensUsage
+    LintRequest:
+      properties:
+        content:
+          type: string
+          title: Content
+          description: Single .mthds file content to lint or format.
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+          description: Optional logical filename for the content. Accepted for parity with `pipelex_tools.lint_mthds`; current
+            diagnostics do not yet include the filename.
+      type: object
+      required:
+      - content
+      title: LintRequest
+      description: Body of `POST /lint`.
+    LintResponse:
+      properties:
+        diagnostics:
+          items:
+            $ref: '#/components/schemas/Diagnostic'
+          type: array
+          title: Diagnostics
+      type: object
+      required:
+      - diagnostics
+      title: LintResponse
+      description: Response body of `POST /lint`.
     ModelCategory:
       type: string
       enum:
@@ -2953,6 +3119,36 @@ components:
       - medium
       - high
       title: Quality
+    Range:
+      properties:
+        start_offset:
+          type: integer
+          title: Start Offset
+        end_offset:
+          type: integer
+          title: End Offset
+        start_line:
+          type: integer
+          title: Start Line
+        start_col:
+          type: integer
+          title: Start Col
+        end_line:
+          type: integer
+          title: End Line
+        end_col:
+          type: integer
+          title: End Col
+      type: object
+      required:
+      - start_offset
+      - end_offset
+      - start_line
+      - start_col
+      - end_line
+      - end_col
+      title: Range
+      description: Byte offsets plus 1-based line/column coordinates from `pipelex-tools-py`.
     ReasoningEffort:
       type: string
       enum:
