@@ -55,7 +55,7 @@ make docker-logs      # Tail Docker container logs
 
 ## Python Version
 
-- **Python 3.11+** (requires-python = ">=3.11,<4.0")
+- **Python 3.11+** (requires-python = ">=3.11,<3.15")
 - Avoid Python 3.10 idioms that changed in 3.11+
 
 ## Variable Naming

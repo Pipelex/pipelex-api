@@ -1,9 +1,8 @@
 version = 1
 revision = 3
-requires-python = ">=3.11, <4.0"
+requires-python = ">=3.11, <3.15"
 resolution-markers = [
-    "python_full_version >= '3.15'",
-    "python_full_version == '3.14.*'",
+    "python_full_version >= '3.14'",
     "python_full_version >= '3.12' and python_full_version < '3.14'",
     "python_full_version < '3.12'",
 ]
@@ -2385,6 +2384,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "mthds" },
     { name = "pipelex", extra = ["anthropic", "bedrock", "fal", "google", "google-genai", "mistralai"] },
+    { name = "pipelex-tools-py" },
     { name = "pyjwt" },
     { name = "uvicorn" },
 ]
@@ -2434,6 +2434,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.2" },
     { name = "pandas-stubs", marker = "extra == 'dev'", specifier = ">=2.2.3.241126" },
     { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal"], git = "https://github.com/Pipelex/pipelex.git?rev=50ff1f79f1bf38a81cf6f9c16063e32ed51b1e57" },
+    { name = "pipelex-tools-py", specifier = ">=0.1.0" },
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.3.8" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.405" },
@@ -2456,6 +2457,21 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.37.0" },
 ]
 provides-extras = ["dev", "docs"]
+
+[[package]]
+name = "pipelex-tools-py"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3e/73/4700e5b67e18260b277e266f8bad24a390c633014c753209425cf962b22b/pipelex_tools_py-0.1.0.tar.gz", hash = "sha256:d0429f1629cf547689781ed7fb80300492d0beb4ab9b087bb6e49a7feb29f4d9", size = 112896, upload-time = "2026-06-24T11:17:40.441Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b1/9b/186425a2801630a09acb9b5427f975b71e258cba069d9dce296bc31561a6/pipelex_tools_py-0.1.0-cp38-abi3-macosx_10_12_x86_64.whl", hash = "sha256:188a8bc89580668455cb4394f81f2dadb8a8ceb47225d776999cc8dda28b9068", size = 2486377, upload-time = "2026-06-24T11:17:28.096Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/d7/c030ee6ecb391a09e2dd46cae01a7b24925d263c73857e855040e1c8d6bb/pipelex_tools_py-0.1.0-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:0755c4b68ef7ef82de5f730d750183a8ebd7b2972e8f0ebdfa96eb353ff6717c", size = 2387958, upload-time = "2026-06-24T11:17:29.772Z" },
+    { url = "https://files.pythonhosted.org/packages/44/aa/a45055aba32b19beaaa94669357971e1bfb7ada3db8d48070ca6f0147378/pipelex_tools_py-0.1.0-cp38-abi3-manylinux_2_12_i686.manylinux2010_i686.whl", hash = "sha256:385f4068c02c8af7ed7d12c72da04e63d4e691c12061e2834abff68fa23d7864", size = 2716557, upload-time = "2026-06-24T11:17:31.921Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/6a/b7b99a19728ed823cadbd22ad0b444597c49a505553db1385c92ff84df67/pipelex_tools_py-0.1.0-cp38-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:38fcdd311d98ccde3b42eeacb9ca57e6b20d5c7fda1d06399417b2fc02e5dbf0", size = 2504478, upload-time = "2026-06-24T11:17:33.56Z" },
+    { url = "https://files.pythonhosted.org/packages/9a/4e/d8417fe30ad2f2058f80e8a40716ee014820c9be59553d6dd1167b2582d2/pipelex_tools_py-0.1.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3c329af0fbcf887c7a2e2bbf4b36c2247798c85765550e865d0621b3c9d4317e", size = 2629087, upload-time = "2026-06-24T11:17:35.239Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/3a/eee68ebf310c2193c99105466f760c1cc662972052f9b94bb3623c5fc498/pipelex_tools_py-0.1.0-cp38-abi3-win32.whl", hash = "sha256:64facac1934b0ab702ae8f9f9d3b536126bb11acb4cf0b22013842eb6ffd51cd", size = 2395853, upload-time = "2026-06-24T11:17:36.917Z" },
+    { url = "https://files.pythonhosted.org/packages/8c/1a/15ce89a940a16f9a210a228da924511efd5f81e4f5c987f1bbe71c5a9fa6/pipelex_tools_py-0.1.0-cp38-abi3-win_amd64.whl", hash = "sha256:10affd1cf72be5a1726817df0d51269b28c57356269dc218dcbe516da21af7b7", size = 2632513, upload-time = "2026-06-24T11:17:38.847Z" },
+]
 
 [[package]]
 name = "platformdirs"
