@@ -86,7 +86,7 @@ required-version = ">=0.7.2"
 # (an editable local path is unresolvable in CI). For local co-development, repoint this to
 # the editable `../_plugins` path; flip to the `==<ver>` PyPI pin once the core change ships.
 [tool.uv.sources]
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "50ff1f79f1bf38a81cf6f9c16063e32ed51b1e57" }
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "5d729a1d366912b45b5b215727f723201157ae80" }
 
 [tool.mypy]
 check_untyped_defs = true
