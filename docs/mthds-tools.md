@@ -1,6 +1,6 @@
-# Pipe Tools
+# MTHDS Tools
 
-The Pipe Tools endpoints expose lightweight editor tooling for a single `.mthds`
+The MTHDS Tools endpoints expose lightweight editor tooling for a single `.mthds`
 file. They are Pipelex API extensions, not MTHDS Protocol routes.
 
 ## Lint

@@ -146,13 +146,13 @@ Validate MTHDS content to ensure pipelines are correctly defined before executio
 
 [Learn more →](pipe-validate.md)
 
-### Pipe Tools
+### MTHDS Tools
 Lint and format single `.mthds` files without loading or executing a pipeline.
 
 - `POST /v1/lint` — Return syntax, semantic, or schema diagnostics
 - `POST /v1/format` — Return formatted content, changed status, and blocking syntax diagnostics
 
-[Learn more →](pipe-tools.md)
+[Learn more →](mthds-tools.md)
 
 ### Pipe Builder
 Generate input schemas, output representations, and runner code for pipelines.
