@@ -370,6 +370,19 @@ def _problem_response(report: ErrorReport, *, request: Request, disclosure_mode:
     )
 
 
+def problem_response_from_error_report(report: ErrorReport, *, request: Request) -> JSONResponse:
+    """Render an `ErrorReport` value through the same RFC 7807 path as raised errors.
+
+    Most `ErrorReport`s reach this module by raising a `PipelexError` or by an
+    orchestrator transport mapper. `/validate` can also receive an `ErrorReport`
+    as a registry-returned value; when that value is a backend/config/runtime
+    fault rather than a validation verdict, it must still keep the same status,
+    disclosure, logging, and retry headers as the global handler path.
+    """
+    disclosure_mode = getattr(request.app.state, "error_disclosure_mode", DisclosureMode.VERBOSE)
+    return _problem_response(report, request=request, disclosure_mode=disclosure_mode)
+
+
 async def handle_pipelex_error(request: Request, exc: Exception, *, disclosure_mode: DisclosureMode) -> Response:
     """Translate any pipelex `PipelexError` into an RFC 7807 problem response.
 
@@ -574,6 +587,7 @@ def register_exception_handlers(
     case. The other three handlers don't render an `ErrorReport`, so they don't need
     the mode and register directly.
     """
+    app.state.error_disclosure_mode = disclosure_mode
 
     async def _pipelex_error(request: Request, exc: Exception) -> Response:
         return await handle_pipelex_error(request, exc, disclosure_mode=disclosure_mode)

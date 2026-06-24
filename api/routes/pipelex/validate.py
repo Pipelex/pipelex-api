@@ -1,6 +1,6 @@
 from typing import Annotated, Literal, Self, Union
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pipelex.base_exceptions import ErrorReport, ValidationErrorItem
 from pipelex.pipeline.validation_render import format_validate_markdown, render_invalid_validation_markdown
@@ -9,6 +9,7 @@ from pipelex.tools.typing.pydantic_utils import empty_list_factory_of
 from pipelex.types import StrEnum
 from pydantic import BaseModel, Field, model_validator
 
+from api.exception_handlers import problem_response_from_error_report
 from api.routes.pipelex.pipeline import ApiRunner
 from api.schemas.models import MthdsContentsRequest
 
@@ -148,7 +149,7 @@ ValidationResponse = Annotated[Union[ValidReport, InvalidReport], Field(discrimi
 
 
 @router.post("/validate", response_model=ValidationResponse, openapi_extra={"x-mthds-protocol": True})
-async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
+async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSONResponse:
     """Validate MTHDS content by parsing, loading, and dry-running pipes (MTHDS Protocol `POST /validate`).
 
     `/validate` is a **diagnostic endpoint**: any verdict the validator can produce — valid,
@@ -166,9 +167,11 @@ async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
     - **Invalid verdict (200, `is_valid: false`):** the `InvalidReport` arm — `validation_errors[]`
       (the structured per-error diagnostics, built by pipelex's one shared builder, incl. the
       `dry_run` residual item) + `message`, with the structural artifacts absent. The runner
-      returns this as a value (`ErrorReport`) regardless of backend — the in-process arm from the
-      bundle's `ValidateBundleError`, the dispatched arm recovered from the worker — so the route
-      maps it to a 200 by matching the returned verdict, never by catching an exception.
+      returns this as a value (`ErrorReport` with `validation_errors`) regardless of backend — the
+      in-process arm from the bundle's `ValidateBundleError`, the dispatched arm recovered from the
+      worker — so the route maps it to a 200 by matching validation diagnostics, never by catching an
+      exception. Returned `ErrorReport`s without validation diagnostics are backend/config/runtime
+      faults and keep the global RFC 7807 problem response path.
     - **No verdict (non-2xx):** a malformed request body or an `mthds_sources` length mismatch is a
       request-shape **422**; a forbidden `orchestration_mode` override is a **403**; a host-wiring
       programmer error or a genuine orchestrator fault is a **5xx**; auth is **401/403**. All are
@@ -179,8 +182,9 @@ async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
     # default → no `rendered_*` field, response byte-identical to the no-`render` request.
     requested_formats = _resolve_render_formats(request_data.render)
     # Verdict-as-value: the runner resolves the orchestration mode and dispatches through the bundle
-    # validator registry, returning the verdict. A produced invalid verdict is an `ErrorReport`
-    # (→ 200 InvalidReport); only a no-verdict fault propagates to the global problem+json handler.
+    # validator registry, returning either a validation verdict or a classified fault report.
+    # Only `ErrorReport`s with validation diagnostics are invalid-bundle verdicts (→ 200
+    # InvalidReport); backend/config/runtime reports keep the global problem+json mapping.
     verdict = await ApiRunner().validate_verdict(
         mthds_contents=request_data.mthds_contents,
         mthds_sources=request_data.mthds_sources,
@@ -188,7 +192,9 @@ async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
         requested_orchestration_mode=request_data.orchestration_mode,
     )
     if not isinstance(verdict, PipelexValidationReport):
-        return _invalid_report_response(verdict, requested_formats=requested_formats)
+        if verdict.validation_errors:
+            return _invalid_report_response(verdict, requested_formats=requested_formats)
+        return problem_response_from_error_report(verdict, request=request)
     report = verdict
 
     # Splat the report's own field/value pairs so a future canonical field rides the wire

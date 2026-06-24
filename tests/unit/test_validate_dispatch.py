@@ -3,10 +3,11 @@
 Pins the dispatch+route mapping independent of any real backend, with a stub validator registered
 for a non-direct mode (no `temporalio` import): the runner resolves the deployment's orchestration_mode,
 dispatches to the validator the registry holds for it, and the route maps the *returned* verdict —
-an `ErrorReport` to a 200 `InvalidReport`, a raised fault to a 5xx. Also pins the no-validator case
-(`MissingBundleValidatorError`) and that the route threads `orchestration_mode` into the same override
-policy `/start` uses (a forbidden override is a 403). The `direct` path is covered end-to-end by the
-existing `/validate` suite; this proves the dispatch is backend-agnostic, not direct-only.
+an `ErrorReport` with validation diagnostics to a 200 `InvalidReport`, a returned backend fault report
+to problem+json, and a raised fault to a 5xx. Also pins the no-validator case (`MissingBundleValidatorError`)
+and that the route threads `orchestration_mode` into the same override policy `/start` uses (a forbidden
+override is a 403). The `direct` path is covered end-to-end by the existing `/validate` suite; this proves
+the dispatch is backend-agnostic, not direct-only.
 """
 
 from collections.abc import Sequence
@@ -16,7 +17,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pipelex.base_exceptions import ErrorReport, PipelexConfigError, ValidationErrorCategory, ValidationErrorItem
+from pipelex.base_exceptions import ErrorDomain, ErrorReport, PipelexConfigError, ValidationErrorCategory, ValidationErrorItem
 from pipelex.plugins.bundle_validator_registry import BundleValidatorRegistry
 from pipelex.runtime_bridge.exceptions import MissingBundleValidatorError
 from pytest_mock import MockerFixture
@@ -115,6 +116,30 @@ class TestValidateDispatch:
         assert response.status_code >= 500, response.text
         assert response.headers["content-type"].startswith("application/problem+json")
         assert "is_valid" not in response.json()
+
+    def test_returned_non_verdict_error_report_maps_to_problem_json(self, mocker: MockerFixture) -> None:
+        """A registry-backed validator can return a classified backend fault report, not an invalid-bundle verdict."""
+        backend_fault = ErrorReport(
+            error_type="TemporalTransportError",
+            message="validator backend unavailable",
+            title="Temporal transport error",
+            type_uri="https://errors.pipelex.com/temporal-transport-error/",
+            error_domain=ErrorDomain.CONFIG,
+        )
+        stub = _StubBundleValidator(verdict=backend_fault)
+        _register_stub_for_temporal(mocker, stub)
+
+        client = _build_client()
+        response = client.post("/v1/validate", json={"mthds_contents": [VALID_MTHDS]})
+
+        assert response.status_code == 500, response.text
+        assert response.headers["content-type"].startswith("application/problem+json")
+        body = response.json()
+        assert body["error_type"] == "TemporalTransportError"
+        assert body["error_domain"] == ErrorDomain.CONFIG
+        assert body["status"] == 500
+        assert "is_valid" not in body
+        assert "validation_errors" not in body
 
     @pytest.mark.asyncio
     async def test_missing_validator_for_resolved_mode_raises(self, mocker: MockerFixture) -> None:
