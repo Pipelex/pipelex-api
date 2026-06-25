@@ -129,6 +129,25 @@ class TestValidateErrors:
         assert sourced, f"no validation_errors item carried the threaded source: {items}"
         assert any(item["category"] == ValidationErrorCategory.BLUEPRINT_VALIDATION for item in sourced)
 
+    def test_toml_syntax_errors_carry_threaded_source(self):
+        client = _build_client()
+        response = client.post(
+            "/v1/validate",
+            json={
+                "mthds_contents": ['domain = "broken" trailing'],
+                "mthds_sources": ["broken.mthds"],
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["is_valid"] is False
+        items: list[dict[str, Any]] = body["validation_errors"]
+        sourced = [item for item in items if item.get("source") == "broken.mthds"]
+        assert sourced, f"no validation_errors item carried the threaded source: {items}"
+        assert any(item["category"] == ValidationErrorCategory.BLUEPRINT_VALIDATION for item in sourced)
+        assert any("TOML syntax error" in item["message"] for item in sourced)
+
     def test_all_categories_project_onto_invalid_report(self, mocker: MockerFixture):
         # Every structured category lands on the 200 InvalidReport, and collectively the items cover
         # the full ValidationErrorItem field set (so a dropped field would fail here, not silently
