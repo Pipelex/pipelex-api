@@ -80,7 +80,7 @@ packages = ["api"]
 required-version = ">=0.7.2"
 
 [tool.uv.sources]
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "3a8ffcf96626bdd14f3270b376919e2ad0dddc0f" }
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "318d248fbf9b02418f18ec7599528be968df4f11" }
 
 [tool.mypy]
 check_untyped_defs = true
