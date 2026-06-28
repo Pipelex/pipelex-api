@@ -12,7 +12,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.api_config import ApiConfig, get_api_config, resolve_orchestration_mode
+from api.api_config import ApiBootConfigError, ApiConfig, get_api_config, resolve_boot_orchestrator, resolve_orchestration_mode
 from api.errors import ApiError
 from api.exception_handlers import register_exception_handlers
 from api.middleware import RequestIdMiddleware
@@ -56,6 +56,34 @@ class TestResolveOrchestrationMode:
     def test_allowed_override_is_honored(self):
         config = ApiConfig(orchestration_mode="temporal", allow_request_orchestration_mode_override=True)
         assert resolve_orchestration_mode("direct", config=config) == "direct"
+
+
+class TestResolveBootOrchestrator:
+    """`resolve_boot_orchestrator` derives the single orchestrator the process boots under from the
+    deployment config, and refuses a config whose single boot can't service its own override policy.
+    """
+
+    def test_direct_default_boots_in_process(self):
+        # The base `direct` mode names no orchestrator: it boots in-process (None).
+        config = ApiConfig(orchestration_mode="direct", allow_request_orchestration_mode_override=False)
+        assert resolve_boot_orchestrator(config) is None
+
+    def test_non_direct_default_boots_under_that_orchestrator(self):
+        config = ApiConfig(orchestration_mode="temporal", allow_request_orchestration_mode_override=False)
+        assert resolve_boot_orchestrator(config) == "temporal"
+
+    def test_non_direct_default_with_override_still_boots_under_that_orchestrator(self):
+        # Coherent: the async hub is claimed at boot, so a per-request `direct` override still runs
+        # in-process while `temporal` requests use the claimed hub.
+        config = ApiConfig(orchestration_mode="temporal", allow_request_orchestration_mode_override=True)
+        assert resolve_boot_orchestrator(config) == "temporal"
+
+    def test_direct_default_with_override_is_refused_at_boot(self):
+        # Incoherent: a `direct` boot claims no async hub, so a request overriding to a non-direct mode
+        # would fail at dispatch. Fail loud at boot instead of on the first overriding request.
+        config = ApiConfig(orchestration_mode="direct", allow_request_orchestration_mode_override=True)
+        with pytest.raises(ApiBootConfigError):
+            resolve_boot_orchestrator(config)
 
 
 class TestStartOverridePolicyEndToEnd:

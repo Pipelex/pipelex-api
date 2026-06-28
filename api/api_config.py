@@ -26,6 +26,7 @@ keeps it symmetric with how ``pipelex-temporal`` self-loads ``temporal.toml``.
 from functools import cache
 from pathlib import Path
 
+from pipelex.runtime_bridge.orchestration_mode import DIRECT_ORCHESTRATION_MODE
 from pipelex.system.configuration.config_loader import config_manager
 from pydantic import BaseModel, ConfigDict
 
@@ -107,3 +108,37 @@ def resolve_orchestration_mode(requested: str | None, *, config: ApiConfig) -> s
         f"(configured mode '{config.orchestration_mode}', requested '{requested}')."
     )
     raise_forbidden(msg, error_type=ErrorType.ORCHESTRATION_MODE_OVERRIDE_FORBIDDEN)
+
+
+class ApiBootConfigError(ValueError):
+    """Raised at startup when the deployment's orchestration config cannot boot coherently."""
+
+
+def resolve_boot_orchestrator(config: ApiConfig) -> str | None:
+    """The orchestrator plugin this process boots under, derived from the deployment config.
+
+    The base ``direct`` mode names no orchestrator and boots in-process (``None``); any other
+    mode (a plugin token like ``"temporal"``) boots the process under that orchestrator so its
+    execution-hub slots are claimed and async dispatch is enabled.
+
+    A process boots under exactly one orchestrator, so a ``direct`` default that ALSO enables
+    per-request override is incoherent: no async hub is claimed at boot, yet
+    :func:`resolve_orchestration_mode` would honor a request overriding to a non-direct mode and
+    resolve that orchestrator's dispatch arm — which then fails at dispatch with
+    ``AsyncExecutionNotEnabledError``. Refuse it here: fail loud at boot, where the operator sees
+    it, rather than on the first overriding request. The mirror case (a non-direct default with
+    override on) IS coherent — the async hub is claimed at boot, and a per-request ``direct``
+    override still runs in-process — so it boots normally under that orchestrator.
+    """
+    mode = config.orchestration_mode
+    if config.allow_request_orchestration_mode_override and mode == DIRECT_ORCHESTRATION_MODE:
+        msg = (
+            "allow_request_orchestration_mode_override=true with a 'direct' orchestration_mode default "
+            "cannot service a non-direct per-request override: no async execution hub is claimed at boot, "
+            "so such a request would fail at dispatch. Set a non-direct orchestration_mode default or "
+            "disable per-request override."
+        )
+        raise ApiBootConfigError(msg)
+    if mode == DIRECT_ORCHESTRATION_MODE:
+        return None
+    return mode

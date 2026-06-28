@@ -17,14 +17,13 @@ from mthds.protocol.protocol import PROTOCOL_VERSION
 from pipelex.pipelex import Pipelex
 from pipelex.plugins.discovery import build_registrar
 from pipelex.plugins.registrar import HttpErrorMapperFn
-from pipelex.runtime_bridge.orchestration_mode import DIRECT_ORCHESTRATION_MODE
 from pipelex.system.configuration.config_loader import config_manager
 from pipelex.system.configuration.configs import PipelexConfig
 from pipelex.system.environment import get_optional_env
 from pipelex.system.runtime import IntegrationMode
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from api.api_config import get_api_config
+from api.api_config import get_api_config, resolve_boot_orchestrator
 from api.disclosure import resolve_disclosure_mode
 from api.exception_handlers import register_exception_handlers
 from api.middleware import RequestIdMiddleware, request_body_size_middleware
@@ -43,31 +42,21 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     # (`is_*_boot_active()`): without it, a `temporal`-mode runner resolves the Temporal
     # dispatch arm but the underlying pipe-run stack is still in-process, and dispatch fails
     # with AsyncExecutionNotEnabledError. The base `direct` mode names no orchestrator and
-    # boots in-process (boot_orchestrator=None). Deriving boot from the single api.toml knob
-    # keeps the two coherent by construction — they can never be set inconsistently.
+    # boots in-process (boot_orchestrator=None). `resolve_boot_orchestrator` derives boot from
+    # the deployment config and refuses a config whose single boot can't service its own
+    # per-request override policy (a `direct` default with override on) — so boot and dispatch
+    # can never be set inconsistently.
     #
     # Loading `api.toml` here also fails the app fast on a malformed config / baked override
     # (the same posture as ERROR_DISCLOSURE), now even before the singleton exists. The loader
     # only needs `runtime_manager.environment` (from PIPELEX_ENV), which resolves without a
     # live singleton. get_api_config() is @cache'd, so the warm here is reused everywhere.
-    boot_orchestrator = get_boot_orchestrator()
+    boot_orchestrator = resolve_boot_orchestrator(get_api_config())
     Pipelex.make(integration_mode=IntegrationMode.FASTAPI, boot_orchestrator=boot_orchestrator)
     try:
         yield
     finally:
         Pipelex.teardown_if_needed()
-
-
-def get_boot_orchestrator() -> str | None:
-    """The orchestrator plugin this process boots under, derived from the deployment's
-    `orchestration_mode`. The base `direct` mode boots in-process (None); any other mode
-    (a plugin token like "temporal") boots the process under that orchestrator so its
-    execution hub slots are claimed and async dispatch is enabled.
-    """
-    orchestration_mode = get_api_config().orchestration_mode
-    if orchestration_mode == DIRECT_ORCHESTRATION_MODE:
-        return None
-    return orchestration_mode
 
 
 def _resolve_cors_origins() -> tuple[list[str], bool]:
