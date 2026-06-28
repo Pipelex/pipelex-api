@@ -112,7 +112,6 @@ nav:
       - Code of Conduct: CODE_OF_CONDUCT.md
       - License: license.md
     - Changelog: changelog.md
-  - MCP: https://pipelex.github.io/pipelex-mcp/
   - n8n: https://pipelex.github.io/n8n-nodes-pipelex/
   - Contribute: https://docs.pipelex.com/pages/contributing/
   - Changelog: https://docs.pipelex.com/pages/changelog/

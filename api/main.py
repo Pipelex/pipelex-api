@@ -23,7 +23,7 @@ from pipelex.system.environment import get_optional_env
 from pipelex.system.runtime import IntegrationMode
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from api.api_config import get_api_config
+from api.api_config import get_api_config, resolve_boot_orchestrator
 from api.disclosure import resolve_disclosure_mode
 from api.exception_handlers import register_exception_handlers
 from api.middleware import RequestIdMiddleware, request_body_size_middleware
@@ -35,15 +35,25 @@ from api.security import get_auth_dependency
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    Pipelex.make(integration_mode=IntegrationMode.FASTAPI)
+    # Resolve the deployment's orchestration mode BEFORE booting, so the process can boot
+    # under the matching orchestrator. `orchestration_mode` selects the dispatch arm; a
+    # non-`direct` (async/boot) orchestrator — e.g. "temporal" — must additionally claim the
+    # process-global execution hub slots at boot, which the shared WorkflowExecutor requires
+    # (`is_*_boot_active()`): without it, a `temporal`-mode runner resolves the Temporal
+    # dispatch arm but the underlying pipe-run stack is still in-process, and dispatch fails
+    # with AsyncExecutionNotEnabledError. The base `direct` mode names no orchestrator and
+    # boots in-process (boot_orchestrator=None). `resolve_boot_orchestrator` derives boot from
+    # the deployment config and refuses a config whose single boot can't service its own
+    # per-request override policy (a `direct` default with override on) — so boot and dispatch
+    # can never be set inconsistently.
+    #
+    # Loading `api.toml` here also fails the app fast on a malformed config / baked override
+    # (the same posture as ERROR_DISCLOSURE), now even before the singleton exists. The loader
+    # only needs `runtime_manager.environment` (from PIPELEX_ENV), which resolves without a
+    # live singleton. get_api_config() is @cache'd, so the warm here is reused everywhere.
+    boot_orchestrator = resolve_boot_orchestrator(get_api_config())
+    Pipelex.make(integration_mode=IntegrationMode.FASTAPI, boot_orchestrator=boot_orchestrator)
     try:
-        # Warm (and validate) the [api] deployment config now that Pipelex is booted, so a malformed
-        # `api.toml` / baked override fails the app at startup rather than on the first /start — the
-        # same fail-fast posture as ERROR_DISCLOSURE above. Must run after `Pipelex.make` since the
-        # loader reads `runtime_manager.environment`. Inside the `try` so a raise here still tears the
-        # singleton down via the `finally` — otherwise `Pipelex.make` leaves a live, ready singleton
-        # registered and a startup retry / second app in this process fails as "already initialized".
-        get_api_config()
         yield
     finally:
         Pipelex.teardown_if_needed()

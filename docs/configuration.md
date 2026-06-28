@@ -112,6 +112,8 @@ The base is **orchestrator-agnostic**. WHICH backend a top-level run dispatches 
 
 The packaged default (`orchestration_mode = "direct"`, override off) is what the generic image ships.
 
+**Boot-coherence guard.** A process boots under exactly one orchestrator (the server derives it from `orchestration_mode`), so enabling `allow_request_orchestration_mode_override` on a `direct` default is **refused at boot**: a request overriding to a non-direct mode would resolve that orchestrator's dispatch arm while the process claimed no async execution hub, failing only at dispatch. The app fails fast at startup instead — set a non-direct `orchestration_mode` default (which claims the hub, and still serves a per-request `direct` override in-process) or leave override off.
+
 **`orchestration_mode` is one of two orthogonal axes.** It names only the **backend**. The other axis — *delivery*, i.e. whether the caller waits — is **endpoint-intrinsic**, never configured and never requestable:
 
 - `POST /v1/execute` and `POST /v1/validate` are **synchronous** (`BLOCKING` delivery): they return the full output / the verdict.
