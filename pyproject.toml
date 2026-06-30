@@ -1,6 +1,6 @@
 [project]
 name = "pipelex-api"
-version = "0.5.0"
+version = "0.6.0"
 description = "Pipelex API"
 authors = [{ name = "Evotis S.A.S.", email = "oss@pipelex.com" }]
 maintainers = [{ name = "Pipelex staff", email = "oss@pipelex.com" }]
@@ -16,9 +16,8 @@ classifiers = [
 ]
 
 dependencies = [
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.35.0",
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.36.0",
   "pipelex-tools-py>=0.1.0",
-  "mthds>=0.5.0",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",
@@ -78,9 +77,6 @@ packages = ["api"]
 
 [tool.uv]
 required-version = ">=0.7.2"
-
-[tool.uv.sources]
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "dee747ad0f33e71a0f0c9c453235ec1e1ed5fbf1" }
 
 [tool.mypy]
 check_untyped_defs = true

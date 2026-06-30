@@ -98,6 +98,11 @@ def _resolve_http_error_mappers() -> dict[type[Exception], HttpErrorMapperFn]:
     definition installed — is the plugin's exc-type provider thunk run. Resolved once
     at module import so a duplicate/broken plugin fails the app fast, mirroring the
     `ERROR_DISCLOSURE` fail-fast above.
+
+    Safe at import because the map is a pure function of *installed* plugins (entry
+    points + `config.plugins.disabled`) — never of the `boot_orchestrator` that
+    `Pipelex.make` selects at boot — so an import-time resolution yields the identical
+    map a post-boot one would.
     """
     config = PipelexConfig.model_validate(config_manager.load_config())
     return build_registrar(config=config).get_http_error_mappers()

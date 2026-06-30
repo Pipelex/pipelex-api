@@ -1786,7 +1786,7 @@ wheels = [
 
 [[package]]
 name = "mthds"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -1795,9 +1795,9 @@ dependencies = [
     { name = "tomlkit" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3a/6b/5d706bade53e93466fbe1816d3046b7924c67bfec9859544cbedf21ea4c5/mthds-0.5.0.tar.gz", hash = "sha256:143b4405590d4f78713c442ad55553542d630c374099e9ee02b96823b2a2c426", size = 142082, upload-time = "2026-06-18T20:45:24.601Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/51/d4/64263f35f42dcc0a74bb348e6511e923fe32f99d851955f04673f1cb5d68/mthds-0.6.0.tar.gz", hash = "sha256:8608599345f90b1a6f4a475cc73dc050d9dfd69c4b9245d814b8733fd923dd5b", size = 131133, upload-time = "2026-06-30T12:50:51.744Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ef/47/0af23c995b6859b8809d077185d97de1be93c50f56bfe980daaf7cd9fc2d/mthds-0.5.0-py3-none-any.whl", hash = "sha256:a41a7b5986b65f41b0465372fc4f9180800ad212ed67830d8bb8d6dd457cd220", size = 64413, upload-time = "2026-06-18T20:45:23.277Z" },
+    { url = "https://files.pythonhosted.org/packages/58/f3/4b30d61dbd6b5699954da41908353524b07c388376a0bb164e75196bd6c0/mthds-0.6.0-py3-none-any.whl", hash = "sha256:8faf7ba78e672da7c3693a07872bfd654fcdcff43d0e085a9d340d9920beb2f3", size = 57703, upload-time = "2026-06-30T12:50:50.57Z" },
 ]
 
 [[package]]
@@ -2311,8 +2311,8 @@ wheels = [
 
 [[package]]
 name = "pipelex"
-version = "0.35.1"
-source = { git = "https://github.com/Pipelex/pipelex.git?rev=dee747ad0f33e71a0f0c9c453235ec1e1ed5fbf1#dee747ad0f33e71a0f0c9c453235ec1e1ed5fbf1" }
+version = "0.36.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
     { name = "datamodel-code-generator" },
@@ -2351,6 +2351,10 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "urllib3" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/b9/3e/51aa5abb42fdf9191d42545d326306deb0c1953c0db3c5ac20988a8014cd/pipelex-0.36.0.tar.gz", hash = "sha256:ef07cd050c69406762a66ddfd203d84006050247017eac7fddb185301e76a098", size = 977043, upload-time = "2026-06-30T14:50:43.96Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3f/12/3b0c9ec0de691b07bf17b8e03a53847ad7a2be386b4e2d5e5f40617d8b39/pipelex-0.36.0-py3-none-any.whl", hash = "sha256:aea61bb549ee1f2418e2f0c4b6f80243454105cc129cbebea318d80a1d929c6a", size = 1396810, upload-time = "2026-06-30T14:50:41.944Z" },
+]
 
 [package.optional-dependencies]
 anthropic = [
@@ -2378,11 +2382,10 @@ mistralai = [
 
 [[package]]
 name = "pipelex-api"
-version = "0.5.0"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
-    { name = "mthds" },
     { name = "pipelex", extra = ["anthropic", "bedrock", "fal", "google", "google-genai", "mistralai"] },
     { name = "pipelex-tools-py" },
     { name = "pyjwt" },
@@ -2430,10 +2433,9 @@ requires-dist = [
     { name = "mkdocs-glightbox", marker = "extra == 'docs'", specifier = "==0.4.0" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = "==9.6.14" },
     { name = "mkdocs-meta-manager", marker = "extra == 'docs'", specifier = "==1.1.0" },
-    { name = "mthds", specifier = ">=0.5.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.2" },
     { name = "pandas-stubs", marker = "extra == 'dev'", specifier = ">=2.2.3.241126" },
-    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal"], git = "https://github.com/Pipelex/pipelex.git?rev=dee747ad0f33e71a0f0c9c453235ec1e1ed5fbf1" },
+    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal"], specifier = "==0.36.0" },
     { name = "pipelex-tools-py", specifier = ">=0.1.0" },
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.3.8" },
