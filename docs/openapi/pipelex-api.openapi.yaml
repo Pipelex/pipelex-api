@@ -5,13 +5,13 @@ info:
   summary: The open-source Pipelex runner — implements MTHDS Protocol v0.6.0.
   description: 'This server implements the [MTHDS Protocol](https://mthds.ai) v0.6.0 (`POST /execute`, `POST /start`, `POST
     /validate`, `GET /models`, `GET /version` — marked `x-mthds-protocol: true`) plus the Pipelex build tooling extensions
-    (`/build/*`). Contract layering: MTHDS Protocol ⊂ Pipelex API (this server) ⊂ Pipelex hosted API. Routes not in the published
-    contract (`/upload`, `/resolve-storage-url`) are documented as non-contract in their descriptions. All endpoints are served
-    under the `/v1` base path; errors are RFC 7807 `application/problem+json`.'
+    (`/build/*`) and editor tooling extensions (`/lint`, `/format`). Contract layering: MTHDS Protocol ⊂ Pipelex API (this
+    server) ⊂ Pipelex hosted API. Routes not in the published contract (`/upload`, `/resolve-storage-url`) are documented
+    as non-contract in their descriptions. All endpoints are served under the `/v1` base path; errors are RFC 7807 `application/problem+json`.'
   license:
     name: MIT
     identifier: MIT
-  version: 0.5.0
+  version: 0.6.0
 paths:
   /health:
     get:
@@ -181,9 +181,17 @@ paths:
       description: 'Execute a method synchronously and return its full output (MTHDS Protocol `POST /execute`).
 
 
-        Pipelex domain failures propagate untouched: the global `PipelexError`
+        The backend is selected by the resolved `orchestration_mode` (deployment default + optional
 
-        handler in `api.exception_handlers` turns them into an RFC 7807 problem response.'
+        policy-gated per-request override via the `orchestration_mode` extra), symmetric with `/start` —
+
+        not by `boot_orchestrator`. `/execute` is synchronous, so it dispatches with `BLOCKING` delivery
+
+        regardless of backend (wait-semantics is endpoint-set, never requestable). Pipelex domain
+
+        failures propagate untouched: the global `PipelexError` handler in `api.exception_handlers`
+
+        turns them into an RFC 7807 problem response.'
       operationId: execute_v1_execute_post
       requestBody:
         content:
@@ -255,19 +263,29 @@ paths:
                   - type: string
                   - type: 'null'
                   title: Dynamic Output Concept Ref
+                orchestration_mode:
+                  anyOf:
+                  - type: string
+                  - type: 'null'
+                  title: Orchestration Mode
+                  description: 'PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — request the orchestration mode (the
+                    backend) for this run. An OPEN string token: `direct` (in-process, the base default), `temporal`, and
+                    any other plugin-provided token are accepted; an unregistered token is refused at dispatch. The delivery
+                    axis (blocking vs fire-and-forget) is endpoint-set, never requestable. Honored ONLY when the deployment
+                    sets `allow_request_orchestration_mode_override = true` in its `api.toml`; otherwise a token that differs
+                    from the deployment default is refused with a 403. Omit it to use the deployment default.'
               additionalProperties: true
               type: object
-              title: RunRequest
-              description: "Body of `POST /execute` — this server's typed request model.\n\nThe MTHDS Protocol has no request\
-                \ model (`mthds` deleted `RunRequest`: the\nrequest body is just the basic args the runner already takes as\
-                \ named\nparameters). pipelex-api keeps a typed model so it can publish the request\nschema in its OpenAPI\
-                \ artifact and parse the body once.\n\nThe declared fields are the protocol's **basic** arguments. The model\
-                \ is\ndeliberately open (`extra=\"allow\"`): a caller may send extra request\nproperties (an extension may\
-                \ carry the method selector), and they are kept\nrather than silently dropped.\n\nAttributes:\n    pipe_code:\
-                \ Code of the pipe to execute.\n    mthds_contents: List of MTHDS bundle contents to load.\n    inputs: Inputs\
-                \ in PipelineInputs format — Pydantic validation is skipped\n        to preserve the flexible format (dicts,\
-                \ strings, StuffContent objects, etc.).\n    output_name: Name of the output slot to write to.\n    output_multiplicity:\
-                \ Output multiplicity setting.\n    dynamic_output_concept_ref: Override for the dynamic output concept ref."
+              title: PipelexApiExecuteRequest
+              description: 'Documented body of `POST /execute` — the protocol''s `RunRequest` plus THIS server''s `orchestration_mode`
+                extension.
+
+
+                Used only to publish the OpenAPI request schema: `/execute` reads the body through the raw
+
+                `Request` (kajson decoding), so FastAPI cannot infer the body type; this model documents the
+
+                per-request `orchestration_mode` override the route actually honors (parsed by `PipelineApiExtras`).'
         required: true
       responses:
         '200':
@@ -282,7 +300,7 @@ paths:
       tags:
       - run
       summary: Start
-      description: 'Start a method asynchronously; returns its pipeline_run_id immediately (MTHDS Protocol `POST /start`).
+      description: 'Start a method run and return its pipeline_run_id with a 202 ack (MTHDS Protocol `POST /start`).
 
 
         Answers `202 Accepted` with a `StartAck`. A client-supplied `pipeline_run_id` is
@@ -293,7 +311,24 @@ paths:
 
         `PipelexError` handler in `api.exception_handlers` turns them into an
 
-        RFC 7807 problem response.'
+        RFC 7807 problem response.
+
+
+        Fire-and-forget is a property of THIS endpoint (its delivery axis), honored only by an
+
+        async-capable backend. A deployment configures the backend (`orchestration_mode`) once; `/start`
+
+        sets `FIRE_AND_FORGET` delivery and checks the resolved orchestrator can honor it. A Temporal
+
+        deployment (`orchestration_mode = "temporal"`) enqueues the run and returns immediately with a
+
+        `workflow_id`. On the orchestrator-agnostic base (`orchestration_mode = "direct"`, the default)
+
+        the in-process orchestrator is blocking-only, so `/start` is HONEST: it refuses with a `400`
+
+        (`StartRequiresAsyncOrchestration`) — use `/execute` — rather than silently blocking and acking.
+
+        The completion callback (`callback_urls` / storage delivery) fires on the async path.'
       operationId: start_v1_start_post
       requestBody:
         content:
@@ -381,6 +416,17 @@ paths:
                   description: PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — completion webhooks. When the run
                     finishes, the runner POSTs the RunResult to each URL, HMAC-SHA256-signed via the X-Completion-Signature
                     header. http/https only; private, loopback, link-local and cloud-metadata hosts are rejected.
+                orchestration_mode:
+                  anyOf:
+                  - type: string
+                  - type: 'null'
+                  title: Orchestration Mode
+                  description: 'PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — request the orchestration mode (the
+                    backend) for this run. An OPEN string token: `direct` (in-process, the base default), `temporal`, and
+                    any other plugin-provided token are accepted; an unregistered token is refused at dispatch. The delivery
+                    axis (blocking vs fire-and-forget) is endpoint-set, never requestable. Honored ONLY when the deployment
+                    sets `allow_request_orchestration_mode_override = true` in its `api.toml`; otherwise a token that differs
+                    from the deployment default is refused with a 403. Omit it to use the deployment default.'
               additionalProperties: true
               type: object
               title: PipelexApiStartRequest
@@ -416,14 +462,14 @@ paths:
         \ and carries `graph_spec=null`. Pending\n  signatures are reported as `pending_signatures` + `is_runnable: false`,\
         \ never as an error.\n- **Invalid verdict (200, `is_valid: false`):** the `InvalidReport` arm — `validation_errors[]`\n\
         \  (the structured per-error diagnostics, built by pipelex's one shared builder, incl. the\n  `dry_run` residual item)\
-        \ + `message`, with the structural artifacts absent. This is what the\n  route synthesizes by catching the runtime's\
-        \ `ValidateBundleError` (direct mode) and the\n  Temporal-recovered `WorkflowExecutionError` (whose `to_error_report()`\
-        \ recovers the original\n  `ValidateBundleError` report) — neither reaches the global handler.\n- **No verdict (non-2xx):**\
-        \ a malformed request body or an `mthds_sources` length mismatch is a\n  request-shape **422**; a host-wiring programmer\
-        \ error is a `PipelexUnexpectedError` → **500**;\n  auth is **401/403**. All are RFC 7807 `application/problem+json`\
-        \ rendered by the global\n  handler in `api.exception_handlers` — routes never shape them. A genuine Temporal workflow\n\
-        \  fault (a `WorkflowExecutionError` that recovers no `ValidateBundleError`) is re-raised here\n  so it lands as a\
-        \ 5xx, not a verdict."
+        \ + `message`, with the structural artifacts absent. The runner\n  returns this as a value (`ErrorReport` with `validation_errors`)\
+        \ regardless of backend — the\n  in-process arm from the bundle's `ValidateBundleError`, the dispatched arm recovered\
+        \ from the\n  worker — so the route maps it to a 200 by matching validation diagnostics, never by catching an\n  exception.\
+        \ Returned `ErrorReport`s without validation diagnostics are backend/config/runtime\n  faults and keep the global\
+        \ RFC 7807 problem response path.\n- **No verdict (non-2xx):** a malformed request body or an `mthds_sources` length\
+        \ mismatch is a\n  request-shape **422**; a forbidden `orchestration_mode` override is a **403**; a host-wiring\n\
+        \  programmer error or a genuine orchestrator fault is a **5xx**; auth is **401/403**. All are\n  RFC 7807 `application/problem+json`\
+        \ rendered by the global handler in\n  `api.exception_handlers` — routes never shape them."
       operationId: validate_mthds_v1_validate_post
       requestBody:
         content:
@@ -453,6 +499,70 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
       x-mthds-protocol: true
+  /v1/lint:
+    post:
+      tags:
+      - tools
+      summary: Lint Mthds
+      description: 'Lint one .mthds file with the embedded MTHDS schema.
+
+
+        Malformed .mthds content is a produced diagnostic verdict and returns 200.
+
+        Request-shape problems remain RFC 7807 422 responses through the global handlers.'
+      operationId: lint_mthds_v1_lint_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LintRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LintResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/problem+json:
+              schema:
+                additionalProperties: true
+                type: object
+  /v1/format:
+    post:
+      tags:
+      - tools
+      summary: Format Mthds
+      description: 'Format one .mthds file with the canonical MTHDS formatter.
+
+
+        Syntax errors return 200 with diagnostics and unchanged content. Malformed
+
+        formatter options are caller input errors and return RFC 7807 422.'
+      operationId: format_mthds_v1_format_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FormatRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FormatResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/problem+json:
+              schema:
+                additionalProperties: true
+                type: object
   /v1/models:
     get:
       tags:
@@ -1103,6 +1213,39 @@ components:
       - pipe_and_concept_registry
       title: DataInclusionConfig
       description: Controls which data is included in graph outputs.
+    Diagnostic:
+      properties:
+        kind:
+          type: string
+          enum:
+          - syntax
+          - semantic
+          - schema
+          title: Kind
+        severity:
+          type: string
+          title: Severity
+        message:
+          type: string
+          title: Message
+        location:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Location
+        range:
+          anyOf:
+          - $ref: '#/components/schemas/Range'
+          - type: 'null'
+      type: object
+      required:
+      - kind
+      - severity
+      - message
+      - location
+      - range
+      title: Diagnostic
+      description: Structured lint/format diagnostic returned by `pipelex-tools-py`.
     DryRunStatus:
       type: string
       enum:
@@ -1263,6 +1406,45 @@ components:
       - inference_model_id
       - nb_tokens_by_category
       title: ExtractTokensUsage
+    FormatRequest:
+      properties:
+        content:
+          type: string
+          title: Content
+          description: Single .mthds file content to lint or format.
+        options:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Options
+          description: Optional formatter options passed through to `pipelex_tools.format_mthds`, such as `column_width`.
+            Malformed option values return a 422 problem response.
+      type: object
+      required:
+      - content
+      title: FormatRequest
+      description: Body of `POST /format`.
+    FormatResponse:
+      properties:
+        formatted:
+          type: string
+          title: Formatted
+        changed:
+          type: boolean
+          title: Changed
+        diagnostics:
+          items:
+            $ref: '#/components/schemas/Diagnostic'
+          type: array
+          title: Diagnostics
+      type: object
+      required:
+      - formatted
+      - changed
+      - diagnostics
+      title: FormatResponse
+      description: Response body of `POST /format`.
     GraphSpec:
       properties:
         graph_id:
@@ -1709,6 +1891,36 @@ components:
       - inference_model_id
       - nb_tokens_by_category
       title: LLMTokensUsage
+    LintRequest:
+      properties:
+        content:
+          type: string
+          title: Content
+          description: Single .mthds file content to lint or format.
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+          description: Optional logical filename for the content. Accepted for parity with `pipelex_tools.lint_mthds`; current
+            diagnostics do not yet include the filename.
+      type: object
+      required:
+      - content
+      title: LintRequest
+      description: Body of `POST /lint`.
+    LintResponse:
+      properties:
+        diagnostics:
+          items:
+            $ref: '#/components/schemas/Diagnostic'
+          type: array
+          title: Diagnostics
+      type: object
+      required:
+      - diagnostics
+      title: LintResponse
+      description: Response body of `POST /lint`.
     ModelCategory:
       type: string
       enum:
@@ -2908,6 +3120,36 @@ components:
       - medium
       - high
       title: Quality
+    Range:
+      properties:
+        start_offset:
+          type: integer
+          title: Start Offset
+        end_offset:
+          type: integer
+          title: End Offset
+        start_line:
+          type: integer
+          title: Start Line
+        start_col:
+          type: integer
+          title: Start Col
+        end_line:
+          type: integer
+          title: End Line
+        end_col:
+          type: integer
+          title: End Col
+      type: object
+      required:
+      - start_offset
+      - end_offset
+      - start_line
+      - start_col
+      - end_line
+      - end_col
+      title: Range
+      description: Byte offsets plus 1-based line/column coordinates from `pipelex-tools-py`.
     ReasoningEffort:
       type: string
       enum:
@@ -3421,6 +3663,16 @@ components:
             adds a `rendered_<format>` field (e.g. `rendered_markdown`) to the 200 verdict, on both the valid and invalid
             arms. Unknown/unsupported tokens are silently ignored (presentation hint, not part of the verdict contract); the
             default empty list renders nothing and the response is unchanged.'
+        orchestration_mode:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Orchestration Mode
+          description: 'Optional per-request orchestration-mode (backend) override for the validation dispatch (same plumbing
+            as `/start`). An OPEN string token: `direct` validates in-process; a `temporal` mode dispatches the whole job
+            to a worker; any plugin-provided token is accepted and an unregistered one is refused at dispatch. Honored only
+            when the deployment sets `allow_request_orchestration_mode_override = true` in its `api.toml`; otherwise a token
+            that differs from the deployment default is refused with a 403. Omitted → the default.'
       type: object
       required:
       - mthds_contents

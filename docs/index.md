@@ -12,7 +12,7 @@ MTHDS Protocol  ⊂  Pipelex API (this server)  ⊂  Pipelex hosted API
 ```
 
 - **MTHDS Protocol** — five routes: `POST /execute`, `POST /start`, `POST /validate`, `GET /models`, `GET /version`. Tagged `x-mthds-protocol: true` in the [committed OpenAPI artifact](openapi/pipelex-api.openapi.yaml).
-- **Pipelex API (this server)** — the protocol verbatim, plus the build tooling extensions (`/build/*`). `/upload` and `/resolve-storage-url` exist but are NOT part of the published contract.
+- **Pipelex API (this server)** — the protocol verbatim, plus the build tooling extensions (`/build/*`) and editor tooling (`/lint`, `/format`). `/upload` and `/resolve-storage-url` exist but are NOT part of the published contract.
 - **Pipelex hosted API** (`api.pipelex.com/v1`) — everything here, same shapes, plus durable runs, the method catalog, and account management.
 
 All routes are served under the `/v1` base path (clients compose `{base}/v1/{endpoint}`).
@@ -24,8 +24,9 @@ The API currently allows you to:
 1. **Run** any Pipelex pipeline with flexible inputs (sync or async)
 2. **Validate** any Pipelex pipeline to ensure correctness
 3. **Build** pipeline components — generate input schemas, output representations, runner code, concepts, and pipe specs
-4. **List** available model presets and configurations
-5. **Upload** files via presigned URLs
+4. **Lint and format** single `.mthds` files for editor workflows
+5. **List** available model presets and configurations
+6. **Upload** files via presigned URLs
 
 ## Deployment
 
@@ -71,7 +72,7 @@ The response contains `state: "COMPLETED"` and the result under `pipe_output.wor
 
 ### 4. Customize the configuration
 
-Need to disable Temporal, point to a different storage backend, or ship your own model deck? See **[Configuration →](configuration.md)** for how to provide your own `.pipelex/` config files to the Docker image and a quick recipe for running without Temporal.
+Need to change the execution mode, point to a different storage backend, or ship your own model deck? See **[Configuration →](configuration.md)** for how to provide your own `.pipelex/` config files to the Docker image. The base runs every pipeline in-process by default; distributed execution (Temporal, …) is added by a deployment flavor, not configured on the base.
 
 ## Base URL
 
@@ -144,6 +145,14 @@ Validate MTHDS content to ensure pipelines are correctly defined before executio
 - `POST /v1/validate` — Parse, validate, and dry-run pipelines
 
 [Learn more →](pipe-validate.md)
+
+### MTHDS Tools
+Lint and format single `.mthds` files without loading or executing a pipeline.
+
+- `POST /v1/lint` — Return syntax, semantic, or schema diagnostics
+- `POST /v1/format` — Return formatted content, changed status, and blocking syntax diagnostics
+
+[Learn more →](mthds-tools.md)
 
 ### Pipe Builder
 Generate input schemas, output representations, and runner code for pipelines.

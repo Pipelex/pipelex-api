@@ -1,16 +1,15 @@
 from typing import Annotated, Literal, Self, Union
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pipelex.base_exceptions import ErrorReport, ValidationErrorItem
-from pipelex.pipeline.exceptions import ValidateBundleError
 from pipelex.pipeline.validation_render import format_validate_markdown, render_invalid_validation_markdown
 from pipelex.pipeline.validation_report import PipelexValidationReport
-from pipelex.temporal.exceptions import WorkflowExecutionError
 from pipelex.tools.typing.pydantic_utils import empty_list_factory_of
 from pipelex.types import StrEnum
 from pydantic import BaseModel, Field, model_validator
 
+from api.exception_handlers import problem_response_from_error_report
 from api.routes.pipelex.pipeline import ApiRunner
 from api.schemas.models import MthdsContentsRequest
 
@@ -63,6 +62,16 @@ class ValidateRequest(MthdsContentsRequest):
             "(`markdown`) adds a `rendered_<format>` field (e.g. `rendered_markdown`) to the 200 verdict, on both "
             "the valid and invalid arms. Unknown/unsupported tokens are silently ignored (presentation hint, not "
             "part of the verdict contract); the default empty list renders nothing and the response is unchanged."
+        ),
+    )
+    orchestration_mode: str | None = Field(
+        default=None,
+        description=(
+            "Optional per-request orchestration-mode (backend) override for the validation dispatch (same plumbing as "
+            "`/start`). An OPEN string token: `direct` validates in-process; a `temporal` mode dispatches the whole "
+            "job to a worker; any plugin-provided token is accepted and an unregistered one is refused at dispatch. "
+            "Honored only when the deployment sets `allow_request_orchestration_mode_override = true` in its `api.toml`; "
+            "otherwise a token that differs from the deployment default is refused with a 403. Omitted → the default."
         ),
     )
 
@@ -140,7 +149,7 @@ ValidationResponse = Annotated[Union[ValidReport, InvalidReport], Field(discrimi
 
 
 @router.post("/validate", response_model=ValidationResponse, openapi_extra={"x-mthds-protocol": True})
-async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
+async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSONResponse:
     """Validate MTHDS content by parsing, loading, and dry-running pipes (MTHDS Protocol `POST /validate`).
 
     `/validate` is a **diagnostic endpoint**: any verdict the validator can produce — valid,
@@ -157,42 +166,36 @@ async def validate_mthds(request_data: ValidateRequest) -> JSONResponse:
       signatures are reported as `pending_signatures` + `is_runnable: false`, never as an error.
     - **Invalid verdict (200, `is_valid: false`):** the `InvalidReport` arm — `validation_errors[]`
       (the structured per-error diagnostics, built by pipelex's one shared builder, incl. the
-      `dry_run` residual item) + `message`, with the structural artifacts absent. This is what the
-      route synthesizes by catching the runtime's `ValidateBundleError` (direct mode) and the
-      Temporal-recovered `WorkflowExecutionError` (whose `to_error_report()` recovers the original
-      `ValidateBundleError` report) — neither reaches the global handler.
+      `dry_run` residual item) + `message`, with the structural artifacts absent. The runner
+      returns this as a value (`ErrorReport` with `validation_errors`) regardless of backend — the
+      in-process arm from the bundle's `ValidateBundleError`, the dispatched arm recovered from the
+      worker — so the route maps it to a 200 by matching validation diagnostics, never by catching an
+      exception. Returned `ErrorReport`s without validation diagnostics are backend/config/runtime
+      faults and keep the global RFC 7807 problem response path.
     - **No verdict (non-2xx):** a malformed request body or an `mthds_sources` length mismatch is a
-      request-shape **422**; a host-wiring programmer error is a `PipelexUnexpectedError` → **500**;
-      auth is **401/403**. All are RFC 7807 `application/problem+json` rendered by the global
-      handler in `api.exception_handlers` — routes never shape them. A genuine Temporal workflow
-      fault (a `WorkflowExecutionError` that recovers no `ValidateBundleError`) is re-raised here
-      so it lands as a 5xx, not a verdict.
+      request-shape **422**; a forbidden `orchestration_mode` override is a **403**; a host-wiring
+      programmer error or a genuine orchestrator fault is a **5xx**; auth is **401/403**. All are
+      RFC 7807 `application/problem+json` rendered by the global handler in
+      `api.exception_handlers` — routes never shape them.
     """
     # Opt-in presentation formats (D-D): resolved once, threaded into both 200 arms. Empty by
     # default → no `rendered_*` field, response byte-identical to the no-`render` request.
     requested_formats = _resolve_render_formats(request_data.render)
-    try:
-        report = await ApiRunner().validate(
-            mthds_contents=request_data.mthds_contents,
-            allow_signatures=request_data.allow_signatures,
-            # `mthds_sources` rides the protocol's `extra` extension hook (mthds-python 0.5.0
-            # generalized the concrete param to `extra: dict | None`). Omitted when absent so the
-            # sourceless path is unchanged.
-            extra={"mthds_sources": request_data.mthds_sources} if request_data.mthds_sources is not None else None,
-        )
-    except ValidateBundleError as validation_error:
-        # Direct backend: an invalid bundle is a produced verdict (200 InvalidReport), not a
-        # transport failure — intercept it before the global 422 handler.
-        return _invalid_report_response(validation_error.to_error_report(), requested_formats=requested_formats)
-    except WorkflowExecutionError as workflow_error:
-        # Temporal backend: a content verdict crosses the activity boundary as a
-        # WorkflowExecutionError that recovers the original ValidateBundleError report. A genuine
-        # workflow fault recovers no such report → re-raise to the global problem+json handler
-        # (it is a no-verdict server condition, not a verdict the client submitted).
-        recovered_report = workflow_error.to_error_report()
-        if recovered_report.error_type != ValidateBundleError.__name__:
-            raise
-        return _invalid_report_response(recovered_report, requested_formats=requested_formats)
+    # Verdict-as-value: the runner resolves the orchestration mode and dispatches through the bundle
+    # validator registry, returning either a validation verdict or a classified fault report.
+    # Only `ErrorReport`s with validation diagnostics are invalid-bundle verdicts (→ 200
+    # InvalidReport); backend/config/runtime reports keep the global problem+json mapping.
+    verdict = await ApiRunner().validate_verdict(
+        mthds_contents=request_data.mthds_contents,
+        mthds_sources=request_data.mthds_sources,
+        allow_signatures=request_data.allow_signatures,
+        requested_orchestration_mode=request_data.orchestration_mode,
+    )
+    if not isinstance(verdict, PipelexValidationReport):
+        if verdict.validation_errors:
+            return _invalid_report_response(verdict, requested_formats=requested_formats)
+        return problem_response_from_error_report(verdict, request=request)
+    report = verdict
 
     # Splat the report's own field/value pairs so a future canonical field rides the wire
     # automatically — the wrapper never enumerates (and silently drops) report fields. `is_valid`

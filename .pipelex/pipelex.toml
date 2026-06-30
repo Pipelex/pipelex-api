@@ -145,14 +145,6 @@ console_print_target = "stdout"
 pipelex = "INFO"
 
 ####################################################################################################
-# Feature Config
-####################################################################################################
-
-[pipelex.feature_config]
-# WIP/Experimental feature flags
-is_reporting_enabled = true
-
-####################################################################################################
 # Reporting Config
 ####################################################################################################
 
@@ -203,60 +195,3 @@ traces_dir = ".pipelex/traces"
 # Configure your own table_name + region in your override file when backend = "dynamodb".
 table_name = ""
 region = ""
-
-####################################################################################################
-# Temporal Config
-####################################################################################################
-
-[temporal]
-# Temporal is opt-in. With Temporal disabled the API runs pipelines in-process
-# (POST /v1/execute) and POST /v1/start is unavailable.
-# To enable: add a [temporal] section in your pipelex_override.toml with
-# is_enabled = true and define a server under [temporal.temporal_config.temporal_server_configs.<name>].
-is_enabled = false
-
-[temporal.worker_config]
-workflow_execution_timeout = "1:00:00"
-run_timeout = "1:00:00"
-task_timeout = "0:00:10"
-start_delay = "0:00:00"
-rpc_timeout = "1:00:00"
-
-[temporal.worker_config.retry_policy_config]
-initial_interval = "0:00:03"
-backoff_coefficient = 2.0
-maximum_interval = "unlimited"
-maximum_attempts = 3
-non_retryable_error_types = [
-  "ExtractHandleNotFoundError",
-  "FileNotFoundError",
-  "ImgGenHandleNotFoundError",
-  "LLMHandleNotFoundError",
-  "ModelNotFoundError",
-  "ValidationError",
-]
-
-[temporal.temporal_config]
-selected_server = "local"
-
-[temporal.temporal_config.temporal_server_configs.local]
-description = "default localhost"
-target_host = "localhost:7233"
-namespace = "default"
-api_key_method = "none"
-api_key_id = ""
-
-[temporal.temporal_config.temporal_log_config]
-is_workflow_info_on_message = false
-is_workflow_info_on_extra = true
-is_full_workflow_info_on_extra = false
-is_activity_info_on_message = false
-is_activity_info_on_extra = true
-is_full_activity_info_on_extra = false
-is_formatter_enabled = true
-is_prefix_enabled = true
-managed_loggers = [
-  "temporalio.activity",
-  "temporalio.workflow",
-  "temporalio.worker._activity",
-]

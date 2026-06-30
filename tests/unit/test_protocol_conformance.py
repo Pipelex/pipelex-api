@@ -12,8 +12,8 @@ mechanism that prevents first-party spec drift (master plan, eng review):
 - A client-supplied `pipeline_run_id` on `/start` is honored (master D11 — this
   open-source runner accepts it; `StartAck.pipeline_run_id` echoes it back).
 - The completion-callback E2E (eng-review 5A): `/start` with `callback_urls`
-  delivers a signed POST to a local in-test receiver. Temporal is replaced by a
-  fake whose `start` runs the real `DeliveryExecutor` delivery in-process, so
+  delivers a signed POST to a local in-test receiver. The orchestrator is replaced
+  by a fake whose `run` performs the real `DeliveryExecutor` delivery in-process, so
   the wire bytes (headers + JSON payload) are the production delivery path's.
 """
 
@@ -36,6 +36,8 @@ from mthds.protocol.protocol import PROTOCOL_VERSION
 from pipelex.pipe_run.delivery_assignment import DeliveryAssignment, DeliveryStatus
 from pipelex.pipe_run.delivery_executor import DeliveryExecutor
 from pipelex.pipeline.pipeline_response import RunState
+from pipelex.runtime_bridge.delivery_mode import DeliveryMode
+from pipelex.runtime_bridge.payloads import PipelexPipeRunOutput
 from typing_extensions import override
 
 from api.exception_handlers import register_exception_handlers
@@ -154,7 +156,7 @@ class TestProtocolConformance:
         and the completion callback reaches the receiver with a valid
         `X-Completion-Signature` and a payload carrying the protocol `pipeline_run_id`.
 
-        Temporal is replaced by a fake whose `start` immediately runs the REAL
+        The orchestrator is replaced by a fake whose `run` immediately runs the REAL
         `DeliveryExecutor` delivery against the captured `DeliveryAssignment`
         (storage skipped — no pipe output), so headers and payload bytes come
         from the production delivery code path. The SSRF guards are relaxed for
@@ -181,8 +183,15 @@ class TestProtocolConformance:
         test_secret = "conformance-shared-callback-secret"
         mocker.patch.dict(os.environ, {"COMPLETION_CALLBACK_SECRET": test_secret})
 
-        # --- fake Temporal: deliver the completion in-process ---------------------
-        async def fake_temporal_start(pipe_job: Any, delivery_assignment: DeliveryAssignment) -> tuple[str, None]:
+        # --- fake orchestrator: deliver the completion in-process -----------------
+        # The runner now dispatches the locally-built PipeJob through the hub's
+        # OrchestratorRegistry. Stand in a fake orchestrator whose `run` performs the REAL
+        # DeliveryExecutor delivery and returns a fire-and-forget output (workflow_id set,
+        # is_completed False), so the delivery wire bytes still come from the production path
+        # without needing a Temporal cluster or the `pipelex-temporal` plugin.
+        async def fake_run(*, pipe_job: Any, delivery_assignment: DeliveryAssignment, delivery: DeliveryMode) -> PipelexPipeRunOutput:
+            # `/start` sets the delivery axis itself — it must reach the orchestrator as FIRE_AND_FORGET.
+            assert delivery is DeliveryMode.FIRE_AND_FORGET
             await DeliveryExecutor().execute(
                 pipe_output=None,
                 user_id="anonymous",
@@ -190,11 +199,21 @@ class TestProtocolConformance:
                 delivery_assignment=delivery_assignment,
                 status=DeliveryStatus.COMPLETED,
             )
-            return "wf-conformance-1", None
+            return PipelexPipeRunOutput(
+                output_dict={},
+                pipeline_run_id=pipe_job.job_metadata.pipeline_run_id,
+                workflow_id="wf-conformance-1",
+                is_completed=False,
+            )
 
-        fake_temporal = mocker.MagicMock()
-        fake_temporal.start = mocker.AsyncMock(side_effect=fake_temporal_start)
-        mocker.patch("api.routes.pipelex.pipeline.make_temporal_pipe_run", return_value=fake_temporal)
+        # The fake stands in for an async-capable backend so `/start`'s capability gate passes (it
+        # checks `supports_fire_and_forget` BEFORE dispatch — a blocking-only orchestrator would 400).
+        fake_orchestrator = mocker.MagicMock()
+        fake_orchestrator.supports_fire_and_forget = True
+        fake_orchestrator.run = mocker.AsyncMock(side_effect=fake_run)
+        fake_registry = mocker.MagicMock()
+        fake_registry.get_optional.return_value = fake_orchestrator
+        mocker.patch("api.routes.pipelex.pipeline.get_orchestrator_registry", return_value=fake_registry)
 
         app = FastAPI(redirect_slashes=False)
         app.include_router(api_router, prefix="/v1")
@@ -223,6 +242,13 @@ class TestProtocolConformance:
         ack = response.json()
         assert ack["pipeline_run_id"] == client_pipeline_run_id
         assert ack["state"] == RunState.STARTED
+
+        # The runner resolved the deployment's orchestration mode and dispatched under it: with the
+        # packaged-default config (`direct`) and no per-request override, the registry is asked for the
+        # `direct` orchestrator by keyword `mode=` — so a regression that resolved/threaded the wrong
+        # mode would be caught here, not silently dispatched.
+        fake_registry.get_optional.assert_called_once_with(mode="direct")
+        fake_orchestrator.run.assert_awaited_once()
 
         # Exactly one delivery reached the receiver.
         assert len(_CallbackReceiver.captured) == 1

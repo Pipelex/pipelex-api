@@ -21,7 +21,7 @@ Issues tagged `good first issue` or `help-welcome` are easy entry points. If you
 
 ## Requirements
 
-- Python ≥ 3.11 (see `pyproject.toml`'s `requires-python`)
+- Python 3.11 through 3.14 (see `pyproject.toml`'s `requires-python`)
 - [uv](https://docs.astral.sh/uv/) ≥ 0.7.2
 - Docker (only required if you want to test the published image flow)
 

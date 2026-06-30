@@ -15,10 +15,15 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from mthds.protocol.protocol import PROTOCOL_VERSION
 from pipelex.pipelex import Pipelex
+from pipelex.plugins.discovery import build_registrar
+from pipelex.plugins.registrar import HttpErrorMapperFn
+from pipelex.system.configuration.config_loader import config_manager
+from pipelex.system.configuration.configs import PipelexConfig
 from pipelex.system.environment import get_optional_env
 from pipelex.system.runtime import IntegrationMode
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from api.api_config import get_api_config, resolve_boot_orchestrator
 from api.disclosure import resolve_disclosure_mode
 from api.exception_handlers import register_exception_handlers
 from api.middleware import RequestIdMiddleware, request_body_size_middleware
@@ -30,7 +35,24 @@ from api.security import get_auth_dependency
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    Pipelex.make(integration_mode=IntegrationMode.FASTAPI)
+    # Resolve the deployment's orchestration mode BEFORE booting, so the process can boot
+    # under the matching orchestrator. `orchestration_mode` selects the dispatch arm; a
+    # non-`direct` (async/boot) orchestrator — e.g. "temporal" — must additionally claim the
+    # process-global execution hub slots at boot, which the shared WorkflowExecutor requires
+    # (`is_*_boot_active()`): without it, a `temporal`-mode runner resolves the Temporal
+    # dispatch arm but the underlying pipe-run stack is still in-process, and dispatch fails
+    # with AsyncExecutionNotEnabledError. The base `direct` mode names no orchestrator and
+    # boots in-process (boot_orchestrator=None). `resolve_boot_orchestrator` derives boot from
+    # the deployment config and refuses a config whose single boot can't service its own
+    # per-request override policy (a `direct` default with override on) — so boot and dispatch
+    # can never be set inconsistently.
+    #
+    # Loading `api.toml` here also fails the app fast on a malformed config / baked override
+    # (the same posture as ERROR_DISCLOSURE), now even before the singleton exists. The loader
+    # only needs `runtime_manager.environment` (from PIPELEX_ENV), which resolves without a
+    # live singleton. get_api_config() is @cache'd, so the warm here is reused everywhere.
+    boot_orchestrator = resolve_boot_orchestrator(get_api_config())
+    Pipelex.make(integration_mode=IntegrationMode.FASTAPI, boot_orchestrator=boot_orchestrator)
     try:
         yield
     finally:
@@ -63,6 +85,32 @@ def _resolve_cors_origins() -> tuple[list[str], bool]:
 ERROR_DISCLOSURE_MODE = resolve_disclosure_mode()
 
 
+def _resolve_http_error_mappers() -> dict[type[Exception], HttpErrorMapperFn]:
+    """Resolve the orchestrator plugins' HTTP-error mappers for this deployment.
+
+    Runs the pure, repeatable `build_registrar` against the loaded config (the same
+    standalone pattern `pipelex plugins list` uses) and reads back the
+    `{exc_type: to_error_report}` map each installed orchestrator plugin contributed
+    via `PluginRegistrar.add_http_error_mapper`. The base installs no orchestrator
+    plugin, so this is an empty map and no transport-error handler is registered; a
+    flavor (e.g. the Temporal one) contributes its plugin's mapper here, and only at
+    this point — at app construction, where the plugin (and therefore its SDK) is by
+    definition installed — is the plugin's exc-type provider thunk run. Resolved once
+    at module import so a duplicate/broken plugin fails the app fast, mirroring the
+    `ERROR_DISCLOSURE` fail-fast above.
+
+    Safe at import because the map is a pure function of *installed* plugins (entry
+    points + `config.plugins.disabled`) — never of the `boot_orchestrator` that
+    `Pipelex.make` selects at boot — so an import-time resolution yields the identical
+    map a post-boot one would.
+    """
+    config = PipelexConfig.model_validate(config_manager.load_config())
+    return build_registrar(config=config).get_http_error_mappers()
+
+
+HTTP_ERROR_MAPPERS = _resolve_http_error_mappers()
+
+
 def _own_version() -> str:
     """This server package's version — best-effort for app metadata."""
     try:
@@ -80,7 +128,8 @@ fastapi_app = FastAPI(
     description=(
         f"This server implements the [MTHDS Protocol](https://mthds.ai) v{PROTOCOL_VERSION} "
         "(`POST /execute`, `POST /start`, `POST /validate`, `GET /models`, `GET /version` — "
-        "marked `x-mthds-protocol: true`) plus the Pipelex build tooling extensions (`/build/*`). "
+        "marked `x-mthds-protocol: true`) plus the Pipelex build tooling extensions (`/build/*`) "
+        "and editor tooling extensions (`/lint`, `/format`). "
         "Contract layering: MTHDS Protocol ⊂ Pipelex API (this server) ⊂ Pipelex hosted API. "
         "Routes not in the published contract (`/upload`, `/resolve-storage-url`) are documented "
         "as non-contract in their descriptions. All endpoints are served under the `/v1` base path; "
@@ -128,7 +177,7 @@ async def root() -> dict[str, str]:
     return {"message": "Pipelex API"}
 
 
-register_exception_handlers(fastapi_app, disclosure_mode=ERROR_DISCLOSURE_MODE)
+register_exception_handlers(fastapi_app, disclosure_mode=ERROR_DISCLOSURE_MODE, http_error_mappers=HTTP_ERROR_MAPPERS)
 
 
 # RequestIdMiddleware wraps the *entire* FastAPI app — including Starlette's

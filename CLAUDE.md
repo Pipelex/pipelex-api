@@ -42,6 +42,7 @@ make li               # lock + install
 make run              # Run the API with uvicorn (hot reload, no Docker — needs `make install` first)
 make docker-build     # Build Docker image from local source
 make docker-run       # Build + run in Docker on http://localhost:8081 (foreground)
+make docker-run-hub   # Pull + run the published Docker Hub image (no local build); HUB_TAG=<tag> to pin
 make docker-stop      # Force-stop the Docker container
 make docker-logs      # Tail Docker container logs
 ```
@@ -55,7 +56,7 @@ make docker-logs      # Tail Docker container logs
 
 ## Python Version
 
-- **Python 3.11+** (requires-python = ">=3.11,<4.0")
+- **Python 3.11+** (requires-python = ">=3.11,<3.15")
 - Avoid Python 3.10 idioms that changed in 3.11+
 
 ## Variable Naming

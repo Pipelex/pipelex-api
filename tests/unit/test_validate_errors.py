@@ -6,8 +6,8 @@ carrying a structured `validation_errors[]` list (the per-error diagnostics the 
 maps to per-line problems), built by pipelex's one shared builder; the structural artifacts
 (`bundle_blueprint`, `pipe_io_contracts`, `graph_spec`, `validated_pipes`) are absent on the invalid
 arm. Non-2xx is reserved for *no-verdict* conditions: a malformed body or an
-`mthds_sources`/`mthds_contents` length mismatch is a request-shape **422**; a genuine Temporal
-workflow fault is a **5xx**.
+`mthds_sources`/`mthds_contents` length mismatch is a request-shape **422**; a server fault that
+is not a produced verdict (a host-wiring `PipelexError` / `PipelexUnexpectedError`) is a **5xx**.
 
 When the caller sends `mthds_sources` parallel to `mthds_contents`, each name is threaded onto
 `blueprint.source`, so pipe/concept and blueprint errors name the owning file on BOTH the invalid
@@ -21,21 +21,17 @@ from typing import Any
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pipelex.base_exceptions import ValidationErrorCategory
+from pipelex.base_exceptions import PipelexConfigError, ValidationErrorCategory
 from pipelex.core.bundles.exceptions import PipelexBundleBlueprintValidationErrorData
 from pipelex.core.exceptions import PipeFactoryErrorData, PipesAndConceptValidationErrorData
 from pipelex.core.pipes.exceptions import PipeFactoryErrorType, PipeValidationErrorType
-from pipelex.pipeline.bundle_validator import DryRunOutput, DryRunStatus
 from pipelex.pipeline.exceptions import ValidateBundleError
-from pipelex.pipeline.pipe_io_contracts import IOMultiplicity, PipeInputContract, PipeIOContract, PipeOutputContract
-from pipelex.temporal.exceptions import WorkflowExecutionError
-from pipelex.temporal.tprl_pipe.act_dry_validate import DryValidateResult
 from pytest_mock import MockerFixture
 
 from api.exception_handlers import register_exception_handlers
 from api.routes import router as api_router
 from api.routes.pipelex.pipeline import ApiRunner
-from tests.unit._constants import INVALID_MAIN_PIPE_MTHDS, NO_MAIN_PIPE_MTHDS, VALID_MTHDS
+from tests.unit._constants import INVALID_MAIN_PIPE_MTHDS, VALID_MTHDS
 
 # Structural artifacts that exist only on the valid arm — the invalid arm must NOT carry them.
 _STRUCTURAL_FIELDS = ("bundle_blueprint", "pipe_io_contracts", "graph_spec", "validated_pipes")
@@ -133,11 +129,31 @@ class TestValidateErrors:
         assert sourced, f"no validation_errors item carried the threaded source: {items}"
         assert any(item["category"] == ValidationErrorCategory.BLUEPRINT_VALIDATION for item in sourced)
 
+    def test_toml_syntax_errors_carry_threaded_source(self):
+        client = _build_client()
+        response = client.post(
+            "/v1/validate",
+            json={
+                "mthds_contents": ['domain = "broken" trailing'],
+                "mthds_sources": ["broken.mthds"],
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["is_valid"] is False
+        items: list[dict[str, Any]] = body["validation_errors"]
+        sourced = [item for item in items if item.get("source") == "broken.mthds"]
+        assert sourced, f"no validation_errors item carried the threaded source: {items}"
+        assert any(item["category"] == ValidationErrorCategory.BLUEPRINT_VALIDATION for item in sourced)
+        assert any("TOML syntax error" in item["message"] for item in sourced)
+
     def test_all_categories_project_onto_invalid_report(self, mocker: MockerFixture):
         # Every structured category lands on the 200 InvalidReport, and collectively the items cover
         # the full ValidationErrorItem field set (so a dropped field would fail here, not silently
-        # vanish at the exception->wire boundary).
-        mocker.patch.object(ApiRunner, "validate", new=mocker.AsyncMock(side_effect=_multi_category_error()))
+        # vanish at the verdict->wire boundary). The runner returns the invalid verdict as a value
+        # (an ErrorReport) — here the ValidateBundleError's own `to_error_report()` projection.
+        mocker.patch.object(ApiRunner, "validate_verdict", new=mocker.AsyncMock(return_value=_multi_category_error().to_error_report()))
         client = _build_client()
         response = client.post("/v1/validate", json={"mthds_contents": [VALID_MTHDS]})
 
@@ -176,7 +192,7 @@ class TestValidateErrors:
         # message — the structured-info invariant (never a bare detail with an empty list). It is
         # graph-level, so it carries no `source`.
         residual = ValidateBundleError(message="Dry run failed: boom.", dry_run_error_message="Dry run failed: boom.")
-        mocker.patch.object(ApiRunner, "validate", new=mocker.AsyncMock(side_effect=residual))
+        mocker.patch.object(ApiRunner, "validate_verdict", new=mocker.AsyncMock(return_value=residual.to_error_report()))
         client = _build_client()
         response = client.post("/v1/validate", json={"mthds_contents": [VALID_MTHDS]})
 
@@ -191,31 +207,20 @@ class TestValidateErrors:
         assert dry_run_item["message"] == "Dry run failed: boom."
         assert "source" not in dry_run_item
 
-    def test_temporal_recovered_validation_error_is_200_invalid_report(self, mocker: MockerFixture):
-        # On the Temporal arm a content verdict crosses the activity boundary as a
-        # WorkflowExecutionError that recovers the original ValidateBundleError report. The route
-        # detects the recovered verdict and answers 200 InvalidReport — never a 422/5xx.
-        recovered_report = _multi_category_error().to_error_report()
-        workflow_error = WorkflowExecutionError("workflow failed", error_report=recovered_report)
-        mocker.patch.object(ApiRunner, "validate", new=mocker.AsyncMock(side_effect=workflow_error))
-        client = _build_client()
-        response = client.post("/v1/validate", json={"mthds_contents": [VALID_MTHDS]})
-
-        assert response.status_code == 200, response.text
-        body = response.json()
-        assert body["is_valid"] is False
-        assert {item["category"] for item in body["validation_errors"]}
-
-    def test_genuine_workflow_fault_is_not_a_verdict(self, mocker: MockerFixture):
-        # A WorkflowExecutionError that recovers NO ValidateBundleError report is a server fault, not
-        # a verdict the client submitted — it must propagate to the global problem+json handler
-        # (non-2xx), never masquerade as a 200 InvalidReport.
-        mocker.patch.object(ApiRunner, "validate", new=mocker.AsyncMock(side_effect=WorkflowExecutionError("cluster unreachable")))
+    def test_non_verdict_failure_is_not_a_200_verdict(self, mocker: MockerFixture):
+        # The runner returns a produced verdict (valid report | invalid ErrorReport) as a value; only
+        # a no-verdict fault propagates. A genuine host-wiring/server fault must reach the global
+        # problem+json handler as a 5xx, never be masqueraded as a 200 verdict. (Route invariant: the
+        # route maps the returned verdict and lets a raised fault propagate.)
+        mocker.patch.object(ApiRunner, "validate_verdict", new=mocker.AsyncMock(side_effect=PipelexConfigError("host wiring fault")))
         client = _build_client()
         response = client.post("/v1/validate", json={"mthds_contents": [VALID_MTHDS]})
 
         assert response.status_code >= 500, response.text
         assert response.headers["content-type"].startswith("application/problem+json")
+        # Not a verdict body: the discriminated-union arms always carry `is_valid`; a no-verdict
+        # problem document does not.
+        assert "is_valid" not in response.json()
 
     def test_valid_bundle_threads_source_onto_blueprint(self):
         client = _build_client()
@@ -244,39 +249,3 @@ class TestValidateErrors:
         assert response.status_code == 422, response.text
         assert response.headers["content-type"].startswith("application/problem+json")
         assert "mthds_sources" in response.text
-
-    def test_temporal_backend_threads_mthds_sources_through_dispatch(self, mocker: MockerFixture):
-        # Issue 5 on the Temporal arm: the per-content names ride the dispatched DryValidateArg
-        # AND the API-side blueprint parse threads them onto `bundle_blueprint.source`.
-        worker_result = DryValidateResult(
-            dry_run_outputs={"nomain.echo": DryRunOutput(pipe_code="echo", pipe_ref="nomain.echo", status=DryRunStatus.SUCCESS)},
-            graph_spec=None,
-            pending_signatures=[],
-            pipe_io_contracts={
-                "nomain.echo": PipeIOContract(
-                    inputs={"text": PipeInputContract(concept_ref="native.Text", json_schema={"type": "string"})},
-                    output=PipeOutputContract(concept_ref="native.Text", multiplicity=IOMultiplicity.SINGLE),
-                )
-            },
-        )
-        fake_config = mocker.MagicMock()
-        fake_config.temporal.is_enabled = True
-        mocker.patch("api.routes.pipelex.pipeline.get_config", return_value=fake_config)
-        dispatch_mock: Any = mocker.patch(
-            "api.routes.pipelex.pipeline.dispatch_dry_validate",
-            new=mocker.AsyncMock(return_value=worker_result),
-        )
-
-        client = _build_client()
-        response = client.post(
-            "/v1/validate",
-            json={"mthds_contents": [NO_MAIN_PIPE_MTHDS], "mthds_sources": ["api://nomain.mthds"]},
-        )
-
-        assert response.status_code == 200, response.text
-        body = response.json()
-        assert body["is_valid"] is True
-        assert body["bundle_blueprint"]["source"] == "api://nomain.mthds"
-        dispatch_mock.assert_awaited_once()
-        dispatched_arg = dispatch_mock.await_args.args[0]
-        assert dispatched_arg.mthds_sources == ["api://nomain.mthds"]

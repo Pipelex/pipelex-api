@@ -105,13 +105,13 @@ nav:
     - Pipe Builder: pipe-builder.md
     - Pipe Run: pipe-run.md
     - Pipe Validate: pipe-validate.md
+    - MTHDS Tools: mthds-tools.md
     - Error Responses: error-responses.md
     - Contribute:
       - Contributing: contributing.md
       - Code of Conduct: CODE_OF_CONDUCT.md
       - License: license.md
     - Changelog: changelog.md
-  - MCP: https://pipelex.github.io/pipelex-mcp/
   - n8n: https://pipelex.github.io/n8n-nodes-pipelex/
   - Contribute: https://docs.pipelex.com/pages/contributing/
   - Changelog: https://docs.pipelex.com/pages/changelog/

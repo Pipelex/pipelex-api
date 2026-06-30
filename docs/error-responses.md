@@ -101,7 +101,7 @@ API-authored errors (`ValidationError`, `BadRequest`, `Unauthenticated`, etc.) f
 
 ## Request correlation
 
-Every response carries `X-Request-ID`. The middleware respects an inbound `X-Request-ID` header if present, otherwise generates a UUID. The same id rides through to the Temporal worker via `JobMetadata.request_id` and is bound onto every `WorkflowLog` / `ActivityLog` record produced during the run — so a single id correlates the inbound HTTP call, the API-side log line, and every worker-side log line for the run.
+Every response carries `X-Request-ID`. The middleware respects an inbound `X-Request-ID` header if present, otherwise generates a UUID. The same id rides through onto `JobMetadata.request_id`, so it correlates the inbound HTTP call with the API-side log line — and, on a distributed-execution flavor, with every orchestrator worker-side log record produced during the run.
 
 When opening an issue, include the `request_id` from the response (or response headers) and the timestamp.
 
