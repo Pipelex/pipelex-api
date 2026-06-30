@@ -3,6 +3,9 @@
 #################################################################################
 
 LOCAL_IMAGE     := pipelex-api:local
+HUB_IMAGE_NAME  := pipelex/pipelex-api
+HUB_TAG         ?= latest
+HUB_IMAGE       := $(HUB_IMAGE_NAME):$(HUB_TAG)
 ENV_FILE        ?= .env
 CONTAINER_NAME  ?= pipelex-api
 
@@ -14,10 +17,11 @@ define HELP_LOCAL
 	make run-wip$(RESET) ($(GREEN)wip$(RESET)):     Run against a LOCAL pipelex checkout (editable overlay). Path: make run-wip PIPELEX_REPO=../_bridge
 
 	$(YELLOW)Docker (closest to what's deployed):$(RESET)
-	make docker-build$(RESET):  Build the API image from local source.
-	make docker-run$(RESET):    Build + run the image on http://localhost:8081 (foreground, Ctrl+C to stop).
-	make docker-stop$(RESET):   Force-stop the Docker container.
-	make docker-logs$(RESET):   Tail Docker container logs.
+	make docker-build$(RESET):    Build the API image from local source.
+	make docker-run$(RESET):      Build + run the image on http://localhost:8081 (foreground, Ctrl+C to stop).
+	make docker-run-hub$(RESET):  Pull + run the PUBLISHED Docker Hub image (no local build). Tag: make docker-run-hub HUB_TAG=0.5.0
+	make docker-stop$(RESET):     Force-stop the Docker container.
+	make docker-logs$(RESET):     Tail Docker container logs.
 
 	$(YELLOW)Local Temporal dev server (when TEMPORAL is enabled in config):$(RESET)
 	make temporal-server$(RESET) ($(GREEN)ts$(RESET)):           Start a local Temporal dev server (:7233, UI :8233) WITH search attributes registered.
@@ -36,11 +40,14 @@ define HELP_LOCAL
 endef
 export HELP_LOCAL
 
+.PHONY: docker-build docker-run docker-run-hub docker-stop docker-logs
+.PHONY: check-pipelex-repo install-wip-pipelex run-wip wip
+.PHONY: temporal-server ts temporal-server-bare ts-bare tsb temporal-stop tstop
+.PHONY: check-bundle-arg bundle-run bundle-validate bundle-curl bundle-postman bundle-dry
+
 #################################################################################
 #################################    API    #################################
 #################################################################################
-
-.PHONY: docker-build docker-run docker-stop docker-logs
 
 # Build the generic pipelex-api image from local source.
 docker-build:
@@ -58,6 +65,21 @@ docker-run: docker-build
 		--env-file $(ENV_FILE) \
 		$(LOCAL_IMAGE)
 
+# Pull and run the PUBLISHED image from Docker Hub — no local checkout/build needed.
+# Same env contract as docker-run (reads all env from .env).
+# Required: PIPELEX_GATEWAY_API_KEY (only if you use the default routing profile).
+# Optional: AUTH_MODE, API_KEY, JWT_SECRET_KEY (see .env.example).
+# Override the published tag with HUB_TAG, e.g. make docker-run-hub HUB_TAG=0.5.0
+docker-run-hub:
+	@docker rm -f $(CONTAINER_NAME) 2>/dev/null || true
+	@test -f $(ENV_FILE) || (echo "ERROR: $(ENV_FILE) not found. Copy .env.example to .env and fill it in." && exit 1)
+	@echo "\n=== Pull $(HUB_IMAGE) from Docker Hub ==="
+	docker pull $(HUB_IMAGE)
+	@echo "\n=== Run $(HUB_IMAGE) on http://localhost:8081  —  Ctrl+C to stop ==="
+	docker run --rm --name $(CONTAINER_NAME) -p 8081:8081 \
+		--env-file $(ENV_FILE) \
+		$(HUB_IMAGE)
+
 docker-stop:
 	@docker rm -f $(CONTAINER_NAME) 2>/dev/null && echo "Stopped $(CONTAINER_NAME)" || echo "$(CONTAINER_NAME) was not running"
 
@@ -74,8 +96,6 @@ docker-logs:
 # which pipelex the API runs WITHOUT hand-editing pyproject.toml. Override the
 # path per-invocation, e.g.:  make run-wip PIPELEX_REPO=../_bridge
 PIPELEX_REPO ?= ../pipelex
-
-.PHONY: check-pipelex-repo install-wip-pipelex run-wip wip
 
 check-pipelex-repo:
 	@test -d "$(PIPELEX_REPO)/pipelex" || { echo "ERROR: '$(PIPELEX_REPO)/pipelex' not found. Point PIPELEX_REPO at your pipelex checkout, e.g. make run-wip PIPELEX_REPO=../_bridge"; exit 1; }
@@ -109,8 +129,6 @@ wip: run-wip
 # error (SearchAttributeRegistrationError). Keep in lockstep with
 # [temporal.search_attributes].attributes in the pipelex config.
 TEMPORAL_SEARCH_ATTRS := PipeCode PipelineRunId SessionId UserId DomainCode
-
-.PHONY: temporal-server ts temporal-server-bare ts-bare tsb temporal-stop tstop
 
 # Start a local Temporal dev server WITH the search attributes registered. Only
 # needed when the API runs with TEMPORAL enabled (selected_server pointed at the
@@ -194,8 +212,6 @@ tstop: temporal-stop
 BUNDLE_SCRIPT := .claude/skills/postman-run-bundle/scripts/build_postman_query.py
 BUNDLE_OPTS    = $(if $(ENDPOINT),--endpoint $(ENDPOINT)) $(if $(PIPE),--pipe $(PIPE)) $(if $(INPUTS),--inputs $(INPUTS)) $(if $(NAME),--name $(NAME)) $(if $(ALLOW_SIGNATURES),--allow-signatures) $(if $(RENDER),--render $(RENDER)) $(if $(CALLBACK_URL),--callback-url '$(CALLBACK_URL)') $(ARGS)
 BUNDLE_RUN_OPTS = $(if $(BASE_URL),--base-url $(BASE_URL)) $(if $(TOKEN),--token $(TOKEN))
-
-.PHONY: check-bundle-arg bundle-run bundle-validate bundle-curl bundle-postman bundle-dry
 
 check-bundle-arg:
 	@test -n "$(BUNDLE)" || { echo "ERROR: set BUNDLE=<bundle dir or .mthds file>, e.g. make bundle-run BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard"; exit 1; }
