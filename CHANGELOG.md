@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.7.0] - 2026-07-04
+
+### Added
+- **Core:** Introduced `PipelexPipeDispatchAck` payload to handle fire-and-forget job acknowledgments (returning IDs only), replacing incomplete `PipelexPipeRunOutput` objects for async dispatches.
+
+### Changed
+- **Architecture:** Replaced the `DeliveryMode` flag and unified `orchestrator.run()` method with explicit wait-semantics methods: synchronous `/execute` requests drive the blocking `orchestrator.execute()`, while asynchronous `/start` requests drive the fire-and-forget `orchestrator.start()`.
+- **Dependencies:** Bumped `pipelex` from `0.36.0` to `0.37.0`.
+- **Developer Tools:** Streamlined `Makefile` commands and `CLAUDE.md` docs: renamed `make c` to `make agent-check` and `make t` to `make agent-test` (both silent on success), and added `make cleanderived` to clear caches and compiled files.
+- **Testing:** Aligned test stubs (`_StubOrchestrator`, `_RecordingStub`) and protocol conformance tests with the new `execute`/`start` protocol, and enhanced the `execute` stub to promote input stuff to main stuff via the `MAIN_STUFF_NAME` alias, enforcing the completed-memory invariant.
+- **Documentation:** Updated internal API routing comments to reference `{MTHDS_BASE_URL}` instead of `{MTHDS_API_URL}`.
+
 ## [v0.6.0] - 2026-06-30
 
 Orchestrator-agnostic base. `pipelex-api` no longer hard-wires Temporal: the published base names **no** orchestrator and runs every pipeline in-process, while distributed execution (Temporal, Mistral Workflows, …) becomes a deployment *flavor* = base image + exactly one orchestrator plugin + that plugin's activation. `api/` imports no `pipelex.temporal` / `temporalio`.

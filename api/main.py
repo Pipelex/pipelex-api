@@ -166,7 +166,7 @@ fastapi_app.include_router(health_router)
 fastapi_app.include_router(version_router, prefix="/v1")
 
 # Register all other routes WITH authentication (auto-selects based on AUTH_MODE env var: none/jwt/api_key).
-# The API mounts at `/v1` — the SDKs compose `{MTHDS_API_URL}/v1/{endpoint}` (master D10); no `/api/v1`
+# The API mounts at `/v1` — the SDKs compose `{MTHDS_BASE_URL}/v1/{endpoint}` (master D10); no `/api/v1`
 # mount and no alias remain.
 auth_dependency = get_auth_dependency()
 fastapi_app.include_router(api_router, prefix="/v1", dependencies=[Depends(auth_dependency)])
