@@ -11,7 +11,7 @@ info:
   license:
     name: MIT
     identifier: MIT
-  version: 0.6.0
+  version: 0.7.0
 paths:
   /health:
     get:
@@ -792,10 +792,14 @@ components:
       - landscape_3_2
       - landscape_16_9
       - landscape_21_9
+      - landscape_4_1
+      - landscape_8_1
       - portrait_3_4
       - portrait_2_3
       - portrait_9_16
       - portrait_9_21
+      - portrait_1_4
+      - portrait_1_8
       title: AspectRatio
     Background:
       type: string
@@ -1596,6 +1600,21 @@ components:
       - jpeg
       - webp
       title: ImageFormat
+    ImageSize:
+      properties:
+        width:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Width
+        height:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Height
+      type: object
+      required:
+      - width
+      - height
+      title: ImageSize
     ImgGenSetting:
       properties:
         model:
@@ -2420,6 +2439,12 @@ components:
           anyOf:
           - $ref: '#/components/schemas/AspectRatio'
           - type: 'null'
+        size:
+          anyOf:
+          - $ref: '#/components/schemas/SizeTier'
+          - $ref: '#/components/schemas/ImageSize'
+          - type: 'null'
+          title: Size
         is_raw:
           anyOf:
           - type: boolean
@@ -2626,11 +2651,6 @@ components:
           type: boolean
           title: Add Each Output
           default: false
-        combined_output:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Combined Output
       additionalProperties: false
       type: object
       required:
@@ -2990,9 +3010,7 @@ components:
           - type: 'null'
           title: Finished At
         main_stuff_name:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Main Stuff Name
       additionalProperties: true
       type: object
@@ -3001,6 +3019,7 @@ components:
       - pipe_output
       - created_at
       - state
+      - main_stuff_name
       title: PipelexRunResultExecute
       description: 'Pipelex''s `/execute` response — the completed run.
 
@@ -3272,6 +3291,22 @@ components:
       - inference_model_id
       - nb_tokens_by_category
       title: SearchTokensUsage
+    SizeTier:
+      type: string
+      enum:
+      - 0.5k
+      - 1k
+      - 2k
+      - 4k
+      title: SizeTier
+      description: 'Portable image size classes.
+
+
+        A tier promises a pixel class at the pipe''s chosen aspect ratio, not identical
+
+        pixel dimensions across providers: each provider maps the tier to its own grid
+
+        or computed dimensions.'
     SpecialOutcome:
       type: string
       enum:

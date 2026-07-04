@@ -32,9 +32,9 @@ This server is the reference implementation of the [MTHDS Protocol](https://mthd
 make install          # Create virtualenv and install dependencies
 make run              # Run API with uvicorn (hot reload)
 make fui              # Fix unused imports
-make c                # check = format + lint + pyright + mypy
-make cc               # cleanderived + check
-make t                # Run unit tests (parallel with xdist)
+make agent-check      # fix-unused-imports + format + lint + pyright + mypy — silent on success (use this)
+make agent-test       # Run unit tests — silent on success, output only on failure (use this)
+make cleanderived     # Remove compiled files, caches, logs — run when the pyright/mypy cache is stale
 make tp               # Run unit tests with prints visible
 make test             # Run unit tests (sequential)
 make gha-tests        # Tests for GitHub Actions (no inference)
@@ -47,8 +47,8 @@ make docker-stop      # Force-stop the Docker container
 make docker-logs      # Tail Docker container logs
 ```
 
-**ALWAYS** run `make fui && make c` after code changes.
-**ALWAYS** run `make tp` before committing to ensure tests pass.
+**ALWAYS** run `make agent-check` after code changes (silent on success; supersedes `make fui && make c`).
+**ALWAYS** run `make agent-test` before committing to ensure tests pass (silent on success, output only on failure).
 
 ---
 
