@@ -43,7 +43,7 @@ class _StubOrchestrator:
     Returning via `serialize_completed_output` is the point — it produces the real JSON-safe
     `PipelexPipeRunOutput` (the same shape that crosses the Temporal worker boundary), so the route
     exercises the production serialize -> rehydrate round-trip instead of a hand-built payload. It
-    records each dispatch so a test can assert `/execute` drove the blocking `run` arm. `start` (the
+    records each dispatch so a test can assert `/execute` drove the blocking `execute` arm. `start` (the
     fire-and-forget arm) is present only to satisfy the protocol — `/execute` never calls it.
     """
 
@@ -52,7 +52,7 @@ class _StubOrchestrator:
         self._graph_spec = graph_spec
         self.supports_fire_and_forget = supports_fire_and_forget
 
-    async def run(self, *, pipe_job: PipeJob, delivery_assignment: DeliveryAssignment | None) -> PipelexPipeRunOutput:
+    async def execute(self, *, pipe_job: PipeJob, delivery_assignment: DeliveryAssignment | None) -> PipelexPipeRunOutput:
         self.calls.append({"pipe_code": pipe_job.pipe.code, "delivery_assignment": delivery_assignment})
         # A completed run always delivers a main stuff (pipelex invariant; enforced by
         # `resolve_main_stuff_root_key` in both `serialize_completed_output` and `from_pipe_output`).
@@ -70,7 +70,7 @@ class _StubOrchestrator:
         )
 
     async def start(self, *, pipe_job: PipeJob, delivery_assignment: DeliveryAssignment | None) -> PipelexPipeDispatchAck:
-        msg = "/execute drives the blocking `run` arm; `start` must not be reached."
+        msg = "/execute drives the blocking `execute` arm; `start` must not be reached."
         raise NotImplementedError(msg)
 
 
@@ -112,7 +112,7 @@ class TestExecuteDispatch:
         # rehydrated working memory the /execute response wraps.
         root = body["pipe_output"]["working_memory"]["root"]
         assert root["text"]["content"]["text"] == "hello"
-        # The dispatch reached the registered orchestrator's blocking `run` arm; /execute is
+        # The dispatch reached the registered orchestrator's blocking `execute` arm; /execute is
         # synchronous, so no delivery target (never the caller's to choose).
         assert len(stub.calls) == 1
         assert stub.calls[0]["delivery_assignment"] is None

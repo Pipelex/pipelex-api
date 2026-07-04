@@ -155,7 +155,7 @@ class TestProtocolConformance:
         and the completion callback reaches the receiver with a valid
         `X-Completion-Signature` and a payload carrying the protocol `pipeline_run_id`.
 
-        The orchestrator is replaced by a fake whose `run` immediately runs the REAL
+        The orchestrator is replaced by a fake whose `start` immediately runs the REAL
         `DeliveryExecutor` delivery against the captured `DeliveryAssignment`
         (storage skipped — no pipe output), so headers and payload bytes come
         from the production delivery code path. The SSRF guards are relaxed for

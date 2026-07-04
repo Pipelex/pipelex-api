@@ -114,7 +114,7 @@ class _OrchestratorPipeRun(PipeRunProtocol):
     `orchestration_mode`'s orchestrator instead of the boot-global pipe-run slot. The
     orchestrator's JSON-safe output is rehydrated back into the rich `PipeOutput` the base expects.
 
-    The blocking wait-semantics is intrinsic to `orchestrator.run` (the protocol's BLOCKING arm —
+    The blocking wait-semantics is intrinsic to `orchestrator.execute` (the protocol's BLOCKING arm —
     it awaits completion and returns the completed-run `PipelexPipeRunOutput`); `/execute` is
     synchronous and always drives this arm, so there is no delivery axis to thread here.
     """
@@ -124,7 +124,7 @@ class _OrchestratorPipeRun(PipeRunProtocol):
 
     @override
     async def run(self, pipe_job: PipeJob, *, delivery_assignment: DeliveryAssignment | None = None) -> PipeOutput:
-        run_output = await self._orchestrator.run(pipe_job=pipe_job, delivery_assignment=delivery_assignment)
+        run_output = await self._orchestrator.execute(pipe_job=pipe_job, delivery_assignment=delivery_assignment)
         return _pipe_output_from_run_output(run_output)
 
 
@@ -133,7 +133,7 @@ class ApiRunner(PipelexMTHDSProtocol):
 
     Every surface resolves the deployment's `orchestration_mode` (config default + optional
     per-request override) and dispatches through a per-call hub registry: `execute` runs a
-    top-level pipe through the `OrchestratorRegistry`'s blocking `run` arm and returns the
+    top-level pipe through the `OrchestratorRegistry`'s blocking `execute` arm and returns the
     full output, `start` enqueues one through the same registry's fire-and-forget `start` arm,
     `validate_verdict` produces a validation verdict through the `BundleValidatorRegistry`. On the
     orchestrator-agnostic base that means `direct` in-process; a `temporal` mode dispatches to a
@@ -167,7 +167,7 @@ class ApiRunner(PipelexMTHDSProtocol):
         orchestrator fails loud with `MissingOrchestratorError` (carrying the install hint).
 
         `/execute` is synchronous — it returns the full output — so it drives the orchestrator's
-        blocking `run` arm regardless of backend. Wait-semantics is endpoint-intrinsic, never
+        blocking `execute` arm regardless of backend. Wait-semantics is endpoint-intrinsic, never
         requestable, so there is nothing for the caller to get wrong here (the fire-and-forget arm
         is `/start`'s, gated there by an honest capability check).
 
@@ -187,7 +187,7 @@ class ApiRunner(PipelexMTHDSProtocol):
         # Dispatch the run through the mode-selected orchestrator by injecting it as this runner's
         # PipeRun, then delegate to the base execute, which owns the full run lifecycle. The
         # ApiRunner is constructed per request, so mutating _pipe_run here is request-scoped.
-        # `/execute` is synchronous, so it drives the orchestrator's BLOCKING `run` arm.
+        # `/execute` is synchronous, so it drives the orchestrator's BLOCKING `execute` arm.
         self._pipe_run = _OrchestratorPipeRun(orchestrator=orchestrator)
         return await super().execute(
             pipe_code=pipe_code,

@@ -32,7 +32,7 @@ class _RecordingStub:
     `supports_fire_and_forget` is the capability `/start` reads BEFORE dispatch: a True stub models
     an async-capable backend (Temporal) that acks immediately with a `workflow_id`; a False stub
     models a blocking-only backend (`direct`) that `/start` must refuse honestly. `start` records its
-    dispatch and returns the `PipelexPipeDispatchAck` (ids only) an async backend acks with; `run`
+    dispatch and returns the `PipelexPipeDispatchAck` (ids only) an async backend acks with; `execute`
     (the blocking arm) is present only to satisfy the protocol — `/start` never drives it.
     """
 
@@ -41,8 +41,8 @@ class _RecordingStub:
         self._workflow_id = workflow_id
         self.supports_fire_and_forget = supports_fire_and_forget
 
-    async def run(self, *, pipe_job: PipeJob, delivery_assignment: DeliveryAssignment | None) -> PipelexPipeRunOutput:
-        msg = "/start drives the fire-and-forget `start` arm; `run` must not be reached."
+    async def execute(self, *, pipe_job: PipeJob, delivery_assignment: DeliveryAssignment | None) -> PipelexPipeRunOutput:
+        msg = "/start drives the fire-and-forget `start` arm; `execute` must not be reached."
         raise NotImplementedError(msg)
 
     async def start(self, *, pipe_job: PipeJob, delivery_assignment: DeliveryAssignment | None) -> PipelexPipeDispatchAck:
@@ -94,7 +94,7 @@ class TestStartCapabilityGate:
     def test_start_honestly_400s_when_orchestrator_is_blocking_only(self, mocker: MockerFixture) -> None:
         # The orchestrator-agnostic base (`direct`) is blocking-only: /start refuses honestly with a
         # 400 BEFORE any dispatch (the capability check runs before pipeline_run_setup), so the stub's
-        # `run` is never awaited — no silent block-and-ack.
+        # `execute` is never awaited — no silent block-and-ack.
         _force_config(mocker, mode="direct")
         # workflow_id is a placeholder: the blocking-only backend is refused before `start` is ever
         # reached, so this value is never observed.
