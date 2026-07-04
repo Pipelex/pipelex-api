@@ -18,7 +18,6 @@ from pipelex.pipe_run.pipe_run_protocol import PipeRunProtocol
 from pipelex.pipeline.pipeline_response import PipelexRunResultExecute, PipelexRunResultStart, RunState
 from pipelex.pipeline.pipeline_run_setup import pipeline_run_setup
 from pipelex.pipeline.runner import PipelexMTHDSProtocol
-from pipelex.runtime_bridge.delivery_mode import DeliveryMode
 from pipelex.runtime_bridge.exceptions import MissingBundleValidatorError, MissingOrchestratorError
 from pipelex.runtime_bridge.primitives.hydration import hydrate_working_memory
 from pipelex.system.environment import get_required_env
@@ -115,17 +114,17 @@ class _OrchestratorPipeRun(PipeRunProtocol):
     `orchestration_mode`'s orchestrator instead of the boot-global pipe-run slot. The
     orchestrator's JSON-safe output is rehydrated back into the rich `PipeOutput` the base expects.
 
-    `delivery` is the endpoint-chosen wait-semantics axis threaded into `orchestrator.run`;
-    `/execute` always constructs this with `DeliveryMode.BLOCKING` (it returns the full output).
+    The blocking wait-semantics is intrinsic to `orchestrator.run` (the protocol's BLOCKING arm —
+    it awaits completion and returns the completed-run `PipelexPipeRunOutput`); `/execute` is
+    synchronous and always drives this arm, so there is no delivery axis to thread here.
     """
 
-    def __init__(self, *, orchestrator: OrchestratorProtocol, delivery: DeliveryMode) -> None:
+    def __init__(self, *, orchestrator: OrchestratorProtocol) -> None:
         self._orchestrator = orchestrator
-        self._delivery = delivery
 
     @override
     async def run(self, pipe_job: PipeJob, *, delivery_assignment: DeliveryAssignment | None = None) -> PipeOutput:
-        run_output = await self._orchestrator.run(pipe_job=pipe_job, delivery_assignment=delivery_assignment, delivery=self._delivery)
+        run_output = await self._orchestrator.run(pipe_job=pipe_job, delivery_assignment=delivery_assignment)
         return _pipe_output_from_run_output(run_output)
 
 
@@ -134,8 +133,8 @@ class ApiRunner(PipelexMTHDSProtocol):
 
     Every surface resolves the deployment's `orchestration_mode` (config default + optional
     per-request override) and dispatches through a per-call hub registry: `execute` runs a
-    top-level pipe through the `OrchestratorRegistry` with `DeliveryMode.BLOCKING` and returns the
-    full output, `start` runs one with `DeliveryMode.FIRE_AND_FORGET` through the same registry,
+    top-level pipe through the `OrchestratorRegistry`'s blocking `run` arm and returns the
+    full output, `start` enqueues one through the same registry's fire-and-forget `start` arm,
     `validate_verdict` produces a validation verdict through the `BundleValidatorRegistry`. On the
     orchestrator-agnostic base that means `direct` in-process; a `temporal` mode dispatches to a
     worker when `pipelex-temporal` is installed and selected. The base names no orchestrator and
@@ -167,9 +166,9 @@ class ApiRunner(PipelexMTHDSProtocol):
         `temporal` mode dispatches the whole job to a worker and awaits it. A mode with no registered
         orchestrator fails loud with `MissingOrchestratorError` (carrying the install hint).
 
-        `/execute` is synchronous — it returns the full output — so it dispatches with
-        `DeliveryMode.BLOCKING` regardless of backend. Wait-semantics is endpoint-intrinsic, never
-        requestable, so there is nothing for the caller to get wrong here (the fire-and-forget axis
+        `/execute` is synchronous — it returns the full output — so it drives the orchestrator's
+        blocking `run` arm regardless of backend. Wait-semantics is endpoint-intrinsic, never
+        requestable, so there is nothing for the caller to get wrong here (the fire-and-forget arm
         is `/start`'s, gated there by an honest capability check).
 
         The orchestrator is injected as this runner's `_pipe_run` so the inherited base `execute`
@@ -188,8 +187,8 @@ class ApiRunner(PipelexMTHDSProtocol):
         # Dispatch the run through the mode-selected orchestrator by injecting it as this runner's
         # PipeRun, then delegate to the base execute, which owns the full run lifecycle. The
         # ApiRunner is constructed per request, so mutating _pipe_run here is request-scoped.
-        # `/execute` is synchronous, so delivery is BLOCKING.
-        self._pipe_run = _OrchestratorPipeRun(orchestrator=orchestrator, delivery=DeliveryMode.BLOCKING)
+        # `/execute` is synchronous, so it drives the orchestrator's BLOCKING `run` arm.
+        self._pipe_run = _OrchestratorPipeRun(orchestrator=orchestrator)
         return await super().execute(
             pipe_code=pipe_code,
             mthds_contents=mthds_contents,
@@ -221,7 +220,7 @@ class ApiRunner(PipelexMTHDSProtocol):
         Dispatch is orchestrator-agnostic: the rich `PipeJob` is built locally (so
         `request_id`, `output_multiplicity`, `dynamic_output_concept_ref`, the run
         registration, and telemetry all survive) and then handed to the resolved
-        `orchestration_mode`'s orchestrator with `DeliveryMode.FIRE_AND_FORGET`, through the
+        `orchestration_mode`'s orchestrator via its fire-and-forget `start` arm, through the
         hub's `OrchestratorRegistry`. The base imports no `temporalio` / orchestrator SDK; the
         async-capable Temporal arm (returning a `workflow_id` immediately) is contributed by the
         `pipelex-temporal` plugin when installed.
@@ -307,18 +306,18 @@ class ApiRunner(PipelexMTHDSProtocol):
         )
 
         # Dispatch the locally-built job through the resolved mode's orchestrator (looked up and
-        # capability-checked above) with FIRE_AND_FORGET delivery — the same final dispatch
+        # capability-checked above) via its fire-and-forget `start` arm — the same final dispatch
         # `run_pipe_via_bridge` performs, but fed the rich PipeJob instead of the lossy
         # `PipelexPipeRunInput` (which carries no request_id / output_multiplicity /
-        # dynamic_output_concept_ref and skips run registration + telemetry). The async-capable arm
-        # enqueues and returns the workflow_id immediately.
-        run_output = await orchestrator.run(pipe_job=pipe_job, delivery_assignment=delivery_assignment, delivery=DeliveryMode.FIRE_AND_FORGET)
+        # dynamic_output_concept_ref and skips run registration + telemetry). `start` genuinely
+        # enqueues the job and returns a `PipelexPipeDispatchAck` (ids only) immediately.
+        dispatch_ack = await orchestrator.start(pipe_job=pipe_job, delivery_assignment=delivery_assignment)
 
         return PipelexRunResultStart(
             pipeline_run_id=resolved_pipeline_run_id,
             created_at=created_at,
             state=RunState.STARTED,
-            workflow_id=run_output.workflow_id,
+            workflow_id=dispatch_ack.workflow_id,
         )
 
     async def validate_verdict(

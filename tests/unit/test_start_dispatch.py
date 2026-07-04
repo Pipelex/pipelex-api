@@ -15,8 +15,7 @@ from fastapi.testclient import TestClient
 from pipelex.pipe_run.delivery_assignment import DeliveryAssignment
 from pipelex.pipe_run.pipe_job import PipeJob
 from pipelex.plugins.orchestrator_registry import OrchestratorRegistry
-from pipelex.runtime_bridge.delivery_mode import DeliveryMode
-from pipelex.runtime_bridge.payloads import PipelexPipeRunOutput
+from pipelex.runtime_bridge.payloads import PipelexPipeDispatchAck, PipelexPipeRunOutput
 from pytest_mock import MockerFixture
 
 from api.api_config import ApiConfig
@@ -32,24 +31,25 @@ class _RecordingStub:
 
     `supports_fire_and_forget` is the capability `/start` reads BEFORE dispatch: a True stub models
     an async-capable backend (Temporal) that acks immediately with a `workflow_id`; a False stub
-    models a blocking-only backend (`direct`) that `/start` must refuse honestly. `run` records the
-    `delivery` it was dispatched with so the async-capable case can assert FIRE_AND_FORGET.
+    models a blocking-only backend (`direct`) that `/start` must refuse honestly. `start` records its
+    dispatch and returns the `PipelexPipeDispatchAck` (ids only) an async backend acks with; `run`
+    (the blocking arm) is present only to satisfy the protocol — `/start` never drives it.
     """
 
-    def __init__(self, *, workflow_id: str | None, supports_fire_and_forget: bool) -> None:
+    def __init__(self, *, workflow_id: str, supports_fire_and_forget: bool) -> None:
         self.calls: list[dict[str, object]] = []
         self._workflow_id = workflow_id
         self.supports_fire_and_forget = supports_fire_and_forget
 
-    async def run(self, *, pipe_job: PipeJob, delivery_assignment: DeliveryAssignment | None, delivery: DeliveryMode) -> PipelexPipeRunOutput:
-        self.calls.append({"delivery_assignment": delivery_assignment, "delivery": delivery})
-        return PipelexPipeRunOutput(
-            output_dict={},
-            main_stuff_name=None,
+    async def run(self, *, pipe_job: PipeJob, delivery_assignment: DeliveryAssignment | None) -> PipelexPipeRunOutput:
+        msg = "/start drives the fire-and-forget `start` arm; `run` must not be reached."
+        raise NotImplementedError(msg)
+
+    async def start(self, *, pipe_job: PipeJob, delivery_assignment: DeliveryAssignment | None) -> PipelexPipeDispatchAck:
+        self.calls.append({"delivery_assignment": delivery_assignment})
+        return PipelexPipeDispatchAck(
             pipeline_run_id=pipe_job.job_metadata.pipeline_run_id,
             workflow_id=self._workflow_id,
-            is_completed=False,
-            graph_spec_dump=None,
         )
 
 
@@ -73,8 +73,8 @@ class TestStartCapabilityGate:
     """End-to-end: `POST /start` acks only when the resolved backend can honor fire-and-forget."""
 
     def test_start_acks_when_orchestrator_is_async_capable(self, mocker: MockerFixture) -> None:
-        # A `temporal` deployment whose orchestrator is async-capable: /start dispatches FIRE_AND_FORGET
-        # and acks 202 with the workflow_id the orchestrator returns immediately.
+        # A `temporal` deployment whose orchestrator is async-capable: /start drives the fire-and-forget
+        # `start` arm and acks 202 with the workflow_id the orchestrator returns immediately.
         _force_config(mocker, mode="temporal")
         stub = _RecordingStub(workflow_id="wf-123", supports_fire_and_forget=True)
         _register_stub(mocker, mode="temporal", stub=stub)
@@ -88,16 +88,17 @@ class TestStartCapabilityGate:
         body = response.json()
         assert body["state"] == "STARTED"
         assert body["workflow_id"] == "wf-123"
+        # /start drives the fire-and-forget `start` arm exactly once — the caller never chooses delivery.
         assert len(stub.calls) == 1
-        # /start sets the delivery axis itself — the caller never chooses it.
-        assert stub.calls[0]["delivery"] is DeliveryMode.FIRE_AND_FORGET
 
     def test_start_honestly_400s_when_orchestrator_is_blocking_only(self, mocker: MockerFixture) -> None:
         # The orchestrator-agnostic base (`direct`) is blocking-only: /start refuses honestly with a
         # 400 BEFORE any dispatch (the capability check runs before pipeline_run_setup), so the stub's
         # `run` is never awaited — no silent block-and-ack.
         _force_config(mocker, mode="direct")
-        stub = _RecordingStub(workflow_id=None, supports_fire_and_forget=False)
+        # workflow_id is a placeholder: the blocking-only backend is refused before `start` is ever
+        # reached, so this value is never observed.
+        stub = _RecordingStub(workflow_id="wf-unused", supports_fire_and_forget=False)
         _register_stub(mocker, mode="direct", stub=stub)
 
         response = _build_client().post(

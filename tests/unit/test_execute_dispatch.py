@@ -17,14 +17,14 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pipelex.core.memory.working_memory import MAIN_STUFF_NAME
 from pipelex.core.pipes.pipe_output import PipeOutput
 from pipelex.graph.graphspec import GraphSpec
 from pipelex.pipe_run.delivery_assignment import DeliveryAssignment
 from pipelex.pipe_run.pipe_job import PipeJob
 from pipelex.plugins.orchestrator_registry import OrchestratorRegistry
-from pipelex.runtime_bridge.delivery_mode import DeliveryMode
 from pipelex.runtime_bridge.exceptions import MissingOrchestratorError
-from pipelex.runtime_bridge.payloads import PipelexPipeRunOutput
+from pipelex.runtime_bridge.payloads import PipelexPipeDispatchAck, PipelexPipeRunOutput
 from pipelex.runtime_bridge.serialization import serialize_completed_output
 from pytest_mock import MockerFixture
 
@@ -43,7 +43,8 @@ class _StubOrchestrator:
     Returning via `serialize_completed_output` is the point — it produces the real JSON-safe
     `PipelexPipeRunOutput` (the same shape that crosses the Temporal worker boundary), so the route
     exercises the production serialize -> rehydrate round-trip instead of a hand-built payload. It
-    records the `delivery` it was dispatched with so a test can assert `/execute` always passes BLOCKING.
+    records each dispatch so a test can assert `/execute` drove the blocking `run` arm. `start` (the
+    fire-and-forget arm) is present only to satisfy the protocol — `/execute` never calls it.
     """
 
     def __init__(self, *, graph_spec: GraphSpec | None = None, supports_fire_and_forget: bool = False) -> None:
@@ -51,16 +52,26 @@ class _StubOrchestrator:
         self._graph_spec = graph_spec
         self.supports_fire_and_forget = supports_fire_and_forget
 
-    async def run(self, *, pipe_job: PipeJob, delivery_assignment: DeliveryAssignment | None, delivery: DeliveryMode) -> PipelexPipeRunOutput:
-        self.calls.append({"pipe_code": pipe_job.pipe.code, "delivery_assignment": delivery_assignment, "delivery": delivery})
+    async def run(self, *, pipe_job: PipeJob, delivery_assignment: DeliveryAssignment | None) -> PipelexPipeRunOutput:
+        self.calls.append({"pipe_code": pipe_job.pipe.code, "delivery_assignment": delivery_assignment})
+        # A completed run always delivers a main stuff (pipelex invariant; enforced by
+        # `resolve_main_stuff_root_key` in both `serialize_completed_output` and `from_pipe_output`).
+        # This stub is an echo: promote the job's input stuff to the run's main stuff via the
+        # `main_stuff` alias, so the serialize -> rehydrate round-trip yields a valid completed memory.
+        working_memory = pipe_job.get_working_memory()
+        working_memory.set_alias(alias=MAIN_STUFF_NAME, target=next(iter(working_memory.root)))
         return serialize_completed_output(
             pipe_output=PipeOutput(
-                working_memory=pipe_job.get_working_memory(),
+                working_memory=working_memory,
                 pipeline_run_id=pipe_job.job_metadata.pipeline_run_id,
                 graph_spec=self._graph_spec,
             ),
             workflow_id=None,
         )
+
+    async def start(self, *, pipe_job: PipeJob, delivery_assignment: DeliveryAssignment | None) -> PipelexPipeDispatchAck:
+        msg = "/execute drives the blocking `run` arm; `start` must not be reached."
+        raise NotImplementedError(msg)
 
 
 def _build_client() -> TestClient:
@@ -101,11 +112,10 @@ class TestExecuteDispatch:
         # rehydrated working memory the /execute response wraps.
         root = body["pipe_output"]["working_memory"]["root"]
         assert root["text"]["content"]["text"] == "hello"
-        # The dispatch reached the registered orchestrator; /execute is synchronous, so no delivery
-        # target and BLOCKING delivery (never the caller's to choose).
+        # The dispatch reached the registered orchestrator's blocking `run` arm; /execute is
+        # synchronous, so no delivery target (never the caller's to choose).
         assert len(stub.calls) == 1
         assert stub.calls[0]["delivery_assignment"] is None
-        assert stub.calls[0]["delivery"] is DeliveryMode.BLOCKING
 
     def test_graph_spec_survives_strict_false_rehydration(self, mocker: MockerFixture) -> None:
         """A non-None graph_spec round-trips through the helper's `strict=False` reverse of `model_dump(mode="json")`.
