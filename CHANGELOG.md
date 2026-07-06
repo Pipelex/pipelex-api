@@ -1,5 +1,14 @@
 # Changelog
 
+## [v0.8.0] - 2026-07-06
+
+### Changed
+- **Dependencies:** Bumped `pipelex` from `0.37.0` to `0.38.0`.
+- **Adapted to pipelex 0.38.0 breaking changes:** `StrEnum` is now imported from the stdlib `enum` — pipelex 0.38.0 dropped Python 3.10 and deleted the `pipelex.types` re-export module that used to provide it. And `PipeSignature` is no longer a pipe type: a signature (contract-only pipe) is declared by **omitting** `type`, so the signature test fixtures and the `/validate` docs were updated to the typeless form (writing `type = "PipeSignature"` is now rejected by the runtime).
+
+### Added
+- **Optionality surface on `/validate` and working memory (from pipelex 0.38.0):** the regenerated OpenAPI artifact exposes pipelex's new optionals feature — `optional` (`?`) markers on IO contracts and data edges, `liftable_pipes` (pipes that may be skipped when an optional input resolves absent) plus a general `warnings` array on the validation report, `skip_reason` on graph nodes, and an `absences` ledger (`AbsenceRecord` / `AbsenceKind`) on the serialized working memory.
+
 ## [v0.7.0] - 2026-07-04
 
 ### Added
