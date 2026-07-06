@@ -82,7 +82,7 @@ make docker-logs      # Tail Docker container logs
 
 ## Enums
 
-- Import `StrEnum` from `pipelex.types`
+- Import `StrEnum` from the stdlib `enum`
 - Use `match/case` for enum comparisons, never test equality directly
 - Never add a default `case _:` in exhaustive match statements
 

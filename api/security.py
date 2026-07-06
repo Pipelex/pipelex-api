@@ -5,6 +5,7 @@ Route handlers access it via the get_request_user dependency.
 """
 
 import re
+from enum import StrEnum
 from typing import Annotated, Any
 
 import jwt
@@ -12,7 +13,6 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pipelex import log
 from pipelex.system.environment import get_optional_env
-from pipelex.types import StrEnum
 from pydantic import BaseModel, Field
 
 from api.error_types import ErrorType

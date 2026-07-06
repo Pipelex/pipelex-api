@@ -11,7 +11,7 @@ info:
   license:
     name: MIT
     identifier: MIT
-  version: 0.7.0
+  version: 0.8.0
 paths:
   /health:
     get:
@@ -784,6 +784,51 @@ paths:
                 title: Response Root  Get
 components:
   schemas:
+    AbsenceKind:
+      type: string
+      enum:
+      - declared_absent
+      - skipped
+      - not_provided
+      title: AbsenceKind
+      description: "How a slot came to hold no value.\n\n- DECLARED_ABSENT: a producer with an optional (`?`) output declared\
+        \ it produced nothing\n  (e.g. a PipeCondition `continue` outcome, or — phase 2 — an LLM maybe-wrapper).\n- SKIPPED:\
+        \ the producing pipe was lifted (skipped) because one of its plain inputs was absent.\n- NOT_PROVIDED: the caller\
+        \ omitted an optional method input from the pipeline inputs."
+    AbsenceRecord:
+      properties:
+        variable_name:
+          type: string
+          title: Variable Name
+        kind:
+          $ref: '#/components/schemas/AbsenceKind'
+        reason:
+          type: string
+          title: Reason
+        producing_pipe:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Producing Pipe
+        upstream:
+          anyOf:
+          - $ref: '#/components/schemas/AbsenceRecord'
+          - type: 'null'
+      additionalProperties: false
+      type: object
+      required:
+      - variable_name
+      - kind
+      - reason
+      title: AbsenceRecord
+      description: 'A recorded fact that a named slot holds no value, with provenance (D2).
+
+
+        Absence stays what it mechanically is — no Stuff under the name — but becomes a recorded
+
+        fact: who produced it, why, and which upstream absence it chains to. Provenance is captured
+
+        at the moment absence is produced, not reconstructed at failure time.'
     AspectRatio:
       type: string
       enum:
@@ -1282,6 +1327,10 @@ components:
           title: Target
         kind:
           $ref: '#/components/schemas/EdgeKind'
+        optional:
+          type: boolean
+          title: Optional
+          default: false
         label:
           anyOf:
           - type: string
@@ -1910,6 +1959,29 @@ components:
       - inference_model_id
       - nb_tokens_by_category
       title: LLMTokensUsage
+    LiftablePipeEntry:
+      properties:
+        pipe_ref:
+          type: string
+          title: Pipe Ref
+        within_pipe_ref:
+          type: string
+          title: Within Pipe Ref
+        skipped_when_absent:
+          items:
+            type: string
+          type: array
+          title: Skipped When Absent
+        absence_source:
+          type: string
+          title: Absence Source
+      type: object
+      required:
+      - pipe_ref
+      - within_pipe_ref
+      - absence_source
+      title: LiftablePipeEntry
+      description: One pipe that may be skipped (lifted) when an optional slot resolves absent.
     LintRequest:
       properties:
         content:
@@ -2032,6 +2104,11 @@ components:
           title: Domain Code
         status:
           $ref: '#/components/schemas/NodeStatus'
+        skip_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Skip Reason
         timing:
           anyOf:
           - $ref: '#/components/schemas/TimingSpec'
@@ -2477,6 +2554,10 @@ components:
         concept_ref:
           type: string
           title: Concept Ref
+        optional:
+          type: boolean
+          title: Optional
+          default: false
         json_schema:
           additionalProperties: true
           type: object
@@ -2606,6 +2687,10 @@ components:
           title: Concept Ref
         multiplicity:
           $ref: '#/components/schemas/IOMultiplicity'
+        optional:
+          type: boolean
+          title: Optional
+          default: false
       type: object
       required:
       - concept_ref
@@ -2788,11 +2873,6 @@ components:
           - type: string
           - type: 'null'
           title: Source
-        type:
-          type: string
-          const: PipeSignature
-          title: Type
-          default: PipeSignature
         description:
           type: string
           title: Description
@@ -3610,6 +3690,11 @@ components:
             $ref: '#/components/schemas/PipeIOContract'
           type: object
           title: Pipe Io Contracts
+        liftable_pipes:
+          items:
+            $ref: '#/components/schemas/LiftablePipeEntry'
+          type: array
+          title: Liftable Pipes
         graph_spec:
           anyOf:
           - $ref: '#/components/schemas/GraphSpec'
@@ -3619,6 +3704,11 @@ components:
             $ref: '#/components/schemas/ValidatedPipeEntry'
           type: array
           title: Validated Pipes
+        warnings:
+          items:
+            $ref: '#/components/schemas/ValidationErrorItem'
+          type: array
+          title: Warnings
         pending_signatures:
           items:
             type: string
@@ -3913,6 +4003,11 @@ components:
             type: string
           type: object
           title: Aliases
+        absences:
+          additionalProperties:
+            $ref: '#/components/schemas/AbsenceRecord'
+          type: object
+          title: Absences
       additionalProperties: false
       type: object
       title: WorkingMemory

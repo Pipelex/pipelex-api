@@ -10,7 +10,7 @@ class name, from the `ErrorReport`) and are NOT enumerated here — they are
 deliberately not a fixed set.
 """
 
-from pipelex.types import StrEnum
+from enum import StrEnum
 
 
 class ErrorType(StrEnum):
