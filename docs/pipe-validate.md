@@ -60,7 +60,7 @@ The 200 body is one of two arms, discriminated on the mandatory `is_valid` field
 - `pipe_io_contracts` (object): per-pipe input/output contracts, keyed by the namespaced `pipe_ref` (`domain.code`); each entry carries the JSON Schema of every declared input and the output's concept + multiplicity (`single` | `variable`)
 - `graph_spec` (object | null): best-effort execution graph of the declared `main_pipe`, dry-run against the validated library; `null` when the batch declares no `main_pipe` or the graph dry-run degrades
 - `validated_pipes` (list): per-pipe sweep outcomes — `{pipe_ref, status}` entries with status `SUCCESS` | `FAILURE` | `SKIPPED`
-- `pending_signatures` (list[str]): namespaced refs of pipes still declared as `PipeSignature` in the assembled library — what remains to implement
+- `pending_signatures` (list[str]): namespaced refs of pipes still declared as signatures (contract-only pipes — `inputs`/`output` with no `type` and no implementation) in the assembled library — what remains to implement
 - `is_runnable` (boolean): `pending_signatures` is empty — whether the validated library is complete enough to run
 
 **Response Fields (wire extras, valid arm only, this server only):**

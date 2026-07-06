@@ -6,7 +6,7 @@ Centralising the path strings here means the route names never drift out
 of sync between the `add_api_route` call and the `client.get(...)` call.
 """
 
-from pipelex.types import StrEnum
+from enum import StrEnum
 
 
 class RoutePath(StrEnum):
@@ -80,7 +80,6 @@ domain      = "research"
 description = "Research method headers"
 
 [pipe.find_key_findings]
-type        = "PipeSignature"
 description = "Find the key findings in a document (contract only)."
 inputs      = { doc = "Text" }
 output      = "KeyFinding"
@@ -109,7 +108,6 @@ domain      = "research"
 description = "Research method headers"
 
 [pipe.find_key_findings]
-type        = "PipeSignature"
 description = "Find the key findings in a document (contract only)."
 inputs      = { doc = "Text" }
 output      = "KeyFinding"
@@ -147,7 +145,6 @@ output = "ApiSummary"
 steps = [ { pipe = "summary_sig", result = "summary" } ]
 
 [pipe.summary_sig]
-type = "PipeSignature"
 description = "Signature placeholder for the summary step."
 inputs = { doc = "ApiDoc" }
 output = "ApiSummary"
