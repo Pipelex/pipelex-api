@@ -6,7 +6,7 @@ Centralising the path strings here means the route names never drift out
 of sync between the `add_api_route` call and the `client.get(...)` call.
 """
 
-from pipelex.types import StrEnum
+from enum import StrEnum
 
 
 class RoutePath(StrEnum):

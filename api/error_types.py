@@ -10,7 +10,7 @@ class name, from the `ErrorReport`) and are NOT enumerated here — they are
 deliberately not a fixed set.
 """
 
-from pipelex.types import StrEnum
+from enum import StrEnum
 
 
 class ErrorType(StrEnum):
@@ -41,6 +41,13 @@ class ErrorType(StrEnum):
     INVALID_BASE64 = "InvalidBase64"
     INVALID_URI = "InvalidUri"
     PAYLOAD_TOO_LARGE = "PayloadTooLarge"
+    # A run request carried a malformed method bundle (`bundle_b64` / `files`): a corrupt zip, an
+    # unsafe entry name (absolute path or `..` traversal), or both transport forms supplied at once.
+    INVALID_BUNDLE = "InvalidBundle"
+    # A run request shipped custom Python (`.py` in the bundle) to a deployment that is NOT
+    # sandbox-hosted. Running customer code in-process is refused (403): the bundle-with-code
+    # transport is a sandbox-hosted capability only. Use a sandbox-hosted deployment.
+    CUSTOM_CODE_REQUIRES_SANDBOX = "CustomCodeRequiresSandbox"
 
     # Storage / upload
     UPLOAD_FAILED = "UploadFailed"

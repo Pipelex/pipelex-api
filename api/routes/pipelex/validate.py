@@ -1,3 +1,4 @@
+from enum import StrEnum
 from typing import Annotated, Literal, Self, Union
 
 from fastapi import APIRouter, Request
@@ -6,7 +7,6 @@ from pipelex.base_exceptions import ErrorReport, ValidationErrorItem
 from pipelex.pipeline.validation_render import format_validate_markdown, render_invalid_validation_markdown
 from pipelex.pipeline.validation_report import PipelexValidationReport
 from pipelex.tools.typing.pydantic_utils import empty_list_factory_of
-from pipelex.types import StrEnum
 from pydantic import BaseModel, Field, model_validator
 
 from api.exception_handlers import problem_response_from_error_report

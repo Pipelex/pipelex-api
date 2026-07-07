@@ -35,6 +35,8 @@ Execute a Pipelex pipeline with flexible inputs and wait for completion.
 - `output_name` (string, optional): Name for the output slot
 - `output_multiplicity` (string, optional): Output multiplicity setting (`"single"`, `"variable"`, or a specific number)
 - `dynamic_output_concept_ref` (string, optional): Override output concept ref
+- `bundle_b64` (string, optional): **Pipelex-API extension.** Base64-encoded zip of a whole method bundle — see [Shipping a method bundle](#shipping-a-method-bundle-custom-pipefunc). Mutually exclusive with `files`.
+- `files` (dict[str, str], optional): **Pipelex-API extension.** The same bundle as a `{relative_path: text}` map (the unzipped equivalent of `bundle_b64`). Mutually exclusive with `bundle_b64`.
 
 **Validation Rules:**
 
@@ -105,6 +107,8 @@ Start a pipeline execution and get its `pipeline_run_id` back with a `202` ack.
 - `output_name` (string, optional): Name for the output slot
 - `output_multiplicity` (string, optional): Output multiplicity setting (`"single"`, `"variable"`, or a specific number)
 - `dynamic_output_concept_ref` (string, optional): Override output concept ref
+- `bundle_b64` (string, optional): **Pipelex-API extension.** Base64-encoded zip of a whole method bundle — see [Shipping a method bundle](#shipping-a-method-bundle-custom-pipefunc). Mutually exclusive with `files`.
+- `files` (dict[str, str], optional): **Pipelex-API extension.** The same bundle as a `{relative_path: text}` map (the unzipped equivalent of `bundle_b64`). Mutually exclusive with `bundle_b64`.
 
 **Validation Rules:**
 
@@ -187,6 +191,37 @@ The signer (this server) and the verifier (your callback receiver) must share th
 Set the `COMPLETION_CALLBACK_SECRET` environment variable on the API server **only if** you use `callback_urls`. The variable is read lazily — the server boots fine without it, and only requires it when actually signing a callback. If you call `/start` with `callback_urls` and the env var isn't set, you'll get a 500 with `EnvVarNotFoundError: Environment variable 'COMPLETION_CALLBACK_SECRET' is required but not set`.
 
 The receiver-side secret must be the same value. In typical deployments both sides pull from a shared secrets store (AWS Secrets Manager, Vault, etc.).
+
+---
+
+## Shipping a method bundle (custom PipeFunc)
+
+`mthds_contents` carries only the `.mthds` text. When your method uses a **custom `PipeFunc`** — your own Python function, plus any structure classes it needs — the code has to travel with the method too. Both `/execute` and `/start` accept the whole bundle in one of two mutually-exclusive forms:
+
+- `bundle_b64`: a base64-encoded **zip** of the bundle directory (`.mthds` + `pipe_func.py` + `structures/*.py` + an optional `requirements.txt`).
+- `files`: the same content as a `{relative_path: text}` **map** (the unzipped equivalent) — handy for JSON clients that would rather not zip.
+
+The server materializes the bundle into a temporary library directory for the run and tears it down afterward. The pipe to run comes from the bundle's `main_pipe` (or an explicit `pipe_code`, to pick which pipe in the bundle to run). A bundle carries its own `.mthds`, so it is **mutually exclusive with inline `mthds_contents`** — sending both is a `422` (they would load into one library with no dedup and a shared domain would collide).
+
+**Example (`files` form):**
+
+```json
+{
+  "files": {
+    "main.mthds": "domain = \"demo\"\nmain_pipe = \"crunch\"\n\n[pipe.crunch]\ntype = \"PipeFunc\"\ndescription = \"Crunch numbers\"\ninputs = { data = \"Text\" }\noutput = \"Text\"\nfunction_name = \"crunch\"\n",
+    "pipe_func.py": "def crunch(working_memory):\n    return \"...\"\n"
+  },
+  "inputs": { "data": "1,2,3" }
+}
+```
+
+**Ingest guards.** Bundles are bounded at ingest and rejected with a clear error (never a silent truncation):
+
+- A hard **file-count** ceiling (`MAX_BUNDLE_FILES`) and a **total decompressed-size** ceiling (`MAX_BUNDLE_TOTAL_KIB`) → `413 PayloadTooLarge`. The zip path bounds actual decompression, so a zip bomb cannot expand past the ceiling, and an oversized `bundle_b64` is refused on its encoded length *before* it is decoded into memory.
+- **Path safety:** entry names that are absolute, use `..` traversal, use backslashes, or carry a Windows drive/`:` form → `422 InvalidBundle`.
+- Supplying **both** `bundle_b64` and `files`, an empty bundle, or a corrupt zip → `422 InvalidBundle`; invalid base64 → `400 InvalidBase64`.
+
+**Sandbox-hosted only for custom Python.** A bundle that ships any `.py` is honored **only on a sandbox-hosted deployment**, where the load path captures the source without importing it and execution happens in an isolated sandbox. On a non-hosted deployment such a bundle is refused with `403 CustomCodeRequiresSandbox` — running caller-supplied code in-process is never done implicitly. A bundle that carries only `.mthds` (no `.py`) is accepted on any deployment.
 
 ---
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, cast
 
@@ -10,7 +11,7 @@ from fastapi.responses import JSONResponse
 from kajson import kajson
 from kajson.exceptions import KajsonDecoderError
 from mthds.protocol.exceptions import PipelineRequestError
-from pipelex.config import get_config
+from pipelex.config import get_config, is_pipe_func_sandbox_hosted
 from pipelex.core.pipes.pipe_output import PipeOutput
 from pipelex.hub import get_bundle_validator_registry, get_orchestrator_registry
 from pipelex.pipe_run.delivery_assignment import DeliveryAssignment, StorageTarget, WebhookTarget
@@ -25,13 +26,16 @@ from pydantic import ValidationError
 from typing_extensions import override
 
 from api.api_config import get_api_config, resolve_orchestration_mode
+from api.bundle import materialize_parsed, parse_bundle
 from api.error_types import ErrorType
-from api.errors import raise_bad_request, raise_validation_error
+from api.errors import raise_bad_request, raise_forbidden, raise_validation_error
 from api.logging_context import get_request_id
 from api.routes.pipelex.utils import get_current_iso_timestamp
 from api.schemas.models import PipelexApiExecuteRequest, PipelexApiStartRequest, PipelineApiExtras, RunRequest
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from mthds.protocol.pipe_output import VariableMultiplicity
     from mthds.protocol.pipeline_inputs import PipelineInputs
     from mthds.protocol.working_memory import WorkingMemoryAbstract
@@ -491,6 +495,33 @@ async def _parse_request(request: Request) -> tuple[RunRequest, PipelineApiExtra
     return run_request, extras
 
 
+@contextmanager
+def _bundle_library_dirs(run_request: RunRequest) -> Generator[list[str] | None, None, None]:
+    """Materialize a request-carried method bundle into a temp library dir for the run.
+
+    When the request carries no bundle (`bundle_b64` / `files` both absent), yields
+    `None` — the runner loads from `mthds_contents` exactly as before. When a bundle
+    is present, it is materialized (guards enforced in `api.bundle`) and the temp
+    directory is yielded as the single `library_dirs` entry, cleaned up on exit.
+
+    Security gate (decision 5): a bundle that ships custom Python (`.py`) is only
+    honored on a sandbox-hosted deployment, where the load path captures the source
+    without importing it. On a non-hosted deployment, running that code would import
+    it in-process — refused with a 403 rather than executing untrusted code.
+    """
+    if run_request.bundle_b64 is None and run_request.files is None:
+        yield None
+        return
+    # Parse + guard in memory FIRST, then apply the sandbox-hosted gate BEFORE any disk write —
+    # a bundle destined for a 403 on a non-hosted deployment never touches the filesystem.
+    parsed = parse_bundle(bundle_b64=run_request.bundle_b64, files=run_request.files)
+    if parsed.has_python_sources and not is_pipe_func_sandbox_hosted():
+        msg = "This bundle ships custom Python (.py); running it requires a sandbox-hosted deployment."
+        raise_forbidden(message=msg, error_type=ErrorType.CUSTOM_CODE_REQUIRES_SANDBOX)
+    with materialize_parsed(parsed) as bundle:
+        yield [str(bundle.directory)]
+
+
 @router.post(
     "/execute",
     response_model=PipelexRunResultExecute,
@@ -519,16 +550,17 @@ async def execute(request: Request) -> JSONResponse:
     turns them into an RFC 7807 problem response.
     """
     run_request, extras = await _parse_request(request)
-    runner = ApiRunner(user_id=_get_user_id(request))
-    response = await runner.execute(
-        pipe_code=run_request.pipe_code,
-        mthds_contents=run_request.mthds_contents,
-        inputs=run_request.inputs,
-        output_name=run_request.output_name,
-        output_multiplicity=run_request.output_multiplicity,
-        dynamic_output_concept_ref=run_request.dynamic_output_concept_ref,
-        requested_orchestration_mode=extras.orchestration_mode,
-    )
+    with _bundle_library_dirs(run_request) as library_dirs:
+        runner = ApiRunner(user_id=_get_user_id(request), library_dirs=library_dirs)
+        response = await runner.execute(
+            pipe_code=run_request.pipe_code,
+            mthds_contents=run_request.mthds_contents,
+            inputs=run_request.inputs,
+            output_name=run_request.output_name,
+            output_multiplicity=run_request.output_multiplicity,
+            dynamic_output_concept_ref=run_request.dynamic_output_concept_ref,
+            requested_orchestration_mode=extras.orchestration_mode,
+        )
     return JSONResponse(
         content=response.model_dump(mode="json", serialize_as_any=True, by_alias=True),
     )
@@ -573,16 +605,20 @@ async def start(
     The completion callback (`callback_urls` / storage delivery) fires on the async path.
     """
     run_request, extras = parsed
-    runner = ApiRunner(user_id=_get_user_id(request))
-    return await runner.start(
-        pipe_code=run_request.pipe_code,
-        mthds_contents=run_request.mthds_contents,
-        inputs=run_request.inputs,
-        output_name=run_request.output_name,
-        output_multiplicity=run_request.output_multiplicity,
-        dynamic_output_concept_ref=run_request.dynamic_output_concept_ref,
-        pipeline_run_id=extras.pipeline_run_id,
-        callback_urls=extras.callback_urls,
-        request_id=get_request_id(),
-        requested_orchestration_mode=extras.orchestration_mode,
-    )
+    # The bundle is materialized only for the synchronous setup phase: `start` builds the PipeJob
+    # (crate carrying the captured `python_sources`) before it enqueues, so the temp dir is no
+    # longer needed once `start` returns — cleanup on context exit is safe for the async path.
+    with _bundle_library_dirs(run_request) as library_dirs:
+        runner = ApiRunner(user_id=_get_user_id(request), library_dirs=library_dirs)
+        return await runner.start(
+            pipe_code=run_request.pipe_code,
+            mthds_contents=run_request.mthds_contents,
+            inputs=run_request.inputs,
+            output_name=run_request.output_name,
+            output_multiplicity=run_request.output_multiplicity,
+            dynamic_output_concept_ref=run_request.dynamic_output_concept_ref,
+            pipeline_run_id=extras.pipeline_run_id,
+            callback_urls=extras.callback_urls,
+            request_id=get_request_id(),
+            requested_orchestration_mode=extras.orchestration_mode,
+        )
