@@ -57,6 +57,15 @@ class UploadRequest(BaseModel):
         description=f"File content as base64-encoded string (max {MAX_UPLOAD_MIB} MiB decoded)",
     )
     content_type: str | None = Field(default=None, max_length=255, description="MIME type (e.g. 'application/pdf')")
+    ephemeral: bool = Field(
+        default=False,
+        description=(
+            "When true, the file is stored under the user's '/ephemeral/' key prefix instead of '/assets/'. "
+            "The prefix marks synthetic, throwaway test inputs (e.g. sandbox-generated data) as distinct from "
+            "durable user attachments under '/assets/'. A 7-day auto-delete lifecycle for these objects is planned "
+            "(tag-based, gated on pipelex storage-provider tag support) but not yet active."
+        ),
+    )
 
 
 class UploadResponse(BaseModel):
@@ -94,7 +103,15 @@ async def upload_file(
         raise_payload_too_large(f"Decoded file exceeds {MAX_UPLOAD_BYTES // (1024 * 1024)} MiB limit")
 
     ext = body.filename.rsplit(".", 1)[-1] if "." in body.filename else "bin"
-    key = f"{user.user_id}/assets/{uuid.uuid4()}.{ext}"
+    # The key must keep `user_id` as its first segment: the storage-URL resolver
+    # (`storage.py::parse_storage_uri`) gates ownership on `segments[0] == requester
+    # user_id`, so ephemeral files stay resolvable by their owner. The '/ephemeral/'
+    # segment separates synthetic, throwaway inputs from durable user attachments
+    # under '/assets/'. A planned 7-day auto-delete lifecycle for ephemeral objects
+    # is tag-based (not prefix-based) precisely because the user_id-first layout
+    # prevents a single S3 prefix rule from matching '*/ephemeral/'.
+    prefix = "ephemeral" if body.ephemeral else "assets"
+    key = f"{user.user_id}/{prefix}/{uuid.uuid4()}.{ext}"
 
     storage = get_storage_provider()
     # Most storage failures surface as a pipelex `StorageError` (a `PipelexError`)

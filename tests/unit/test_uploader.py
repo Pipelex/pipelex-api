@@ -116,6 +116,35 @@ class TestUploadEndpoint:
         assert key.startswith(f"{USER_A}/assets/")
         assert key.endswith(f".{expected_ext}")
 
+    def test_default_upload_lands_under_assets_prefix(self, mocker: MockerFixture):
+        """Regression guard: omitting `ephemeral` keeps durable attachments under '/assets/',
+        which the 7-day lifecycle rule must never touch.
+        """
+        user = RequestUser(user_id=USER_A)
+        client, store_mock = _build_client(user, mocker)
+
+        client.post("/upload", json={"filename": "resume.pdf", "data": VALID_B64})
+
+        store_mock.assert_awaited_once()
+        key = store_mock.await_args.kwargs["key"]
+        assert key.startswith(f"{USER_A}/assets/")
+        assert "/ephemeral/" not in key
+
+    def test_ephemeral_upload_lands_under_ephemeral_prefix(self, mocker: MockerFixture):
+        """`ephemeral=true` routes the object under '/ephemeral/', the exact key segment the
+        pipelex-api-infra S3 lifecycle rule filters on for 7-day auto-deletion.
+        """
+        user = RequestUser(user_id=USER_A)
+        client, store_mock = _build_client(user, mocker)
+
+        client.post("/upload", json={"filename": "synthetic.png", "data": VALID_B64, "ephemeral": True})
+
+        store_mock.assert_awaited_once()
+        key = store_mock.await_args.kwargs["key"]
+        assert key.startswith(f"{USER_A}/ephemeral/")
+        assert key.endswith(".png")
+        assert "/assets/" not in key
+
     @pytest.mark.parametrize(
         "backend_error",
         [
