@@ -80,7 +80,6 @@ domain      = "research"
 description = "Research method headers"
 
 [pipe.find_key_findings]
-type        = "PipeSignature"
 description = "Find the key findings in a document (contract only)."
 inputs      = { doc = "Text" }
 output      = "KeyFinding"
@@ -109,7 +108,6 @@ domain      = "research"
 description = "Research method headers"
 
 [pipe.find_key_findings]
-type        = "PipeSignature"
 description = "Find the key findings in a document (contract only)."
 inputs      = { doc = "Text" }
 output      = "KeyFinding"
@@ -147,7 +145,6 @@ output = "ApiSummary"
 steps = [ { pipe = "summary_sig", result = "summary" } ]
 
 [pipe.summary_sig]
-type = "PipeSignature"
 description = "Signature placeholder for the summary step."
 inputs = { doc = "ApiDoc" }
 output = "ApiSummary"
