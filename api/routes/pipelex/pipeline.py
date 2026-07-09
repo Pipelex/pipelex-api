@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 from contextlib import contextmanager
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, Request
@@ -26,7 +26,7 @@ from pydantic import ValidationError
 from typing_extensions import override
 
 from api.api_config import get_api_config, resolve_orchestration_mode
-from api.bundle import materialize_parsed, parse_bundle
+from api.bundle import ParsedBundle, materialize_parsed, parse_bundle
 from api.error_types import ErrorType
 from api.errors import raise_bad_request, raise_forbidden, raise_validation_error
 from api.logging_context import get_request_id
@@ -496,13 +496,20 @@ async def _parse_request(request: Request) -> tuple[RunRequest, PipelineApiExtra
 
 
 @contextmanager
-def _bundle_library_dirs(run_request: RunRequest) -> Generator[list[str] | None, None, None]:
-    """Materialize a request-carried method bundle into a temp library dir for the run.
+def _bundle_run_source(run_request: RunRequest) -> Generator[tuple[list[str] | None, list[str] | None], None, None]:
+    """Resolve a run's `(mthds_contents, library_dirs)` from the request.
 
-    When the request carries no bundle (`bundle_b64` / `files` both absent), yields
-    `None` — the runner loads from `mthds_contents` exactly as before. When a bundle
-    is present, it is materialized (guards enforced in `api.bundle`) and the temp
-    directory is yielded as the single `library_dirs` entry, cleaned up on exit.
+    A method bundle KEEPS the proven run path rather than replacing it: its `.mthds`
+    text travels as `mthds_contents` — so `main_pipe` resolves exactly as it does for a
+    plain (non-bundle) run — and ONLY the non-`.mthds` files (custom PipeFunc `.py`,
+    `structures/*.py`, `requirements.txt`) are materialized into a temp `library_dirs`
+    entry for source capture. This mirrors "a normal run, plus the Python", instead of
+    handing the engine a bare directory with no `mthds_contents` (which never resolves
+    `main_pipe`, since that is only derived from `mthds_contents`).
+
+    No bundle → yields the request's own `mthds_contents` and no library dir (the
+    classic path, unchanged). Bundle with no non-`.mthds` files → yields the `.mthds`
+    texts and no library dir. The temp dir (when created) is cleaned up on exit.
 
     Security gate (decision 5): a bundle that ships custom Python (`.py`) is only
     honored on a sandbox-hosted deployment, where the load path captures the source
@@ -510,7 +517,7 @@ def _bundle_library_dirs(run_request: RunRequest) -> Generator[list[str] | None,
     it in-process — refused with a 403 rather than executing untrusted code.
     """
     if run_request.bundle_b64 is None and run_request.files is None:
-        yield None
+        yield run_request.mthds_contents, None
         return
     # Parse + guard in memory FIRST, then apply the sandbox-hosted gate BEFORE any disk write —
     # a bundle destined for a 403 on a non-hosted deployment never touches the filesystem.
@@ -518,8 +525,25 @@ def _bundle_library_dirs(run_request: RunRequest) -> Generator[list[str] | None,
     if parsed.has_python_sources and not is_pipe_func_sandbox_hosted():
         msg = "This bundle ships custom Python (.py); running it requires a sandbox-hosted deployment."
         raise_forbidden(message=msg, error_type=ErrorType.CUSTOM_CODE_REQUIRES_SANDBOX)
-    with materialize_parsed(parsed) as bundle:
-        yield [str(bundle.directory)]
+    # Split: `.mthds` text → `mthds_contents` (the proven main_pipe path); everything else
+    # (`.py`, `requirements.txt`) → a temp `library_dirs` entry the load path source-captures.
+    mthds_contents: list[str] = []
+    other_entries: list[tuple[PurePosixPath, bytes]] = []
+    for relpath, content in parsed.entries:
+        if str(relpath).endswith(".mthds"):
+            try:
+                mthds_contents.append(content.decode("utf-8"))
+            except UnicodeDecodeError:
+                raise_validation_error(message=f"Bundle .mthds file '{relpath}' is not valid UTF-8.", error_type=ErrorType.INVALID_BUNDLE)
+        else:
+            other_entries.append((relpath, content))
+    if not mthds_contents:
+        raise_validation_error(message="Method bundle contains no .mthds file.", error_type=ErrorType.INVALID_BUNDLE)
+    if not other_entries:
+        yield mthds_contents, None
+        return
+    with materialize_parsed(ParsedBundle(entries=tuple(other_entries))) as bundle:
+        yield mthds_contents, [str(bundle.directory)]
 
 
 @router.post(
@@ -550,11 +574,11 @@ async def execute(request: Request) -> JSONResponse:
     turns them into an RFC 7807 problem response.
     """
     run_request, extras = await _parse_request(request)
-    with _bundle_library_dirs(run_request) as library_dirs:
+    with _bundle_run_source(run_request) as (mthds_contents, library_dirs):
         runner = ApiRunner(user_id=_get_user_id(request), library_dirs=library_dirs)
         response = await runner.execute(
             pipe_code=run_request.pipe_code,
-            mthds_contents=run_request.mthds_contents,
+            mthds_contents=mthds_contents,
             inputs=run_request.inputs,
             output_name=run_request.output_name,
             output_multiplicity=run_request.output_multiplicity,
@@ -608,11 +632,11 @@ async def start(
     # The bundle is materialized only for the synchronous setup phase: `start` builds the PipeJob
     # (crate carrying the captured `python_sources`) before it enqueues, so the temp dir is no
     # longer needed once `start` returns — cleanup on context exit is safe for the async path.
-    with _bundle_library_dirs(run_request) as library_dirs:
+    with _bundle_run_source(run_request) as (mthds_contents, library_dirs):
         runner = ApiRunner(user_id=_get_user_id(request), library_dirs=library_dirs)
         return await runner.start(
             pipe_code=run_request.pipe_code,
-            mthds_contents=run_request.mthds_contents,
+            mthds_contents=mthds_contents,
             inputs=run_request.inputs,
             output_name=run_request.output_name,
             output_multiplicity=run_request.output_multiplicity,

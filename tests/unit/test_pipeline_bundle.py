@@ -1,10 +1,11 @@
 """Route-level tests for the method-bundle transport on /execute and /start.
 
-The pipeline runner is mocked (as in `test_pipeline_routes`); these assert the
-API layer materializes a request-carried bundle into a temporary `library_dirs`
-directory, that the materialized files are present on disk when the runner runs,
-that a bundle shipping custom Python is gated on a sandbox-hosted deployment,
-and that the both-forms guard surfaces as a 422.
+The pipeline runner is mocked (as in `test_pipeline_routes`); these assert that
+the API layer KEEPS the proven run path for a bundle — the bundle's `.mthds` text
+is passed as `mthds_contents` (so the engine resolves `main_pipe` exactly as for a
+plain run) — while ONLY the non-`.mthds` files (custom PipeFunc `.py`, etc.) are
+materialized into a temporary `library_dirs` directory for source capture. They
+also assert the custom-Python sandbox gate and the both-forms guard.
 """
 
 import base64
@@ -36,9 +37,11 @@ def _zip_b64(files: dict[str, str]) -> str:
 def _build_client(mocker: MockerFixture) -> tuple[TestClient, dict[str, Any]]:
     """Wire an app whose ApiRunner is mocked and records what the run actually saw.
 
-    The `snapshot` dict captures the `library_dirs` the runner was constructed
-    with and the files present on disk at execute/start time — proving the
-    bundle was materialized before the run and is torn down after.
+    The `snapshot` captures BOTH what the runner was asked to run — the
+    `mthds_contents` passed to `execute`/`start` — and the `library_dirs` it was
+    constructed with plus the files on disk at run time. Together they prove the
+    split: the `.mthds` travels as `mthds_contents`, only the `.py` hits disk, and
+    the temp dir is torn down after the request.
     """
     app = FastAPI()
     app.include_router(pipeline_router, prefix="/v1")
@@ -49,23 +52,26 @@ def _build_client(mocker: MockerFixture) -> tuple[TestClient, dict[str, Any]]:
     fake_execute_response = mocker.MagicMock()
     fake_execute_response.model_dump.return_value = {"pipeline_run_id": "run-1", "state": "COMPLETED"}
 
-    def _record(library_dirs: list[str] | None) -> None:
+    def _record(library_dirs: list[str] | None, run_kwargs: dict[str, Any]) -> None:
         snapshot["library_dirs"] = library_dirs
+        snapshot["mthds_contents"] = run_kwargs.get("mthds_contents")
         if library_dirs:
             root = Path(library_dirs[0])
             snapshot["dir_exists"] = root.exists()
             snapshot["files"] = sorted(path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file())
+        else:
+            snapshot["files"] = None
 
     def _make_runner(**kwargs: Any) -> Any:
         library_dirs: list[str] | None = kwargs.get("library_dirs")
         runner = mocker.MagicMock()
 
-        async def _execute(**_kwargs: Any) -> Any:
-            _record(library_dirs)
+        async def _execute(**run_kwargs: Any) -> Any:
+            _record(library_dirs, run_kwargs)
             return fake_execute_response
 
-        async def _start(**_kwargs: Any) -> Any:
-            _record(library_dirs)
+        async def _start(**run_kwargs: Any) -> Any:
+            _record(library_dirs, run_kwargs)
             return PipelexRunResultStart(
                 pipeline_run_id="run-1",
                 created_at="2026-01-15T12:00:00Z",
@@ -82,42 +88,54 @@ def _build_client(mocker: MockerFixture) -> tuple[TestClient, dict[str, Any]]:
 
 
 class TestPipelineBundle:
-    def test_files_bundle_reaches_runner(self, mocker: MockerFixture):
+    def test_mthds_only_bundle_rides_mthds_contents_no_library_dir(self, mocker: MockerFixture):
+        """A `.mthds`-only bundle takes the proven path: its text becomes `mthds_contents`
+        (so `main_pipe` resolves as always) and NO temp library dir is created.
+        """
         client, snapshot = _build_client(mocker)
         response = client.post("/v1/execute", json={"files": {"main.mthds": VALID_MTHDS}, "inputs": {"text": "hi"}})
         assert response.status_code == 200
-        assert snapshot["dir_exists"] is True
-        assert snapshot["files"] == ["main.mthds"]
-        # Temp dir is cleaned once the request returns.
-        assert not Path(snapshot["library_dirs"][0]).exists()
+        assert snapshot["mthds_contents"] == [VALID_MTHDS]
+        assert snapshot["library_dirs"] is None
 
-    def test_zip_bundle_reaches_runner(self, mocker: MockerFixture):
+    def test_zip_bundle_rides_mthds_contents(self, mocker: MockerFixture):
         client, snapshot = _build_client(mocker)
         bundle = _zip_b64({"main.mthds": VALID_MTHDS})
         response = client.post("/v1/execute", json={"bundle_b64": bundle, "inputs": {"text": "hi"}})
         assert response.status_code == 200
-        assert snapshot["files"] == ["main.mthds"]
+        assert snapshot["mthds_contents"] == [VALID_MTHDS]
+        assert snapshot["library_dirs"] is None
 
-    def test_no_bundle_leaves_library_dirs_none(self, mocker: MockerFixture):
+    def test_no_bundle_passes_request_mthds_contents(self, mocker: MockerFixture):
         client, snapshot = _build_client(mocker)
         response = client.post("/v1/execute", json={"pipe_code": "echo", "mthds_contents": [VALID_MTHDS], "inputs": {}})
         assert response.status_code == 200
         assert snapshot["library_dirs"] is None
+        assert snapshot["mthds_contents"] == [VALID_MTHDS]
 
     def test_python_bundle_forbidden_when_not_hosted(self, mocker: MockerFixture):
         mocker.patch("api.routes.pipelex.pipeline.is_pipe_func_sandbox_hosted", return_value=False)
         client, _ = _build_client(mocker)
-        response = client.post("/v1/execute", json={"files": {"main.mthds": VALID_MTHDS, "pipe_func.py": _PIPE_FUNC_PY}})
+        response = client.post("/v1/execute", json={"files": {"main.mthds": VALID_MTHDS, "funcs/pipe_func.py": _PIPE_FUNC_PY}})
         assert response.status_code == 403
         assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "CustomCodeRequiresSandbox"
 
-    def test_python_bundle_allowed_when_hosted(self, mocker: MockerFixture):
+    def test_python_bundle_splits_mthds_from_py_when_hosted(self, mocker: MockerFixture):
+        """The key fix: `.mthds` → `mthds_contents` (main_pipe path), ONLY the `.py`
+        is materialized to the temp `library_dirs` for source capture.
+        """
         mocker.patch("api.routes.pipelex.pipeline.is_pipe_func_sandbox_hosted", return_value=True)
         client, snapshot = _build_client(mocker)
-        response = client.post("/v1/execute", json={"files": {"main.mthds": VALID_MTHDS, "pipe_func.py": _PIPE_FUNC_PY}})
+        response = client.post("/v1/execute", json={"files": {"main.mthds": VALID_MTHDS, "funcs/pipe_func.py": _PIPE_FUNC_PY}})
         assert response.status_code == 200
-        assert snapshot["files"] == ["main.mthds", "pipe_func.py"]
+        # The .mthds took the proven path, not the disk.
+        assert snapshot["mthds_contents"] == [VALID_MTHDS]
+        # Only the Python landed in the library dir.
+        assert snapshot["files"] == ["funcs/pipe_func.py"]
+        assert snapshot["dir_exists"] is True
+        # Temp dir is cleaned once the request returns.
+        assert not Path(snapshot["library_dirs"][0]).exists()
 
     def test_both_forms_rejected_via_route(self, mocker: MockerFixture):
         client, _ = _build_client(mocker)
@@ -128,11 +146,12 @@ class TestPipelineBundle:
         assert response.status_code == 422
         assert response.json()["error_type"] == "InvalidBundle"
 
-    def test_start_materializes_bundle(self, mocker: MockerFixture):
+    def test_start_bundle_rides_mthds_contents(self, mocker: MockerFixture):
         client, snapshot = _build_client(mocker)
         response = client.post("/v1/start", json={"files": {"main.mthds": VALID_MTHDS}, "inputs": {"text": "hi"}})
         assert response.status_code == 202
-        assert snapshot["files"] == ["main.mthds"]
+        assert snapshot["mthds_contents"] == [VALID_MTHDS]
+        assert snapshot["library_dirs"] is None
 
     def test_bundle_and_mthds_contents_are_mutually_exclusive(self, mocker: MockerFixture):
         client, _ = _build_client(mocker)
