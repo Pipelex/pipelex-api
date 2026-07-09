@@ -16,7 +16,7 @@ classifiers = [
 ]
 
 dependencies = [
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.37.0",
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]",
   "pipelex-tools-py>=0.1.0",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
@@ -77,6 +77,13 @@ packages = ["api"]
 
 [tool.uv]
 required-version = ">=0.7.2"
+
+[tool.uv.sources]
+# No pipelex 0.38.x release yet — the PipeFunc-executor seam (is_pipe_func_sandbox_hosted,
+# the bundle-transport symbols this branch imports) lives on this SHA
+# (feature/remote-pipe-func HEAD). pipelex-worker pins the same line. Repoint to a
+# tag once pipelex 0.38.x is released.
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "00015c5685b26c319a5dbf1a483de39c10d88da3" }
 
 [tool.mypy]
 check_untyped_defs = true
