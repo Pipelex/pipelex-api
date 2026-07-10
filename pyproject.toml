@@ -83,7 +83,7 @@ required-version = ">=0.7.2"
 # the bundle-transport symbols this branch imports) lives on this SHA
 # (feature/remote-pipe-func HEAD). pipelex-worker pins the same line. Repoint to a
 # tag once pipelex 0.38.x is released.
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "34098e3651fb25c573bde44cdee1baeed0e4115d" }
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "5704480b079864c37cebc96ec5219a30afbbe17c" }
 
 [tool.mypy]
 check_untyped_defs = true
