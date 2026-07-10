@@ -13,6 +13,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pipelex.codegen.check import run_codegen_check
 from pipelex.codegen.stamp import comment_prefix_for, parse_stamped
+from pipelex.hub import get_library_manager
+from pytest_mock import MockerFixture
 
 from api.exception_handlers import register_exception_handlers
 from api.routes import router as api_router
@@ -112,3 +114,42 @@ class TestCodegenRoute:
         assert response.status_code == 501, response.text
         assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "MethodRefNotSupported"
+
+    def test_codegen_tears_down_its_library(self, mocker: MockerFixture):
+        # The engine core leaves the library loaded + current on success; the route owns teardown.
+        # Conservation property: opens == teardowns (mirrors /resolve's analog).
+        library_manager = get_library_manager()
+        open_spy = mocker.spy(library_manager, "open_library")
+        teardown_spy = mocker.spy(library_manager, "teardown")
+
+        client = _build_client()
+        response = client.post("/v1/codegen", json={"files": [{"content": VALID_MTHDS}], "kind": "types", "target": "python-pydantic"})
+
+        assert response.status_code == 200, response.text
+        assert open_spy.call_count >= 1
+        assert open_spy.call_count == teardown_spy.call_count
+
+    def test_codegen_tears_down_library_when_emission_raises(self, mocker: MockerFixture):
+        # Leak canary: a failure in the success window — after resolve_requested_crate left its
+        # library loaded + current, before the finally — must NOT leak that library. The synthetic
+        # RuntimeError propagates to the global Exception handler (500), and the conservation
+        # property still holds: opens == teardowns.
+        library_manager = get_library_manager()
+        open_spy = mocker.spy(library_manager, "open_library")
+        teardown_spy = mocker.spy(library_manager, "teardown")
+        mocker.patch(
+            "api.routes.pipelex.codegen.emit_types",
+            side_effect=RuntimeError("synthetic emission failure"),
+        )
+
+        # raise_server_exceptions=False: Starlette's ServerErrorMiddleware would otherwise re-raise
+        # the synthetic RuntimeError through the TestClient (convention of test_exception_handlers.py).
+        app = FastAPI()
+        app.include_router(api_router, prefix="/v1")
+        register_exception_handlers(app)
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.post("/v1/codegen", json={"files": [{"content": VALID_MTHDS}], "kind": "types", "target": "python-pydantic"})
+
+        assert response.status_code == 500
+        assert open_spy.call_count >= 1
+        assert open_spy.call_count == teardown_spy.call_count

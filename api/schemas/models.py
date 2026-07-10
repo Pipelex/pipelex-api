@@ -22,6 +22,13 @@ from pydantic.functional_validators import SkipValidation
 from api.limits import MAX_CALLBACK_URL_LEN, MAX_CALLBACK_URLS, MAX_MTHDS_FILE_BYTES, MAX_MTHDS_FILES_PER_REQUEST
 
 
+def _ensure_mthds_file_within_bytes_limit(content: str) -> None:
+    """Enforce the per-file size bound shared by every route that accepts inline MTHDS content."""
+    if len(content.encode("utf-8")) > MAX_MTHDS_FILE_BYTES:
+        msg = f"MTHDS file exceeds {MAX_MTHDS_FILE_BYTES // 1024} KiB limit"
+        raise ValueError(msg)
+
+
 class RunRequest(BaseModel):
     """Body of `POST /execute` — this server's typed request model.
 
@@ -227,9 +234,7 @@ class MthdsFileItem(BaseModel):
     @field_validator("content")
     @classmethod
     def _bound_content(cls, value: str) -> str:
-        if len(value.encode("utf-8")) > MAX_MTHDS_FILE_BYTES:
-            msg = f"MTHDS file exceeds {MAX_MTHDS_FILE_BYTES // 1024} KiB limit"
-            raise ValueError(msg)
+        _ensure_mthds_file_within_bytes_limit(value)
         return value
 
 
@@ -291,7 +296,5 @@ class MthdsContentsRequest(BaseModel):
     @classmethod
     def _bound_each_file(cls, value: list[str]) -> list[str]:
         for content in value:
-            if len(content.encode("utf-8")) > MAX_MTHDS_FILE_BYTES:
-                msg = f"MTHDS file exceeds {MAX_MTHDS_FILE_BYTES // 1024} KiB limit"
-                raise ValueError(msg)
+            _ensure_mthds_file_within_bytes_limit(content)
         return value

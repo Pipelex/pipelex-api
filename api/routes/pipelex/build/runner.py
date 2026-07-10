@@ -3,6 +3,7 @@ from typing import Annotated, Literal, Union
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from mthds.package.manifest.schema import MTHDS_STANDARD_VERSION
+from pipelex.base_exceptions import PipelexUnexpectedError
 from pipelex.builder.runner_code import generate_runner_code
 from pipelex.codegen.emission import build_stamped_projection
 from pipelex.codegen.emitters.naming import runtime_to_emitted_class_names
@@ -133,10 +134,11 @@ async def build_runner(request_data: BuildRunnerRequest) -> JSONResponse:
 
         crate = library_manager.get_crate(library_id) if library_id else None
         if crate is None:
-            # Unreachable after a successful in-memory validate (the blueprints were accumulated);
-            # kept as a loud guard rather than a silent unstructured scaffold.
+            # Unreachable after a successful in-memory validate (the blueprints were accumulated),
+            # so a None crate is an internal invariant break — a server fault (5xx), never a
+            # caller-facing verdict (mirrors resolve_crate_from_contents's identical guard).
             msg = "library crate unavailable after a successful bundle load"
-            raise ValidateBundleError(message=msg)
+            raise PipelexUnexpectedError(msg)
         normalized_crate = normalize_crate(crate, mthds_version=MTHDS_STANDARD_VERSION)
         emitted = emit_types(normalized_crate, target=CodegenTarget.PYTHON_STRUCTURES)
         projection = build_stamped_projection(

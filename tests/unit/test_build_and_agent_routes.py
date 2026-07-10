@@ -218,6 +218,30 @@ class TestBuildAndAgentRoutes:
         # The fix: teardown runs anyway, with the exact id open_library returned.
         teardown_spy.assert_called_once_with(library_id=created_library_id)
 
+    def test_build_runner_none_crate_is_a_server_fault_not_a_verdict(self, mocker: MockerFixture):
+        # The "unreachable" None-crate guard is an internal invariant break — a server fault (5xx),
+        # never a caller-facing verdict. Before the fix it raised ValidateBundleError OUTSIDE the
+        # except that maps it to the 200 invalid arm, so it rendered as a request-shape-style 422,
+        # contradicting the route's own contract. The library must still be torn down (no leak).
+        library_manager = get_library_manager()
+        open_spy = mocker.spy(library_manager, "open_library")
+        teardown_spy = mocker.spy(library_manager, "teardown")
+        mocker.patch.object(library_manager, "get_crate", return_value=None)
+
+        app = FastAPI()
+        app.include_router(api_router, prefix="/v1")
+        register_exception_handlers(app)
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.post(
+            "/v1/build/runner",
+            json={"mthds_contents": [VALID_MTHDS], "pipe_code": "echo"},
+        )
+
+        assert response.status_code == 500, response.text
+        assert response.headers["content-type"] == "application/problem+json"
+        assert open_spy.call_count >= 1
+        assert open_spy.call_count == teardown_spy.call_count
+
     def test_build_runner_succeeds_and_returns_python_code_and_structures(self):
         # /build/runner rides validate_bundle (loaded-on-success) and the codegen types projection
         # (D9): a 200 valid arm proves the sweep passed, the library survived for code generation,

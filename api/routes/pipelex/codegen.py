@@ -63,13 +63,14 @@ class CodegenRequest(MthdsFilesRequest):
     def _pipe_ref_only_for_per_pipe_kinds(self) -> Self:
         # `types` is concept-set-wide: silently ignoring a pipe_ref would mislead the caller into
         # believing the artifacts were narrowed to one pipe. Request-shape error → 422. A future
-        # per-pipe kind adds its arm here and accepts the selector.
-        if self.pipe_ref is None:
-            return self
+        # per-pipe kind adds its arm here and accepts the selector. The `return self` is
+        # unconditional so a non-raising future arm can never make pydantic take None as the model.
         match self.kind:
             case CodegenRouteKind.TYPES:
-                msg = "pipe_ref is not accepted for kind='types' (a concept-set-wide projection)"
-                raise ValueError(msg)
+                if self.pipe_ref is not None:
+                    msg = "pipe_ref is not accepted for kind='types' (a concept-set-wide projection)"
+                    raise ValueError(msg)
+        return self
 
 
 class CodegenValidReport(BaseModel):
