@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **`POST /v1/resolve` (MTHDS Protocol resolution capability):** resolve a library closure into its **normalized library crate** over HTTP. Request selects the closure with inline `files[]` (each `{content, source?}`) XOR a `method_ref`; a produced verdict is a `200` discriminated on `is_valid` — the canonical JSON crate (qualified refs, flattened refinement, materialized natives, fingerprint) on the valid arm, the structured `validation_errors[]` on the invalid arm. `method_ref` is accepted by the envelope but answers `501` (`MethodRefNotSupported`) until server-side method-registry resolution exists.
+- **`POST /v1/codegen` (MTHDS Protocol type-projection capability):** project the crate into typed artifacts with the two explicit axes — `kind` (`types`) × `target` (`ts-zod`, `python-pydantic`, and the Pipelex-extension `python-structures`). The valid arm carries the **stamped** artifact set plus its `codegen.lock`: a client that writes them verbatim reproduces a local `pipelex codegen types` run byte-for-byte and passes the offline `pipelex codegen check`. An unknown `kind`/`target` (or a `pipe_ref` on the concept-set-wide `types`) is a request-shape `422` problem+json. There is deliberately no server-side check route (the drift check is offline by design), and no `inputs` kind (`POST /v1/build/inputs` already surfaces that projection per pipe).
+- **Docs:** new [Resolve & Codegen](docs/codegen.md) page; [Pipe Builder](docs/pipe-builder.md) rewritten to the new envelopes.
+
+### Changed
+- **Breaking — `/v1/build/{inputs,output,runner}` migrated onto the `/validate` verdict discipline:** a produced verdict is now always a `200` discriminated on `is_valid`. `build/inputs` and `build/output` wrap their previous bare JSON payload in the valid arm (`inputs` / `output` fields); an invalid bundle — including a failed dry-run of the requested pipe — is now a `200` `is_valid: false` with the structured `validation_errors[]` instead of a `422`. `build/runner` drops the retired `success` bool.
+- **Breaking — `/v1/build/runner` rides the codegen types projection (D9):** the generated script spells its imports, example inputs, and output cast with the **emitted** class names, and the valid arm now also carries the `structures` projection it imports from (stamped `structures.py` + `codegen.lock`, written into a `structures/` directory beside the script) — matching what a local `pipelex build runner` scaffolds. A requested pipe recorded SKIPPED by the sweep (cross-package dependency absent from the request) remains a request-shape `422`.
+
 ## [v0.8.0] - 2026-07-06
 
 ### Changed

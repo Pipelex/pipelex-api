@@ -9,7 +9,7 @@ one — owns it. `RunRequest` / `StartRequest` are defined here, not imported.
 from __future__ import annotations
 
 from ipaddress import ip_address
-from typing import Annotated, Any
+from typing import Annotated, Any, Self
 from urllib.parse import urlparse
 
 from mthds.protocol.exceptions import PipelineRequestError
@@ -204,6 +204,65 @@ class PipelexApiExecuteRequest(RunRequest):
     """
 
     orchestration_mode: str | None = Field(default=None, description=_ORCHESTRATION_MODE_DESCRIPTION)
+
+
+class MthdsFileItem(BaseModel):
+    """One inline MTHDS bundle: its content plus an optional logical source for diagnostics.
+
+    The `files[]` envelope pairs each content with its source in one entry (the shape the codegen
+    spec pins for the resolve/codegen routes), unlike the legacy parallel
+    `mthds_contents[]`/`mthds_sources[]` lists on `/validate`.
+    """
+
+    content: str = Field(..., description="MTHDS bundle content.")
+    source: str | None = Field(
+        default=None,
+        max_length=1024,
+        description=(
+            "Optional logical source for this bundle (e.g. its path relative to the submitted directory). "
+            "Threaded onto the blueprint so server-side diagnostics carry a `source` pointing at the owning file."
+        ),
+    )
+
+    @field_validator("content")
+    @classmethod
+    def _bound_content(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > MAX_MTHDS_FILE_BYTES:
+            msg = f"MTHDS file exceeds {MAX_MTHDS_FILE_BYTES // 1024} KiB limit"
+            raise ValueError(msg)
+        return value
+
+
+class MthdsFilesRequest(BaseModel):
+    """Shared closure selector for the resolve/codegen routes: inline `files[]` XOR a `method_ref`.
+
+    Exactly one of the two must be provided (spec'd envelope) — both or neither is a request-shape
+    422. `method_ref` is accepted by the envelope today but resolves to a 501 until server-side
+    method-registry resolution exists.
+    """
+
+    files: list[MthdsFileItem] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_MTHDS_FILES_PER_REQUEST,
+        description="Inline MTHDS bundles forming the closure to resolve (content-passing — no server-side path reads).",
+    )
+    method_ref: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=512,
+        description=(
+            "Reference to an installed/published method, resolving to a library plus its exported entry pipe. "
+            "Accepted by the envelope; served once server-side method-registry resolution lands (501 until then)."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _exactly_one_selector(self) -> Self:
+        if (self.files is None) == (self.method_ref is None):
+            msg = "provide exactly one of `files` or `method_ref`"
+            raise ValueError(msg)
+        return self
 
 
 class MthdsContentsRequest(BaseModel):

@@ -55,7 +55,7 @@ paths:
       tags:
       - build
       summary: Build Inputs
-      description: 'Generate example input JSON for a pipe.
+      description: 'Generate example input JSON for a pipe (the inputs projection, per pipe).
 
 
         `validate_bundle` opens a single library, loads the bundle, and on success leaves it loaded +
@@ -69,9 +69,13 @@ paths:
         sweep to the requested pipe (`dry_run_pipe_codes`) avoids dry-running unrelated sibling pipes.
 
 
-        Pipelex domain failures propagate untouched: the global `PipelexError` handler in
+        Response contract (the `/validate` discipline): an invalid bundle is a produced verdict —
 
-        `api.exception_handlers` turns them into an RFC 7807 problem response.'
+        a **200** `is_valid: false` with the structured `validation_errors[]` — not a 422. Non-2xx is
+
+        reserved for no-verdict conditions (request shape, auth, server fault), rendered RFC 7807 by
+
+        the global handlers.'
       operationId: build_inputs_v1_build_inputs_post
       requestBody:
         content:
@@ -85,7 +89,15 @@ paths:
           content:
             application/json:
               schema:
+                oneOf:
+                - $ref: '#/components/schemas/BuildInputsValidReport'
+                - $ref: '#/components/schemas/CrateInvalidReport'
                 title: Response Build Inputs V1 Build Inputs Post
+                discriminator:
+                  propertyName: is_valid
+                  mapping:
+                    'True': '#/components/schemas/BuildInputsValidReport'
+                    'False': '#/components/schemas/CrateInvalidReport'
         '422':
           description: Validation Error
           content:
@@ -97,7 +109,7 @@ paths:
       tags:
       - build
       summary: Build Output
-      description: 'Generate example output JSON for a pipe.
+      description: 'Generate example output JSON for a pipe (the output projection, per pipe).
 
 
         `validate_bundle` opens a single library, loads the bundle, and on success leaves it loaded +
@@ -111,9 +123,13 @@ paths:
         sweep to the requested pipe (`dry_run_pipe_codes`) avoids dry-running unrelated sibling pipes.
 
 
-        Pipelex domain failures propagate untouched: the global `PipelexError` handler in
+        Response contract (the `/validate` discipline): an invalid bundle is a produced verdict —
 
-        `api.exception_handlers` turns them into an RFC 7807 problem response.'
+        a **200** `is_valid: false` with the structured `validation_errors[]` — not a 422. Non-2xx is
+
+        reserved for no-verdict conditions (request shape, auth, server fault), rendered RFC 7807 by
+
+        the global handlers.'
       operationId: build_output_v1_build_output_post
       requestBody:
         content:
@@ -127,7 +143,15 @@ paths:
           content:
             application/json:
               schema:
+                oneOf:
+                - $ref: '#/components/schemas/BuildOutputValidReport'
+                - $ref: '#/components/schemas/CrateInvalidReport'
                 title: Response Build Output V1 Build Output Post
+                discriminator:
+                  propertyName: is_valid
+                  mapping:
+                    'True': '#/components/schemas/BuildOutputValidReport'
+                    'False': '#/components/schemas/CrateInvalidReport'
         '422':
           description: Validation Error
           content:
@@ -139,20 +163,29 @@ paths:
       tags:
       - build
       summary: Build Runner
-      description: 'Generate Python runner code for a pipe from MTHDS content.
+      description: 'Generate a Python runner script for a pipe, riding the codegen types projection (D9).
 
 
-        Pipelex domain failures propagate untouched: the global `PipelexError`
+        `validate_bundle` opens a single library, loads the bundle, runs the sweep scoped to the
 
-        handler in `api.exception_handlers` turns them into an RFC 7807 problem response. The
+        requested pipe, and on success leaves the library loaded + current; on failure it tears it down
 
-        `try`/`finally` guarantees the library is torn down on every path that
+        itself. On the success path the crate is read from that library (built only from a valid
 
-        actually opened one — `library_id` stays `None` until `open_library`
+        library), the `python-structures` projection is emitted and stamped, and the runner script is
 
-        returns, so a failure before that point is a no-op for teardown rather
+        generated with the **emitted** class names — the same flow as a local `pipelex build runner`.
 
-        than a leak. Matches the pattern in `build/inputs.py` and `build/output.py`.'
+
+        Response contract (the `/validate` discipline): an invalid bundle — including a failed dry-run
+
+        of the requested pipe — is a produced verdict: a **200** `is_valid: false` with the structured
+
+        `validation_errors[]`. Non-2xx is reserved for no-verdict conditions: a request-shape 422
+
+        (including a requested pipe whose cross-package dependencies are absent from the request), auth,
+
+        server fault — RFC 7807 via the global handlers.'
       operationId: build_runner_v1_build_runner_post
       requestBody:
         content:
@@ -166,7 +199,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BuildRunnerResponse'
+                oneOf:
+                - $ref: '#/components/schemas/BuildRunnerValidReport'
+                - $ref: '#/components/schemas/CrateInvalidReport'
+                title: Response Build Runner V1 Build Runner Post
+                discriminator:
+                  propertyName: is_valid
+                  mapping:
+                    'True': '#/components/schemas/BuildRunnerValidReport'
+                    'False': '#/components/schemas/CrateInvalidReport'
         '422':
           description: Validation Error
           content:
@@ -492,6 +533,94 @@ paths:
                   mapping:
                     'True': '#/components/schemas/ValidReport'
                     'False': '#/components/schemas/InvalidReport'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-mthds-protocol: true
+  /v1/resolve:
+    post:
+      tags:
+      - resolve
+      summary: Resolve Mthds
+      description: "Resolve a library closure into its normalized crate (MTHDS Protocol resolution capability).\n\nResolution\
+        \ is a first-class language operation alongside validation: assemble the closure from\nthe inline `files[]`, load\
+        \ + statically validate the library, and emit the **normalized\nlibrary crate** (fully qualified refs, refinement\
+        \ flattened, natives materialized, fingerprint\nset). It runs no dry-run sweep — runnability is `/validate`'s vocabulary.\n\
+        \nResponse contract (the `/validate` discipline):\n\n- **Valid verdict (200, `is_valid: true`):** the crate on the\
+        \ valid arm.\n- **Invalid verdict (200, `is_valid: false`):** the library could not be parsed, loaded, or\n  validated\
+        \ — `validation_errors[]` from pipelex's one shared builder.\n- **No verdict (non-2xx):** a malformed request body\
+        \ (neither/both closure selectors, an\n  over-limit file) is a request-shape 422; `method_ref` is a 501 until server-side\
+        \ method\n  registry resolution exists; auth is 401/403; server fault is 5xx. All RFC 7807\n  `application/problem+json`\
+        \ via the global handlers."
+      operationId: resolve_mthds_v1_resolve_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MthdsFilesRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/ResolveValidReport'
+                - $ref: '#/components/schemas/CrateInvalidReport'
+                title: Response Resolve Mthds V1 Resolve Post
+                discriminator:
+                  propertyName: is_valid
+                  mapping:
+                    'True': '#/components/schemas/ResolveValidReport'
+                    'False': '#/components/schemas/CrateInvalidReport'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-mthds-protocol: true
+  /v1/codegen:
+    post:
+      tags:
+      - codegen
+      summary: Codegen Mthds
+      description: "Generate typed artifacts from a library closure (MTHDS Protocol type-projection capability).\n\nResolves\
+        \ the closure to its normalized crate (exactly like `POST /resolve`), then projects it\nthrough the requested `kind`/`target`\
+        \ axes and returns the **stamped** artifact set plus its\n`codegen.lock` — everything a client needs to materialize\
+        \ a byte-identical local projection\nand run the offline drift check. There is deliberately **no** server-side check\
+        \ route: the\ncheck is offline by design.\n\nResponse contract (the `/validate` discipline):\n\n- **Valid verdict\
+        \ (200, `is_valid: true`):** the artifacts + lock on the valid arm.\n- **Invalid verdict (200, `is_valid: false`):**\
+        \ the library could not be parsed, loaded, or\n  validated — `validation_errors[]` from pipelex's one shared builder;\
+        \ no artifacts exist.\n- **No verdict (non-2xx):** an unknown projection `kind`/`target`, a `pipe_ref` on a\n  concept-set-wide\
+        \ kind, or a malformed closure selector is a request-shape 422 problem+json;\n  `method_ref` is a 501 until server-side\
+        \ method registry resolution exists; auth is 401/403;\n  server fault is 5xx."
+      operationId: codegen_mthds_v1_codegen_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CodegenRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/CodegenValidReport'
+                - $ref: '#/components/schemas/CrateInvalidReport'
+                title: Response Codegen Mthds V1 Codegen Post
+                discriminator:
+                  propertyName: is_valid
+                  mapping:
+                    'True': '#/components/schemas/CodegenValidReport'
+                    'False': '#/components/schemas/CrateInvalidReport'
         '422':
           description: Validation Error
           content:
@@ -911,6 +1040,33 @@ components:
       - mthds_contents
       - pipe_code
       title: BuildInputsRequest
+    BuildInputsValidReport:
+      properties:
+        is_valid:
+          type: boolean
+          const: true
+          title: Is Valid
+          default: true
+        pipe_code:
+          type: string
+          title: Pipe Code
+          description: The pipe the inputs template was generated for (echo of the request).
+        inputs:
+          additionalProperties: true
+          type: object
+          title: Inputs
+          description: Example input JSON for the pipe (the same template `pipelex codegen inputs` renders).
+        message:
+          type: string
+          title: Message
+          description: Status message
+          default: Inputs template generated successfully
+      type: object
+      required:
+      - pipe_code
+      - inputs
+      title: BuildInputsValidReport
+      description: 'The 200 **valid** arm: the example inputs template for the requested pipe.'
     BuildOutputRequest:
       properties:
         mthds_contents:
@@ -942,6 +1098,37 @@ components:
       - mthds_contents
       - pipe_code
       title: BuildOutputRequest
+    BuildOutputValidReport:
+      properties:
+        is_valid:
+          type: boolean
+          const: true
+          title: Is Valid
+          default: true
+        pipe_code:
+          type: string
+          title: Pipe Code
+          description: The pipe the output representation was generated for (echo of the request).
+        format:
+          $ref: '#/components/schemas/ConceptRepresentationFormat'
+          description: The representation format (echo of the request).
+        output:
+          additionalProperties: true
+          type: object
+          title: Output
+          description: Example output JSON for the pipe (fed by the pipe's IO contract).
+        message:
+          type: string
+          title: Message
+          description: Status message
+          default: Output representation generated successfully
+      type: object
+      required:
+      - pipe_code
+      - format
+      - output
+      title: BuildOutputValidReport
+      description: 'The 200 **valid** arm: the example output representation for the requested pipe.'
     BuildPipeSpecRequest:
       properties:
         pipe_type:
@@ -1012,21 +1199,24 @@ components:
       - mthds_contents
       - pipe_code
       title: BuildRunnerRequest
-    BuildRunnerResponse:
+    BuildRunnerValidReport:
       properties:
-        python_code:
-          type: string
-          title: Python Code
-          description: Generated Python code for running the workflow
+        is_valid:
+          type: boolean
+          const: true
+          title: Is Valid
+          default: true
         pipe_code:
           type: string
           title: Pipe Code
-          description: Pipe code that was used
-        success:
-          type: boolean
-          title: Success
-          description: Whether the operation was successful
-          default: true
+          description: The pipe the runner was generated for (echo of the request).
+        python_code:
+          type: string
+          title: Python Code
+          description: Generated Python script for running the pipeline, imports spelled with the emitted class names.
+        structures:
+          $ref: '#/components/schemas/RunnerStructures'
+          description: The typed-structures projection the script imports from.
         message:
           type: string
           title: Message
@@ -1034,9 +1224,132 @@ components:
           default: Runner code generated successfully
       type: object
       required:
-      - python_code
       - pipe_code
-      title: BuildRunnerResponse
+      - python_code
+      - structures
+      title: BuildRunnerValidReport
+      description: 'The 200 **valid** arm: the runner script plus the structures projection it imports from.'
+    CodegenRequest:
+      properties:
+        files:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/MthdsFileItem'
+            type: array
+            maxItems: 16
+            minItems: 1
+          - type: 'null'
+          title: Files
+          description: Inline MTHDS bundles forming the closure to resolve (content-passing — no server-side path reads).
+        method_ref:
+          anyOf:
+          - type: string
+            maxLength: 512
+            minLength: 1
+          - type: 'null'
+          title: Method Ref
+          description: Reference to an installed/published method, resolving to a library plus its exported entry pipe. Accepted
+            by the envelope; served once server-side method-registry resolution lands (501 until then).
+        kind:
+          $ref: '#/components/schemas/CodegenRouteKind'
+          description: What to project. `types` projects the crate's concept set into typed models.
+        target:
+          $ref: '#/components/schemas/CodegenTarget'
+          description: 'For whom: `ts-zod` (zod schemas + inferred types) and `python-pydantic` (self-contained BaseModels)
+            are MTHDS-protocol type projections; `python-structures` (runtime StructuredContent classes) is a Pipelex extension.'
+        pipe_ref:
+          anyOf:
+          - type: string
+            maxLength: 512
+          - type: 'null'
+          title: Pipe Ref
+          description: Pipe selector for per-pipe projection kinds. Not accepted for `types` (a concept-set-wide projection).
+      type: object
+      required:
+      - kind
+      - target
+      title: CodegenRequest
+      description: 'The codegen request: the shared closure selector plus the two explicit projection axes.'
+    CodegenRouteKind:
+      type: string
+      enum:
+      - types
+      title: CodegenRouteKind
+      description: 'The projection kinds this route serves — the `kind` axis of the codegen request.
+
+
+        Deliberately narrower than the engine''s kind axis: input templates ride `POST /build/inputs`
+
+        (the same projection, already surfaced per pipe), mirroring the agent CLI''s deliberate absence
+
+        of a `codegen inputs` mirror. An unknown kind is a request-shape 422 listing the served set.'
+    CodegenTarget:
+      type: string
+      enum:
+      - python-structures
+      - python-pydantic
+      - ts-zod
+      title: CodegenTarget
+      description: 'A codegen target flavor. `python-structures` is a Pipelex-runtime extension (StructuredContent
+
+        classes); `python-pydantic` and `ts-zod` are protocol-capability type projections (neutral shapes).'
+    CodegenValidReport:
+      properties:
+        is_valid:
+          type: boolean
+          const: true
+          title: Is Valid
+          default: true
+        kind:
+          $ref: '#/components/schemas/CodegenRouteKind'
+          description: The projected kind (echo of the request).
+        target:
+          $ref: '#/components/schemas/CodegenTarget'
+          description: The projection target (echo of the request).
+        crate_fingerprint:
+          type: string
+          title: Crate Fingerprint
+          description: Fingerprint of the normalized crate the artifacts were generated from.
+        engine_version:
+          type: string
+          title: Engine Version
+          description: The pipelex engine version that generated the artifacts.
+        artifacts:
+          items:
+            $ref: '#/components/schemas/GeneratedArtifact'
+          type: array
+          title: Artifacts
+          description: The stamped generated files.
+        lock:
+          type: string
+          title: Lock
+          description: The `codegen.lock` content (TOML) tracking the artifact set — write verbatim beside the artifacts.
+        lock_filename:
+          type: string
+          title: Lock Filename
+          description: Filename the lock content must be written as.
+          default: codegen.lock
+        message:
+          type: string
+          title: Message
+          description: Status message
+          default: Codegen artifacts generated successfully
+      type: object
+      required:
+      - kind
+      - target
+      - crate_fingerprint
+      - engine_version
+      - lock
+      title: CodegenValidReport
+      description: 'The 200 **valid** arm: the stamped artifact set plus its lock.
+
+
+        A client that writes each artifact and the lock verbatim reproduces a local
+
+        `pipelex codegen types` run byte-for-byte — the same stamps, the same `codegen.lock` — so the
+
+        offline `codegen check` passes on the written tree exactly as it would locally.'
     Concept:
       properties:
         code:
@@ -1166,6 +1479,8 @@ components:
       - boolean
       - number
       - date
+      - datetime
+      - time
       - concept
       title: ConceptStructureBlueprintFieldType
     ConstructBlueprint:
@@ -1235,6 +1550,36 @@ components:
       - output_accepted_prediction
       - output_rejected_prediction
       title: CostCategory
+    CrateInvalidReport:
+      properties:
+        is_valid:
+          type: boolean
+          const: false
+          title: Is Valid
+          default: false
+        validation_errors:
+          items:
+            $ref: '#/components/schemas/ValidationErrorItem'
+          type: array
+          title: Validation Errors
+          description: Per-error diagnostics, built by pipelex's one shared builder — non-empty on every invalid verdict.
+        message:
+          type: string
+          title: Message
+          description: Human-readable summary of the verdict.
+          default: MTHDS library could not be resolved
+      type: object
+      title: CrateInvalidReport
+      description: 'The 200 **invalid** arm shared by `/resolve` and `/codegen` — the crate-verdict vocabulary.
+
+
+        Same discipline as `/validate`''s `InvalidReport`: an invalid library is the *successful
+
+        product* of a diagnostic call (the request was well-formed; the library was not), so it rides
+
+        a 200 discriminated on `is_valid`, carrying the same structured `ValidationErrorItem`s the
+
+        local CLI and `/validate` emit for the identical failure.'
     DataInclusionConfig:
       properties:
         stuff_json_content:
@@ -1498,6 +1843,22 @@ components:
       - diagnostics
       title: FormatResponse
       description: Response body of `POST /format`.
+    GeneratedArtifact:
+      properties:
+        path:
+          type: string
+          title: Path
+          description: Artifact path, relative to the output root the client writes into.
+        content:
+          type: string
+          title: Content
+          description: Complete file content, stamp header included — write verbatim.
+      type: object
+      required:
+      - path
+      - content
+      title: GeneratedArtifact
+      description: 'One generated file: its path relative to the client''s chosen output root, and its full content.'
     GraphSpec:
       properties:
         graph_id:
@@ -2047,6 +2408,63 @@ components:
       - handle
       title: ModelReferenceKind
       description: The kind of model reference.
+    MthdsFileItem:
+      properties:
+        content:
+          type: string
+          title: Content
+          description: MTHDS bundle content.
+        source:
+          anyOf:
+          - type: string
+            maxLength: 1024
+          - type: 'null'
+          title: Source
+          description: Optional logical source for this bundle (e.g. its path relative to the submitted directory). Threaded
+            onto the blueprint so server-side diagnostics carry a `source` pointing at the owning file.
+      type: object
+      required:
+      - content
+      title: MthdsFileItem
+      description: 'One inline MTHDS bundle: its content plus an optional logical source for diagnostics.
+
+
+        The `files[]` envelope pairs each content with its source in one entry (the shape the codegen
+
+        spec pins for the resolve/codegen routes), unlike the legacy parallel
+
+        `mthds_contents[]`/`mthds_sources[]` lists on `/validate`.'
+    MthdsFilesRequest:
+      properties:
+        files:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/MthdsFileItem'
+            type: array
+            maxItems: 16
+            minItems: 1
+          - type: 'null'
+          title: Files
+          description: Inline MTHDS bundles forming the closure to resolve (content-passing — no server-side path reads).
+        method_ref:
+          anyOf:
+          - type: string
+            maxLength: 512
+            minLength: 1
+          - type: 'null'
+          title: Method Ref
+          description: Reference to an installed/published method, resolving to a library plus its exported entry pipe. Accepted
+            by the envelope; served once server-side method-registry resolution lands (501 until then).
+      type: object
+      title: MthdsFilesRequest
+      description: 'Shared closure selector for the resolve/codegen routes: inline `files[]` XOR a `method_ref`.
+
+
+        Exactly one of the two must be provided (spec''d envelope) — both or neither is a request-shape
+
+        422. `method_ref` is accepted by the envelope today but resolves to a 501 until server-side
+
+        method-registry resolution exists.'
     NodeIOSpec:
       properties:
         inputs:
@@ -3294,6 +3712,37 @@ components:
       - url
       - expires_at
       title: ResolveStorageUrlResponse
+    ResolveValidReport:
+      properties:
+        is_valid:
+          type: boolean
+          const: true
+          title: Is Valid
+          default: true
+        crate:
+          additionalProperties: true
+          type: object
+          title: Crate
+          description: The normalized library crate (canonical JSON encoding, `fingerprint` included).
+        message:
+          type: string
+          title: Message
+          description: Status message
+          default: MTHDS library resolved successfully
+      type: object
+      required:
+      - crate
+      title: ResolveValidReport
+      description: 'The 200 **valid** arm: the normalized library crate, ready for any consumer''s emitter.
+
+
+        The crate rides as the canonical JSON encoding''s object form (top-level maps key-sorted,
+
+        non-semantic provenance dropped) — the same bytes `pipelex resolve --format json` prints, so a
+
+        fingerprint computed from either surface agrees. Its `fingerprint` and `mthds_version` members
+
+        ride inside the crate payload itself.'
     RunState:
       type: string
       enum:
@@ -3305,6 +3754,40 @@ components:
       - ERROR
       title: RunState
       description: Run lifecycle state — a pipelex extension field on run responses (the protocol defines none).
+    RunnerStructures:
+      properties:
+        directory:
+          type: string
+          title: Directory
+          description: Directory (relative to the runner script) to write the artifacts and lock into.
+          default: structures
+        artifacts:
+          items:
+            $ref: '#/components/schemas/GeneratedArtifact'
+          type: array
+          title: Artifacts
+          description: The stamped generated files (paths relative to `directory`).
+        lock:
+          type: string
+          title: Lock
+          description: The lock content (TOML) tracking the artifact set — write verbatim inside `directory`.
+        lock_filename:
+          type: string
+          title: Lock Filename
+          description: Filename the lock content must be written as.
+          default: codegen.lock
+      type: object
+      required:
+      - lock
+      title: RunnerStructures
+      description: 'The typed-structures projection the runner script imports from (`from structures.structures import ...`).
+
+
+        The same stamped `python-structures` artifacts + `codegen.lock` a local `pipelex build runner`
+
+        scaffolds into `<output>/structures/` — write `artifacts` and the lock under `directory` and
+
+        the returned `python_code` runs against them, with the offline `codegen check` passing there.'
     SearchSetting:
       properties:
         model:

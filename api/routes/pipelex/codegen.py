@@ -1,0 +1,146 @@
+from enum import StrEnum
+from typing import Annotated, Literal, Self, Union
+
+from fastapi import APIRouter
+from fastapi.responses import JSONResponse
+from pipelex.codegen.emission import build_stamped_projection
+from pipelex.codegen.emitters.target import CodegenKind, CodegenTarget
+from pipelex.codegen.emitters.types_emitter import emit_types
+from pipelex.codegen.lock import CODEGEN_LOCK_FILENAME
+from pipelex.pipeline.exceptions import ValidateBundleError
+from pipelex.tools.misc.package_utils import get_package_version
+from pipelex.tools.typing.pydantic_utils import empty_list_factory_of
+from pydantic import BaseModel, Field, model_validator
+
+from api.routes.pipelex.crate_ops import (
+    CrateInvalidReport,
+    GeneratedArtifact,
+    invalid_crate_report_response,
+    resolve_requested_crate,
+    teardown_current_library,
+)
+from api.schemas.models import MthdsFilesRequest
+
+router = APIRouter(tags=["codegen"])
+
+
+class CodegenRouteKind(StrEnum):
+    """The projection kinds this route serves — the `kind` axis of the codegen request.
+
+    Deliberately narrower than the engine's kind axis: input templates ride `POST /build/inputs`
+    (the same projection, already surfaced per pipe), mirroring the agent CLI's deliberate absence
+    of a `codegen inputs` mirror. An unknown kind is a request-shape 422 listing the served set.
+    """
+
+    TYPES = "types"
+
+    @property
+    def engine_kind(self) -> CodegenKind:
+        """The engine-side `CodegenKind` this route kind projects."""
+        match self:
+            case CodegenRouteKind.TYPES:
+                return CodegenKind.TYPES
+
+
+class CodegenRequest(MthdsFilesRequest):
+    """The codegen request: the shared closure selector plus the two explicit projection axes."""
+
+    kind: CodegenRouteKind = Field(..., description="What to project. `types` projects the crate's concept set into typed models.")
+    target: CodegenTarget = Field(
+        ...,
+        description=(
+            "For whom: `ts-zod` (zod schemas + inferred types) and `python-pydantic` (self-contained BaseModels) are "
+            "MTHDS-protocol type projections; `python-structures` (runtime StructuredContent classes) is a Pipelex extension."
+        ),
+    )
+    pipe_ref: str | None = Field(
+        default=None,
+        max_length=512,
+        description="Pipe selector for per-pipe projection kinds. Not accepted for `types` (a concept-set-wide projection).",
+    )
+
+    @model_validator(mode="after")
+    def _pipe_ref_only_for_per_pipe_kinds(self) -> Self:
+        # `types` is concept-set-wide: silently ignoring a pipe_ref would mislead the caller into
+        # believing the artifacts were narrowed to one pipe. Request-shape error → 422. A future
+        # per-pipe kind adds its arm here and accepts the selector.
+        if self.pipe_ref is None:
+            return self
+        match self.kind:
+            case CodegenRouteKind.TYPES:
+                msg = "pipe_ref is not accepted for kind='types' (a concept-set-wide projection)"
+                raise ValueError(msg)
+
+
+class CodegenValidReport(BaseModel):
+    """The 200 **valid** arm: the stamped artifact set plus its lock.
+
+    A client that writes each artifact and the lock verbatim reproduces a local
+    `pipelex codegen types` run byte-for-byte — the same stamps, the same `codegen.lock` — so the
+    offline `codegen check` passes on the written tree exactly as it would locally.
+    """
+
+    is_valid: Literal[True] = True
+    kind: CodegenRouteKind = Field(..., description="The projected kind (echo of the request).")
+    target: CodegenTarget = Field(..., description="The projection target (echo of the request).")
+    crate_fingerprint: str = Field(..., description="Fingerprint of the normalized crate the artifacts were generated from.")
+    engine_version: str = Field(..., description="The pipelex engine version that generated the artifacts.")
+    artifacts: list[GeneratedArtifact] = Field(
+        default_factory=empty_list_factory_of(GeneratedArtifact),
+        description="The stamped generated files.",
+    )
+    lock: str = Field(
+        ..., description=f"The `{CODEGEN_LOCK_FILENAME}` content (TOML) tracking the artifact set — write verbatim beside the artifacts."
+    )
+    lock_filename: str = Field(default=CODEGEN_LOCK_FILENAME, description="Filename the lock content must be written as.")
+    message: str = Field(default="Codegen artifacts generated successfully", description="Status message")
+
+
+# Discriminated 200 response union: the `/validate` discipline (see `POST /resolve`).
+CodegenResponse = Annotated[Union[CodegenValidReport, CrateInvalidReport], Field(discriminator="is_valid")]
+
+
+@router.post("/codegen", response_model=CodegenResponse, openapi_extra={"x-mthds-protocol": True})
+async def codegen_mthds(request_data: CodegenRequest) -> JSONResponse:
+    """Generate typed artifacts from a library closure (MTHDS Protocol type-projection capability).
+
+    Resolves the closure to its normalized crate (exactly like `POST /resolve`), then projects it
+    through the requested `kind`/`target` axes and returns the **stamped** artifact set plus its
+    `codegen.lock` — everything a client needs to materialize a byte-identical local projection
+    and run the offline drift check. There is deliberately **no** server-side check route: the
+    check is offline by design.
+
+    Response contract (the `/validate` discipline):
+
+    - **Valid verdict (200, `is_valid: true`):** the artifacts + lock on the valid arm.
+    - **Invalid verdict (200, `is_valid: false`):** the library could not be parsed, loaded, or
+      validated — `validation_errors[]` from pipelex's one shared builder; no artifacts exist.
+    - **No verdict (non-2xx):** an unknown projection `kind`/`target`, a `pipe_ref` on a
+      concept-set-wide kind, or a malformed closure selector is a request-shape 422 problem+json;
+      `method_ref` is a 501 until server-side method registry resolution exists; auth is 401/403;
+      server fault is 5xx.
+    """
+    try:
+        crate = resolve_requested_crate(request_data)
+    except ValidateBundleError as validate_error:
+        return invalid_crate_report_response(validate_error.to_error_report())
+    try:
+        emitted = emit_types(crate, target=request_data.target)
+        projection = build_stamped_projection(
+            emitted,
+            crate_fingerprint=crate.fingerprint,
+            engine_version=get_package_version(),
+            kind=request_data.kind.engine_kind,
+            target=request_data.target,
+        )
+        report = CodegenValidReport(
+            kind=request_data.kind,
+            target=request_data.target,
+            crate_fingerprint=crate.fingerprint,
+            engine_version=get_package_version(),
+            artifacts=[GeneratedArtifact(path=stamped.filename, content=stamped.content) for stamped in projection.files],
+            lock=projection.lock_content,
+        )
+        return JSONResponse(content=report.model_dump(mode="json", by_alias=True))
+    finally:
+        teardown_current_library()

@@ -102,6 +102,18 @@ def raise_unauthenticated(message: str, error_type: ErrorType = ErrorType.UNAUTH
     )
 
 
+def raise_not_implemented(message: str, error_type: ErrorType) -> NoReturn:
+    """Raise a 501 RFC 7807 problem response for a spec'd capability this server does not implement yet.
+
+    For request shapes the published contract accepts but this deployment cannot serve (e.g. a
+    `method_ref` closure selector before the method registry exists). A no-verdict condition —
+    distinct from a 422 (the request is well-formed per the contract) and from a 200 invalid
+    verdict (nothing was diagnosed). Classified `CONFIG` domain: neither the request nor the
+    content is at fault.
+    """
+    _raise_api_error(error_type=error_type, message=message, status=501, error_domain=ErrorDomain.CONFIG)
+
+
 def raise_internal_server_error(message: str, error_type: ErrorType) -> NoReturn:
     """Raise a 500 RFC 7807 problem response for an API-owned server fault.
 

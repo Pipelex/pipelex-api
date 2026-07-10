@@ -86,6 +86,6 @@ class TestAllowSignatures:
         )
         assert response.status_code == 200, response.text
         body = response.json()
-        assert body["success"] is True
+        assert body["is_valid"] is True
         assert body["pipe_code"] == "caller_seq"
         assert body["python_code"]
