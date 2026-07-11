@@ -99,7 +99,7 @@ def _output_is_list(blueprints: list[PipelexBundleBlueprint], *, pipe_code: str)
 
 @router.post("/build/runner", response_model=BuildRunnerResponse)
 async def build_runner(request_data: BuildRunnerRequest) -> JSONResponse:
-    """Generate a Python runner script for a pipe, riding the codegen types projection (D9).
+    """Generate a Python runner script for a pipe, riding the codegen types projection.
 
     `validate_bundle` opens a single library, loads the bundle, runs the sweep scoped to the
     requested pipe, and on success leaves the library loaded + current; on failure it tears it down

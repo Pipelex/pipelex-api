@@ -21,12 +21,14 @@ from pipelex.system.configuration.config_loader import config_manager
 from pipelex.system.configuration.configs import PipelexConfig
 from pipelex.system.environment import get_optional_env
 from pipelex.system.runtime import IntegrationMode
+from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from api.api_config import get_api_config, resolve_boot_orchestrator
 from api.disclosure import resolve_disclosure_mode
 from api.exception_handlers import register_exception_handlers
 from api.middleware import RequestIdMiddleware, request_body_size_middleware
+from api.openapi_schema import PipelexFastAPI
 from api.routes import router as api_router
 from api.routes.health import router as health_router
 from api.routes.version import router as version_router
@@ -119,7 +121,7 @@ def _own_version() -> str:
         return "0.0.0"
 
 
-fastapi_app = FastAPI(
+fastapi_app = PipelexFastAPI(
     redirect_slashes=False,
     lifespan=lifespan,
     title="Pipelex API",
@@ -172,9 +174,21 @@ auth_dependency = get_auth_dependency()
 fastapi_app.include_router(api_router, prefix="/v1", dependencies=[Depends(auth_dependency)])
 
 
-@fastapi_app.get("/")
-async def root() -> dict[str, str]:
-    return {"message": "Pipelex API"}
+class ServiceIdentity(BaseModel):
+    """Body of `GET /` — the service identity banner."""
+
+    message: str = Field(..., description="Name of the service answering on this origin.")
+
+
+@fastapi_app.get("/", summary="Service identity banner", tags=["health"])
+async def root() -> ServiceIdentity:
+    """Identify the service answering on this origin. No auth required.
+
+    A human-facing banner for someone who lands on the bare origin — not a
+    liveness probe (that is `GET /health`) and not the protocol handshake
+    (`GET /v1/version`). It reads nothing and can only succeed.
+    """
+    return ServiceIdentity(message="Pipelex API")
 
 
 register_exception_handlers(fastapi_app, disclosure_mode=ERROR_DISCLOSURE_MODE, http_error_mappers=HTTP_ERROR_MAPPERS)

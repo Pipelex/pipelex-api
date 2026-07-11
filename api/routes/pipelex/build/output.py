@@ -42,7 +42,7 @@ async def build_output(request_data: BuildOutputRequest) -> JSONResponse:
     """Generate example output JSON for a pipe (the output projection, per pipe).
 
     `validate_bundle` opens a single library, loads the bundle, and on success leaves it loaded +
-    current (the D6 loaded-on-success contract); on failure it tears that library down itself. So
+    current (the loaded-on-success contract); on failure it tears that library down itself. So
     this route reuses the already-current library directly — no second `open_library` /
     `load_from_blueprints` — and owns the teardown only on the success path it reaches. Scoping the
     sweep to the requested pipe (`dry_run_pipe_codes`) avoids dry-running unrelated sibling pipes.

@@ -12,6 +12,7 @@ from pipelex.tools.misc.package_utils import get_package_version
 from pipelex.tools.typing.pydantic_utils import empty_list_factory_of
 from pydantic import BaseModel, Field, model_validator
 
+from api.openapi_responses import PROBLEM_501_METHOD_REF
 from api.routes.pipelex.crate_ops import (
     CrateInvalidReport,
     GeneratedArtifact,
@@ -101,7 +102,14 @@ class CodegenValidReport(BaseModel):
 CodegenResponse = Annotated[Union[CodegenValidReport, CrateInvalidReport], Field(discriminator="is_valid")]
 
 
-@router.post("/codegen", response_model=CodegenResponse, openapi_extra={"x-mthds-protocol": True})
+@router.post(
+    "/codegen",
+    response_model=CodegenResponse,
+    # On top of the composite router's shared 401/413/422/500: the `method_ref` closure selector
+    # the envelope accepts but no server-side method registry resolves yet (shared with `/resolve`).
+    responses={501: PROBLEM_501_METHOD_REF},
+    openapi_extra={"x-mthds-protocol": True},
+)
 async def codegen_mthds(request_data: CodegenRequest) -> JSONResponse:
     """Generate typed artifacts from a library closure (MTHDS Protocol type-projection capability).
 

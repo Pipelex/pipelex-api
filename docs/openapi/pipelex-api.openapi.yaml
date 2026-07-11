@@ -17,7 +17,19 @@ paths:
     get:
       tags:
       - health
-      summary: Get Health
+      summary: Liveness probe
+      description: 'Report that this server process is up and serving. No auth required.
+
+
+        A pure liveness probe for load balancers and orchestrators: it touches no
+
+        dependency (no pipelex library load, no storage, no inference provider), so
+
+        a 200 means "the process is serving", never "the deployment is correctly
+
+        configured". It is mounted outside the `/v1` base path and outside the auth
+
+        dependency, and cannot fail.'
       operationId: get_health_health_get
       responses:
         '200':
@@ -25,9 +37,7 @@ paths:
           content:
             application/json:
               schema:
-                additionalProperties: true
-                type: object
-                title: Response Get Health Health Get
+                $ref: '#/components/schemas/HealthResponse'
   /v1/version:
     get:
       tags:
@@ -49,6 +59,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PipelexVersionInfo'
+        '500':
+          description: A `config`-domain or `runtime`-domain failure the caller cannot fix (a missing env var, a bad TOML
+            override, a backend fault), or an unclassified error sanitized by the catch-all handler. Report the `request_id`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
       x-mthds-protocol: true
   /v1/build/inputs:
     post:
@@ -60,7 +77,7 @@ paths:
 
         `validate_bundle` opens a single library, loads the bundle, and on success leaves it loaded +
 
-        current (the D6 loaded-on-success contract); on failure it tears that library down itself. So
+        current (the loaded-on-success contract); on failure it tears that library down itself. So
 
         this route reuses the already-current library directly — no second `open_library` /
 
@@ -98,12 +115,39 @@ paths:
                   mapping:
                     'True': '#/components/schemas/BuildInputsValidReport'
                     'False': '#/components/schemas/CrateInvalidReport'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
+        '401':
+          description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
+            or `AUTH_MODE=jwt`).
+          headers:
+            WWW-Authenticate:
+              description: Authentication challenge — always `Bearer`.
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '413':
+          description: Request body exceeds the deployment's size limit (`MAX_REQUEST_BODY_MIB`, 100 MiB by default).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '422':
+          description: 'The request could not be processed: a malformed body, a field failing validation, or an `input`-domain
+            pipelex error (a `.mthds` bundle the caller must fix). Note that on the diagnostic routes an *invalid bundle*
+            is a **200** verdict, not a 422 — see each route''s response contract.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '500':
+          description: A `config`-domain or `runtime`-domain failure the caller cannot fix (a missing env var, a bad TOML
+            override, a backend fault), or an unclassified error sanitized by the catch-all handler. Report the `request_id`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
   /v1/build/output:
     post:
       tags:
@@ -114,7 +158,7 @@ paths:
 
         `validate_bundle` opens a single library, loads the bundle, and on success leaves it loaded +
 
-        current (the D6 loaded-on-success contract); on failure it tears that library down itself. So
+        current (the loaded-on-success contract); on failure it tears that library down itself. So
 
         this route reuses the already-current library directly — no second `open_library` /
 
@@ -152,18 +196,45 @@ paths:
                   mapping:
                     'True': '#/components/schemas/BuildOutputValidReport'
                     'False': '#/components/schemas/CrateInvalidReport'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
+        '401':
+          description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
+            or `AUTH_MODE=jwt`).
+          headers:
+            WWW-Authenticate:
+              description: Authentication challenge — always `Bearer`.
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '413':
+          description: Request body exceeds the deployment's size limit (`MAX_REQUEST_BODY_MIB`, 100 MiB by default).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '422':
+          description: 'The request could not be processed: a malformed body, a field failing validation, or an `input`-domain
+            pipelex error (a `.mthds` bundle the caller must fix). Note that on the diagnostic routes an *invalid bundle*
+            is a **200** verdict, not a 422 — see each route''s response contract.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '500':
+          description: A `config`-domain or `runtime`-domain failure the caller cannot fix (a missing env var, a bad TOML
+            override, a backend fault), or an unclassified error sanitized by the catch-all handler. Report the `request_id`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
   /v1/build/runner:
     post:
       tags:
       - build
       summary: Build Runner
-      description: 'Generate a Python runner script for a pipe, riding the codegen types projection (D9).
+      description: 'Generate a Python runner script for a pipe, riding the codegen types projection.
 
 
         `validate_bundle` opens a single library, loads the bundle, runs the sweep scoped to the
@@ -208,12 +279,39 @@ paths:
                   mapping:
                     'True': '#/components/schemas/BuildRunnerValidReport'
                     'False': '#/components/schemas/CrateInvalidReport'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
+        '401':
+          description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
+            or `AUTH_MODE=jwt`).
+          headers:
+            WWW-Authenticate:
+              description: Authentication challenge — always `Bearer`.
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '413':
+          description: Request body exceeds the deployment's size limit (`MAX_REQUEST_BODY_MIB`, 100 MiB by default).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '422':
+          description: 'The request could not be processed: a malformed body, a field failing validation, or an `input`-domain
+            pipelex error (a `.mthds` bundle the caller must fix). Note that on the diagnostic routes an *invalid bundle*
+            is a **200** verdict, not a 422 — see each route''s response contract.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '500':
+          description: A `config`-domain or `runtime`-domain failure the caller cannot fix (a missing env var, a bad TOML
+            override, a backend fault), or an unclassified error sanitized by the catch-all handler. Report the `request_id`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
   /v1/execute:
     post:
       tags:
@@ -335,6 +433,58 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PipelexRunResultExecute'
+        '401':
+          description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
+            or `AUTH_MODE=jwt`).
+          headers:
+            WWW-Authenticate:
+              description: Authentication challenge — always `Bearer`.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '413':
+          description: Request body exceeds the deployment's size limit (`MAX_REQUEST_BODY_MIB`, 100 MiB by default).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '422':
+          description: 'The request could not be processed: a malformed body, a field failing validation, or an `input`-domain
+            pipelex error (a `.mthds` bundle the caller must fix). Note that on the diagnostic routes an *invalid bundle*
+            is a **200** verdict, not a 422 — see each route''s response contract.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '500':
+          description: A `config`-domain or `runtime`-domain failure the caller cannot fix (a missing env var, a bad TOML
+            override, a backend fault), or an unclassified error sanitized by the catch-all handler. Report the `request_id`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '403':
+          description: '`OrchestrationModeOverrideForbidden` — the request asked for an `orchestration_mode` this deployment
+            does not allow overriding per request (`allow_request_orchestration_mode_override = false`).'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '429':
+          description: An upstream inference provider rate-limited the run. Passed through from the provider; `Retry-After`
+            is set when the provider supplied a hint.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying, when the upstream provider supplied a hint.
+              schema:
+                type: integer
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
       x-mthds-protocol: true
   /v1/start:
     post:
@@ -346,9 +496,9 @@ paths:
 
         Answers `202 Accepted` with a `StartAck`. A client-supplied `pipeline_run_id` is
 
-        honored (protocol D11: this runner accepts it; `StartAck.pipeline_run_id` is always
+        honored (the protocol lets an implementation decline it; this runner accepts it, and
 
-        authoritative). Pipelex domain failures propagate untouched: the global
+        `StartAck.pipeline_run_id` is always authoritative). Pipelex domain failures propagate untouched: the global
 
         `PipelexError` handler in `api.exception_handlers` turns them into an
 
@@ -487,6 +637,67 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PipelexRunResultStart'
+        '401':
+          description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
+            or `AUTH_MODE=jwt`).
+          headers:
+            WWW-Authenticate:
+              description: Authentication challenge — always `Bearer`.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '413':
+          description: Request body exceeds the deployment's size limit (`MAX_REQUEST_BODY_MIB`, 100 MiB by default).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '422':
+          description: 'The request could not be processed: a malformed body, a field failing validation, or an `input`-domain
+            pipelex error (a `.mthds` bundle the caller must fix). Note that on the diagnostic routes an *invalid bundle*
+            is a **200** verdict, not a 422 — see each route''s response contract.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '500':
+          description: A `config`-domain or `runtime`-domain failure the caller cannot fix (a missing env var, a bad TOML
+            override, a backend fault), or an unclassified error sanitized by the catch-all handler. Report the `request_id`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '400':
+          description: '`StartRequiresAsyncOrchestration` — this deployment''s orchestrator is blocking-only and cannot honor
+            fire-and-forget delivery. Use `POST /execute` instead.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '403':
+          description: '`OrchestrationModeOverrideForbidden` — the request asked for an `orchestration_mode` this deployment
+            does not allow overriding per request (`allow_request_orchestration_mode_override = false`).'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '409':
+          description: '`PipelineManagerAlreadyExistsError` — the submitted `pipeline_run_id` is still registered for an in-flight
+            run. Completed and failed runs free their id, so this only fires for genuinely concurrent duplicates.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '501':
+          description: '`AsyncExecutionNotEnabledError` — this deployment does not provide async pipeline execution. Permanent
+            under the current deployment; do not retry.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
       x-mthds-protocol: true
   /v1/validate:
     post:
@@ -533,12 +744,46 @@ paths:
                   mapping:
                     'True': '#/components/schemas/ValidReport'
                     'False': '#/components/schemas/InvalidReport'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
+        '401':
+          description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
+            or `AUTH_MODE=jwt`).
+          headers:
+            WWW-Authenticate:
+              description: Authentication challenge — always `Bearer`.
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '413':
+          description: Request body exceeds the deployment's size limit (`MAX_REQUEST_BODY_MIB`, 100 MiB by default).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '422':
+          description: 'The request could not be processed: a malformed body, a field failing validation, or an `input`-domain
+            pipelex error (a `.mthds` bundle the caller must fix). Note that on the diagnostic routes an *invalid bundle*
+            is a **200** verdict, not a 422 — see each route''s response contract.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '500':
+          description: A `config`-domain or `runtime`-domain failure the caller cannot fix (a missing env var, a bad TOML
+            override, a backend fault), or an unclassified error sanitized by the catch-all handler. Report the `request_id`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '403':
+          description: '`OrchestrationModeOverrideForbidden` — the request asked for an `orchestration_mode` this deployment
+            does not allow overriding per request (`allow_request_orchestration_mode_override = false`).'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
       x-mthds-protocol: true
   /v1/resolve:
     post:
@@ -577,12 +822,46 @@ paths:
                   mapping:
                     'True': '#/components/schemas/ResolveValidReport'
                     'False': '#/components/schemas/CrateInvalidReport'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
+        '401':
+          description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
+            or `AUTH_MODE=jwt`).
+          headers:
+            WWW-Authenticate:
+              description: Authentication challenge — always `Bearer`.
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '413':
+          description: Request body exceeds the deployment's size limit (`MAX_REQUEST_BODY_MIB`, 100 MiB by default).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '422':
+          description: 'The request could not be processed: a malformed body, a field failing validation, or an `input`-domain
+            pipelex error (a `.mthds` bundle the caller must fix). Note that on the diagnostic routes an *invalid bundle*
+            is a **200** verdict, not a 422 — see each route''s response contract.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '500':
+          description: A `config`-domain or `runtime`-domain failure the caller cannot fix (a missing env var, a bad TOML
+            override, a backend fault), or an unclassified error sanitized by the catch-all handler. Report the `request_id`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '501':
+          description: '`MethodRefNotSupported` — the request selected its closure by `method_ref`, which the published contract
+            accepts but no server-side method registry resolves yet. Submit inline `files[]` instead.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
       x-mthds-protocol: true
   /v1/codegen:
     post:
@@ -621,12 +900,46 @@ paths:
                   mapping:
                     'True': '#/components/schemas/CodegenValidReport'
                     'False': '#/components/schemas/CrateInvalidReport'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
+        '401':
+          description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
+            or `AUTH_MODE=jwt`).
+          headers:
+            WWW-Authenticate:
+              description: Authentication challenge — always `Bearer`.
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '413':
+          description: Request body exceeds the deployment's size limit (`MAX_REQUEST_BODY_MIB`, 100 MiB by default).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '422':
+          description: 'The request could not be processed: a malformed body, a field failing validation, or an `input`-domain
+            pipelex error (a `.mthds` bundle the caller must fix). Note that on the diagnostic routes an *invalid bundle*
+            is a **200** verdict, not a 422 — see each route''s response contract.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '500':
+          description: A `config`-domain or `runtime`-domain failure the caller cannot fix (a missing env var, a bad TOML
+            override, a backend fault), or an unclassified error sanitized by the catch-all handler. Report the `request_id`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '501':
+          description: '`MethodRefNotSupported` — the request selected its closure by `method_ref`, which the published contract
+            accepts but no server-side method registry resolves yet. Submit inline `files[]` instead.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
       x-mthds-protocol: true
   /v1/lint:
     post:
@@ -653,13 +966,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LintResponse'
-        '422':
-          description: Validation Error
+        '401':
+          description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
+            or `AUTH_MODE=jwt`).
+          headers:
+            WWW-Authenticate:
+              description: Authentication challenge — always `Bearer`.
+              schema:
+                type: string
           content:
             application/problem+json:
               schema:
-                additionalProperties: true
-                type: object
+                $ref: '#/components/schemas/ProblemDocument'
+        '413':
+          description: Request body exceeds the deployment's size limit (`MAX_REQUEST_BODY_MIB`, 100 MiB by default).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '422':
+          description: 'The request could not be processed: a malformed body, a field failing validation, or an `input`-domain
+            pipelex error (a `.mthds` bundle the caller must fix). Note that on the diagnostic routes an *invalid bundle*
+            is a **200** verdict, not a 422 — see each route''s response contract.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '500':
+          description: A `config`-domain or `runtime`-domain failure the caller cannot fix (a missing env var, a bad TOML
+            override, a backend fault), or an unclassified error sanitized by the catch-all handler. Report the `request_id`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
   /v1/format:
     post:
       tags:
@@ -685,13 +1024,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FormatResponse'
-        '422':
-          description: Validation Error
+        '401':
+          description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
+            or `AUTH_MODE=jwt`).
+          headers:
+            WWW-Authenticate:
+              description: Authentication challenge — always `Bearer`.
+              schema:
+                type: string
           content:
             application/problem+json:
               schema:
-                additionalProperties: true
-                type: object
+                $ref: '#/components/schemas/ProblemDocument'
+        '413':
+          description: Request body exceeds the deployment's size limit (`MAX_REQUEST_BODY_MIB`, 100 MiB by default).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '422':
+          description: 'The request could not be processed: a malformed body, a field failing validation, or an `input`-domain
+            pipelex error (a `.mthds` bundle the caller must fix). Note that on the diagnostic routes an *invalid bundle*
+            is a **200** verdict, not a 422 — see each route''s response contract.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '500':
+          description: A `config`-domain or `runtime`-domain failure the caller cannot fix (a missing env var, a bad TOML
+            override, a backend fault), or an unclassified error sanitized by the catch-all handler. Report the `request_id`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
   /v1/models:
     get:
       tags:
@@ -730,12 +1095,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PipelexModelDeck'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
+        '401':
+          description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
+            or `AUTH_MODE=jwt`).
+          headers:
+            WWW-Authenticate:
+              description: Authentication challenge — always `Bearer`.
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '413':
+          description: Request body exceeds the deployment's size limit (`MAX_REQUEST_BODY_MIB`, 100 MiB by default).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '422':
+          description: 'The request could not be processed: a malformed body, a field failing validation, or an `input`-domain
+            pipelex error (a `.mthds` bundle the caller must fix). Note that on the diagnostic routes an *invalid bundle*
+            is a **200** verdict, not a 422 — see each route''s response contract.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '500':
+          description: A `config`-domain or `runtime`-domain failure the caller cannot fix (a missing env var, a bad TOML
+            override, a backend fault), or an unclassified error sanitized by the catch-all handler. Report the `request_id`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
       x-mthds-protocol: true
   /v1/build/concept:
     post:
@@ -781,12 +1173,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BuildConceptResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
+        '401':
+          description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
+            or `AUTH_MODE=jwt`).
+          headers:
+            WWW-Authenticate:
+              description: Authentication challenge — always `Bearer`.
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '413':
+          description: Request body exceeds the deployment's size limit (`MAX_REQUEST_BODY_MIB`, 100 MiB by default).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '422':
+          description: 'The request could not be processed: a malformed body, a field failing validation, or an `input`-domain
+            pipelex error (a `.mthds` bundle the caller must fix). Note that on the diagnostic routes an *invalid bundle*
+            is a **200** verdict, not a 422 — see each route''s response contract.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '500':
+          description: A `config`-domain or `runtime`-domain failure the caller cannot fix (a missing env var, a bad TOML
+            override, a backend fault), or an unclassified error sanitized by the catch-all handler. Report the `request_id`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
   /v1/build/pipe-spec:
     post:
       tags:
@@ -820,12 +1239,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BuildPipeSpecResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
+        '401':
+          description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
+            or `AUTH_MODE=jwt`).
+          headers:
+            WWW-Authenticate:
+              description: Authentication challenge — always `Bearer`.
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '413':
+          description: Request body exceeds the deployment's size limit (`MAX_REQUEST_BODY_MIB`, 100 MiB by default).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '422':
+          description: 'The request could not be processed: a malformed body, a field failing validation, or an `input`-domain
+            pipelex error (a `.mthds` bundle the caller must fix). Note that on the diagnostic routes an *invalid bundle*
+            is a **200** verdict, not a 422 — see each route''s response contract.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '500':
+          description: A `config`-domain or `runtime`-domain failure the caller cannot fix (a missing env var, a bad TOML
+            override, a backend fault), or an unclassified error sanitized by the catch-all handler. Report the `request_id`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
   /v1/upload:
     post:
       tags:
@@ -860,12 +1306,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UploadResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
+        '401':
+          description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
+            or `AUTH_MODE=jwt`).
+          headers:
+            WWW-Authenticate:
+              description: Authentication challenge — always `Bearer`.
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '413':
+          description: Request body exceeds the deployment's size limit (`MAX_REQUEST_BODY_MIB`, 100 MiB by default).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '422':
+          description: 'The request could not be processed: a malformed body, a field failing validation, or an `input`-domain
+            pipelex error (a `.mthds` bundle the caller must fix). Note that on the diagnostic routes an *invalid bundle*
+            is a **200** verdict, not a 422 — see each route''s response contract.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '500':
+          description: A `config`-domain or `runtime`-domain failure the caller cannot fix (a missing env var, a bad TOML
+            override, a backend fault), or an unclassified error sanitized by the catch-all handler. Report the `request_id`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
   /v1/resolve-storage-url:
     post:
       tags:
@@ -891,15 +1364,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ResolveStorageUrlResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
+        '401':
+          description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
+            or `AUTH_MODE=jwt`).
+          headers:
+            WWW-Authenticate:
+              description: Authentication challenge — always `Bearer`.
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '413':
+          description: Request body exceeds the deployment's size limit (`MAX_REQUEST_BODY_MIB`, 100 MiB by default).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '422':
+          description: 'The request could not be processed: a malformed body, a field failing validation, or an `input`-domain
+            pipelex error (a `.mthds` bundle the caller must fix). Note that on the diagnostic routes an *invalid bundle*
+            is a **200** verdict, not a 422 — see each route''s response contract.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '500':
+          description: A `config`-domain or `runtime`-domain failure the caller cannot fix (a missing env var, a bad TOML
+            override, a backend fault), or an unclassified error sanitized by the catch-all handler. Report the `request_id`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
   /:
     get:
-      summary: Root
+      tags:
+      - health
+      summary: Service identity banner
+      description: 'Identify the service answering on this origin. No auth required.
+
+
+        A human-facing banner for someone who lands on the bare origin — not a
+
+        liveness probe (that is `GET /health`) and not the protocol handshake
+
+        (`GET /v1/version`). It reads nothing and can only succeed.'
       operationId: root__get
       responses:
         '200':
@@ -907,10 +1417,7 @@ paths:
           content:
             application/json:
               schema:
-                additionalProperties:
-                  type: string
-                type: object
-                title: Response Root  Get
+                $ref: '#/components/schemas/ServiceIdentity'
 components:
   schemas:
     AbsenceKind:
@@ -1804,6 +2311,73 @@ components:
       - inference_model_id
       - nb_tokens_by_category
       title: ExtractTokensUsage
+    FixOp:
+      properties:
+        kind:
+          $ref: '#/components/schemas/FixOpKind'
+        table_path:
+          items:
+            type: string
+          type: array
+          title: Table Path
+        key:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Key
+        value:
+          anyOf:
+          - type: string
+          - type: integer
+          - type: number
+          - type: boolean
+          - additionalProperties:
+              anyOf:
+              - type: string
+              - type: integer
+              - type: number
+              - type: boolean
+            type: object
+          - type: 'null'
+          title: Value
+        new_key:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: New Key
+      additionalProperties: false
+      type: object
+      required:
+      - kind
+      - table_path
+      title: FixOp
+      description: 'One semantic patch op addressed by TOML path.
+
+
+        ``table_path`` addresses the containing table (e.g. ``["pipe", "my_seq"]``), aligned with
+
+        the ``field_path`` conventions of validation errors. For ``ensure_table`` it addresses the
+
+        table to create when absent. ``key`` / ``value`` are used by ``set_key`` / ``delete_key``;
+
+        ``new_key`` only by ``rename_table_key``.'
+    FixOpKind:
+      type: string
+      enum:
+      - set_key
+      - ensure_table
+      - delete_key
+      - delete_table
+      - rename_table_key
+      title: FixOpKind
+      description: The semantic patch operations a suggested fix is composed of.
+    FixSafety:
+      type: string
+      enum:
+      - safe
+      - unsafe
+      title: FixSafety
+      description: Whether a fix is safe to auto-apply (SAFE) or requires explicit opt-in (UNSAFE).
     FormatRequest:
       properties:
         content:
@@ -1908,15 +2482,22 @@ components:
         This is the top-level model representing a complete run graph.
 
         It is versioned and designed for JSON serialization.'
-    HTTPValidationError:
+    HealthResponse:
       properties:
-        detail:
-          items:
-            $ref: '#/components/schemas/ValidationError'
-          type: array
-          title: Detail
+        status:
+          type: string
+          title: Status
+          description: Always `ok` — the endpoint answers only when the process is serving.
+        message:
+          type: string
+          title: Message
+          description: Human-readable confirmation that the server is up.
       type: object
-      title: HTTPValidationError
+      required:
+      - status
+      - message
+      title: HealthResponse
+      description: Body of `GET /health`.
     IOMultiplicity:
       type: string
       enum:
@@ -2139,8 +2720,8 @@ components:
           - type: string
           - type: 'null'
           title: Rendered Markdown
-          description: 'Opt-in Pipelex-API presentation extra (D-D): a server-rendered Markdown view of the invalid verdict''s
-            `validation_errors`, present only when the request''s `render` includes `markdown`. Absent by default.'
+          description: 'Opt-in Pipelex-API presentation extra: a server-rendered Markdown view of the invalid verdict''s `validation_errors`,
+            present only when the request''s `render` includes `markdown`. Absent by default.'
       type: object
       title: InvalidReport
       description: 'The 200 **invalid** arm: a produced "invalid" verdict, discriminated on `is_valid: false`.
@@ -3614,6 +4195,116 @@ components:
       type: object
       title: PipelineRef
       description: Reference to the pipeline that was executed.
+    ProblemDocument:
+      properties:
+        type:
+          type: string
+          title: Type
+          description: 'Stable URI for the error class: `https://docs.pipelex.com/latest/errors/<kebab-class-name>/`.'
+        title:
+          type: string
+          title: Title
+          description: Short, human-readable summary of the error class.
+        status:
+          type: integer
+          title: Status
+          description: HTTP status code, repeated in the body per RFC 7807.
+        detail:
+          type: string
+          title: Detail
+          description: Human-readable explanation of this specific failure. Redacted under `ERROR_DISCLOSURE=strict`.
+        instance:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Instance
+          description: Path of the request that failed.
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+          description: Correlation id, echoed in the `X-Request-ID` response header.
+        error_type:
+          type: string
+          title: Error Type
+          description: Stable class name of the originating error (e.g. `ValidateBundleError`, `Unauthenticated`).
+        error_domain:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Domain
+          description: '`input` (caller can fix it → 422), `config` or `runtime` (deployment must fix it → 500). Absent for
+            domain-less errors.'
+        retryable:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Retryable
+          description: Whether retrying the same request can plausibly succeed. Always present on API-authored errors; on
+            pipelex errors only when the originating error classifies it.
+        error_category:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Category
+          description: Finer classification, when the originating error provides one (inference errors).
+        user_action:
+          anyOf:
+          - $ref: '#/components/schemas/UserAction'
+          - type: 'null'
+          description: Structured suggestion of what the caller should do next, when available.
+        model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Model
+          description: Inference model that failed. Stripped under `ERROR_DISCLOSURE=strict`.
+        provider:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Provider
+          description: Inference provider that failed. Stripped under `ERROR_DISCLOSURE=strict`.
+        provider_metadata:
+          anyOf:
+          - $ref: '#/components/schemas/ProviderErrorMetadata'
+          - type: 'null'
+          description: Upstream provider error metadata. Stripped (bar a curated slice) under `ERROR_DISCLOSURE=strict`.
+        validation_errors:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/ValidationErrorItem'
+            type: array
+          - type: 'null'
+          title: Validation Errors
+          description: Structured per-error diagnostics, carried by a `ValidateBundleError`. Each item may carry a `suggested_fix`.
+            Retained under `ERROR_DISCLOSURE=strict` — it describes the caller's own bundle, not server internals. On `/validate`,
+            `/resolve`, `/codegen` and `/build/*` an invalid bundle is a **200** verdict instead, so the items ride the response
+            body there rather than a problem document.
+      additionalProperties: true
+      type: object
+      required:
+      - type
+      - title
+      - status
+      - detail
+      - error_type
+      title: ProblemDocument
+      description: 'An RFC 7807 `application/problem+json` error body — the shape of every failure response.
+
+
+        Standard RFC 7807 members (`type`, `title`, `status`, `detail`, `instance`)
+
+        plus the extension members pipelex''s classification adds. Only `type`,
+
+        `title`, `status`, `detail`, and `error_type` are always present: the rest
+
+        ride along when the originating error populates them, so a consumer must
+
+        treat them as optional. `extra="allow"` mirrors RFC 7807''s open-ended
+
+        extension-member rule.'
     PromptImageDetail:
       type: string
       enum:
@@ -3630,6 +4321,65 @@ components:
       - gemini
       - fal
       title: PromptingTarget
+    ProviderErrorMetadata:
+      properties:
+        provider:
+          $ref: '#/components/schemas/ProviderName'
+        sdk_exception_type:
+          type: string
+          title: Sdk Exception Type
+        message:
+          type: string
+          title: Message
+          default: ''
+        status_code:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Status Code
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+        retry_after_seconds:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Retry After Seconds
+        provider_error_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Provider Error Code
+      type: object
+      required:
+      - provider
+      - sdk_exception_type
+      title: ProviderErrorMetadata
+      description: 'Structured SDK metadata attached to inference errors.
+
+
+        Carries information downstream consumers (retry, temporal, CLI) need
+
+        without having to scrape it back from the exception chain.'
+    ProviderName:
+      type: string
+      enum:
+      - openai
+      - anthropic
+      - google
+      - mistral
+      - azure
+      - bedrock
+      - fal
+      - huggingface
+      - gateway
+      - linkup
+      - docling
+      - pypdfium2
+      title: ProviderName
+      description: Identifies the inference provider an SDK error originated from.
     Quality:
       type: string
       enum:
@@ -3854,6 +4604,17 @@ components:
       - inference_model_id
       - nb_tokens_by_category
       title: SearchTokensUsage
+    ServiceIdentity:
+      properties:
+        message:
+          type: string
+          title: Message
+          description: Name of the service answering on this origin.
+      type: object
+      required:
+      - message
+      title: ServiceIdentity
+      description: Body of `GET /` — the service identity banner.
     SizeTier:
       type: string
       enum:
@@ -3954,6 +4715,42 @@ components:
       required:
       - pipe
       title: SubPipeBlueprint
+    SuggestedFix:
+      properties:
+        fix_code:
+          type: string
+          title: Fix Code
+        description:
+          type: string
+          title: Description
+        safety:
+          $ref: '#/components/schemas/FixSafety'
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+        ops:
+          items:
+            $ref: '#/components/schemas/FixOp'
+          type: array
+          title: Ops
+      additionalProperties: false
+      type: object
+      required:
+      - fix_code
+      - description
+      - safety
+      - ops
+      title: SuggestedFix
+      description: 'A deterministic fix for one validation error, ready for a style-preserving applier.
+
+
+        ``fix_code`` is the kebab-case rule id (e.g. ``"match-sequence-output"``). ``source`` is
+
+        the file the ops target, when known (multi-file libraries) — an applier must only apply
+
+        ops to the file they target.'
     TagStyle:
       type: string
       enum:
@@ -4159,6 +4956,41 @@ components:
       - uri
       - filename
       title: UploadResponse
+    UserAction:
+      properties:
+        kind:
+          $ref: '#/components/schemas/UserActionKind'
+        detail:
+          type: string
+          title: Detail
+      type: object
+      required:
+      - kind
+      - detail
+      title: UserAction
+      description: 'Structured user-facing advice attached to an inference error.
+
+
+        ``kind`` discriminates the type of action, ``detail`` is the free-form
+
+        provider-specific advice (e.g. a billing URL, a retry hint).'
+    UserActionKind:
+      type: string
+      enum:
+      - wait_and_retry
+      - check_billing
+      - check_credentials
+      - change_input
+      - change_model
+      - contact_support
+      - unknown
+      title: UserActionKind
+      description: 'Discrete categories of advice we surface to the user/agent.
+
+
+        Lets the CLI render consistent guidance and agent JSON stay typed across
+
+        providers. The free-form ``detail`` string carries provider-specific text.'
     ValidReport:
       properties:
         is_valid:
@@ -4217,9 +5049,9 @@ components:
           - type: string
           - type: 'null'
           title: Rendered Markdown
-          description: 'Opt-in Pipelex-API presentation extra (D-D): a server-rendered Markdown view of the valid verdict,
-            present only when the request''s `render` includes `markdown`. Absent by default — the structured fields remain
-            the contract; this is the view.'
+          description: 'Opt-in Pipelex-API presentation extra: a server-rendered Markdown view of the valid verdict, present
+            only when the request''s `render` includes `markdown`. Absent by default — the structured fields remain the contract;
+            this is the view.'
       additionalProperties: true
       type: object
       required:
@@ -4316,32 +5148,6 @@ components:
         The ``pipe_ref`` key carries the namespaced ``pipe_ref`` (``domain.code``) — never the bare code.
 
         ``status`` is a ``DryRunStatus`` (a ``StrEnum``), so it serializes to its plain string value.'
-    ValidationError:
-      properties:
-        loc:
-          items:
-            anyOf:
-            - type: string
-            - type: integer
-          type: array
-          title: Location
-        msg:
-          type: string
-          title: Message
-        type:
-          type: string
-          title: Error Type
-        input:
-          title: Input
-        ctx:
-          type: object
-          title: Context
-      type: object
-      required:
-      - loc
-      - msg
-      - type
-      title: ValidationError
     ValidationErrorCategory:
       type: string
       enum:
@@ -4432,6 +5238,10 @@ components:
             type: array
           - type: 'null'
           title: Declared Concepts
+        suggested_fix:
+          anyOf:
+          - $ref: '#/components/schemas/SuggestedFix'
+          - type: 'null'
       additionalProperties: false
       type: object
       required:
