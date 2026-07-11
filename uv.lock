@@ -2312,7 +2312,7 @@ wheels = [
 [[package]]
 name = "pipelex"
 version = "0.38.0"
-source = { registry = "https://pypi.org/simple" }
+source = { editable = "../_codegen" }
 dependencies = [
     { name = "aiofiles" },
     { name = "datamodel-code-generator" },
@@ -2332,6 +2332,7 @@ dependencies = [
     { name = "opentelemetry-sdk" },
     { name = "opentelemetry-semantic-conventions" },
     { name = "pillow" },
+    { name = "pipelex-tools-py" },
     { name = "polyfactory" },
     { name = "portkey-ai" },
     { name = "posthog" },
@@ -2350,10 +2351,6 @@ dependencies = [
     { name = "typer" },
     { name = "typing-extensions" },
     { name = "urllib3" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/43/b4/39ca22d13c6c7e79a5a637866a33edd365588695af031f42aebac60df21f/pipelex-0.38.0.tar.gz", hash = "sha256:6f4550ff164cf2204d2a72e69a196d49193cb5c07482fddc8c1f85340710d282", size = 1038521, upload-time = "2026-07-06T20:59:43.187Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/05/2c/851278177f83068a0e2c88a53231821636d98558b5a58bc7771de8e39d70/pipelex-0.38.0-py3-none-any.whl", hash = "sha256:e5ff341409f6783b3a8061b8d65c68816d4324fe9b3654edc638c7988e2d4744", size = 1465277, upload-time = "2026-07-06T20:59:41.115Z" },
 ]
 
 [package.optional-dependencies]
@@ -2379,6 +2376,98 @@ google-genai = [
 mistralai = [
     { name = "mistralai" },
 ]
+
+[package.metadata]
+requires-dist = [
+    { name = "aioboto3", marker = "extra == 'bedrock'", specifier = ">=13.4.0" },
+    { name = "aioboto3", marker = "extra == 's3'", specifier = ">=13.4.0" },
+    { name = "aiofiles", specifier = ">=23.2.1" },
+    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.78.0" },
+    { name = "boto3", marker = "extra == 'bedrock'", specifier = ">=1.34.131" },
+    { name = "boto3", marker = "extra == 'dynamodb'", specifier = ">=1.34.131" },
+    { name = "boto3", marker = "extra == 's3'", specifier = ">=1.34.131" },
+    { name = "boto3-stubs", marker = "extra == 'dev'", specifier = ">=1.35.24" },
+    { name = "cryptography", marker = "extra == 'dev'", specifier = ">=46.0.7" },
+    { name = "cryptography", marker = "extra == 'gcp-storage'", specifier = ">=46.0.7" },
+    { name = "cryptography", marker = "extra == 'google'", specifier = ">=46.0.7" },
+    { name = "cryptography", marker = "extra == 'google-genai'", specifier = ">=46.0.7" },
+    { name = "datamodel-code-generator", specifier = ">=0.55.0" },
+    { name = "docling", marker = "extra == 'docling'", specifier = ">=2.94.0" },
+    { name = "fal-client", marker = "extra == 'fal'", specifier = ">=0.4.1" },
+    { name = "filetype", specifier = ">=1.2.0" },
+    { name = "google-auth-oauthlib", marker = "extra == 'google'", specifier = ">=1.2.1" },
+    { name = "google-cloud-storage", marker = "extra == 'gcp-storage'", specifier = ">=2.10.0" },
+    { name = "google-genai", marker = "extra == 'google-genai'" },
+    { name = "httpx", specifier = ">=0.23.0,<1.0.0" },
+    { name = "huggingface-hub", marker = "extra == 'huggingface'", specifier = ">=1.5.0,<2.0.0" },
+    { name = "idna", specifier = ">=3.15" },
+    { name = "instructor", specifier = ">=1.13" },
+    { name = "instructor", extras = ["google-genai"], marker = "extra == 'google-genai'" },
+    { name = "jinja2", specifier = ">=3.1.4" },
+    { name = "json2html", specifier = ">=1.3.0" },
+    { name = "jsonschema", marker = "extra == 'dev'", specifier = ">=4.20.0" },
+    { name = "kajson", specifier = "==0.7.0" },
+    { name = "linkup-sdk", marker = "extra == 'linkup'", specifier = ">=0.12.0" },
+    { name = "lxml", marker = "extra == 'docling'", specifier = ">=6.1.0" },
+    { name = "markdown", specifier = ">=3.6" },
+    { name = "mike", marker = "extra == 'docs'", specifier = ">=2.1.3" },
+    { name = "mistralai", marker = "extra == 'mistralai'", specifier = ">=1.12.0" },
+    { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6.1" },
+    { name = "mkdocs-glightbox", marker = "extra == 'docs'", specifier = ">=0.4.0" },
+    { name = "mkdocs-llmstxt-md", marker = "extra == 'docs'", specifier = ">=0.2.0" },
+    { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.6.14" },
+    { name = "mkdocs-meta-manager", marker = "extra == 'docs'", specifier = ">=1.1.0" },
+    { name = "mkdocs-redirects", marker = "extra == 'docs'", specifier = "==1.2.2" },
+    { name = "moto", extras = ["dynamodb", "s3"], marker = "extra == 'dev'", specifier = ">=5.0.0" },
+    { name = "mthds", specifier = ">=0.8.0" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = "==1.19.1" },
+    { name = "networkx", specifier = ">=3.4.2" },
+    { name = "openai", specifier = ">=2.0.0" },
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-sdk" },
+    { name = "opentelemetry-semantic-conventions" },
+    { name = "pillow", specifier = ">=12.1.1" },
+    { name = "pipelex-tools", marker = "extra == 'dev'", specifier = ">=0.6.0" },
+    { name = "pipelex-tools-py", specifier = "==0.1.1" },
+    { name = "polyfactory", specifier = ">=2.21.0" },
+    { name = "portkey-ai", specifier = ">=2.1.0" },
+    { name = "posthog", specifier = ">=6.7.0" },
+    { name = "protobuf", specifier = ">=6.33.5" },
+    { name = "pydantic", specifier = ">=2.10.6,<3.0.0" },
+    { name = "pygments", marker = "extra == 'docs'", specifier = ">=2.20.0" },
+    { name = "pylint", marker = "extra == 'dev'", specifier = "==4.0.4" },
+    { name = "pymdown-extensions", marker = "extra == 'docs'", specifier = ">=10.21.3" },
+    { name = "pypdfium2", specifier = ">=4.30.0,!=4.30.1,<5.0.0" },
+    { name = "pyright", marker = "extra == 'dev'", specifier = "==1.1.410" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.3" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.1.1" },
+    { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.14.0" },
+    { name = "pytest-sugar", marker = "extra == 'dev'", specifier = ">=1.0.0" },
+    { name = "pytest-timeout", marker = "extra == 'dev'", specifier = ">=2.3.1" },
+    { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.6.1" },
+    { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
+    { name = "reportlab", specifier = ">=4.0,<5" },
+    { name = "requests", specifier = ">=2.33.0" },
+    { name = "rich", specifier = ">=13.8.1" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = "==0.14.13" },
+    { name = "semantic-version", specifier = ">=2.10.0" },
+    { name = "shortuuid", specifier = ">=1.0.13" },
+    { name = "tomli", specifier = ">=2.3.0" },
+    { name = "tomlkit", specifier = ">=0.13.2" },
+    { name = "typer", specifier = ">=0.16.0,<0.27" },
+    { name = "types-aioboto3", extras = ["bedrock", "bedrock-runtime"], marker = "extra == 'dev'", specifier = ">=13.4.0" },
+    { name = "types-aiofiles", marker = "extra == 'dev'", specifier = ">=24.1.0.20240626" },
+    { name = "types-jsonschema", marker = "extra == 'dev'", specifier = ">=4.20.0" },
+    { name = "types-markdown", marker = "extra == 'dev'", specifier = ">=3.6.0.20240316" },
+    { name = "types-networkx", marker = "extra == 'dev'", specifier = ">=3.3.0.20241020" },
+    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12.20250326" },
+    { name = "typing-extensions", specifier = ">=4.13.2" },
+    { name = "urllib3", specifier = ">=2.7.0" },
+]
+provides-extras = ["anthropic", "bedrock", "docling", "fal", "gcp-storage", "google", "google-genai", "huggingface", "linkup", "mistralai", "dynamodb", "s3", "docs", "dev"]
 
 [[package]]
 name = "pipelex-api"
@@ -2435,7 +2524,7 @@ requires-dist = [
     { name = "mkdocs-meta-manager", marker = "extra == 'docs'", specifier = "==1.1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.2" },
     { name = "pandas-stubs", marker = "extra == 'dev'", specifier = ">=2.2.3.241126" },
-    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal"], specifier = "==0.38.0" },
+    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal"], editable = "../_codegen" },
     { name = "pipelex-tools-py", specifier = ">=0.1.0" },
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.3.8" },
@@ -2462,17 +2551,17 @@ provides-extras = ["dev", "docs"]
 
 [[package]]
 name = "pipelex-tools-py"
-version = "0.1.0"
+version = "0.1.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/3e/73/4700e5b67e18260b277e266f8bad24a390c633014c753209425cf962b22b/pipelex_tools_py-0.1.0.tar.gz", hash = "sha256:d0429f1629cf547689781ed7fb80300492d0beb4ab9b087bb6e49a7feb29f4d9", size = 112896, upload-time = "2026-06-24T11:17:40.441Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1c/7a/475d5314cf2c8a402ff646ebf435ccc9d51b9d4e3c52eb063b37130e6ee5/pipelex_tools_py-0.1.1.tar.gz", hash = "sha256:ec1f5e30fe666417f210a5bb1013394cef8b0c246d070037d78cf8dfcd086603", size = 114697, upload-time = "2026-06-29T10:23:00.415Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b1/9b/186425a2801630a09acb9b5427f975b71e258cba069d9dce296bc31561a6/pipelex_tools_py-0.1.0-cp38-abi3-macosx_10_12_x86_64.whl", hash = "sha256:188a8bc89580668455cb4394f81f2dadb8a8ceb47225d776999cc8dda28b9068", size = 2486377, upload-time = "2026-06-24T11:17:28.096Z" },
-    { url = "https://files.pythonhosted.org/packages/a9/d7/c030ee6ecb391a09e2dd46cae01a7b24925d263c73857e855040e1c8d6bb/pipelex_tools_py-0.1.0-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:0755c4b68ef7ef82de5f730d750183a8ebd7b2972e8f0ebdfa96eb353ff6717c", size = 2387958, upload-time = "2026-06-24T11:17:29.772Z" },
-    { url = "https://files.pythonhosted.org/packages/44/aa/a45055aba32b19beaaa94669357971e1bfb7ada3db8d48070ca6f0147378/pipelex_tools_py-0.1.0-cp38-abi3-manylinux_2_12_i686.manylinux2010_i686.whl", hash = "sha256:385f4068c02c8af7ed7d12c72da04e63d4e691c12061e2834abff68fa23d7864", size = 2716557, upload-time = "2026-06-24T11:17:31.921Z" },
-    { url = "https://files.pythonhosted.org/packages/a7/6a/b7b99a19728ed823cadbd22ad0b444597c49a505553db1385c92ff84df67/pipelex_tools_py-0.1.0-cp38-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:38fcdd311d98ccde3b42eeacb9ca57e6b20d5c7fda1d06399417b2fc02e5dbf0", size = 2504478, upload-time = "2026-06-24T11:17:33.56Z" },
-    { url = "https://files.pythonhosted.org/packages/9a/4e/d8417fe30ad2f2058f80e8a40716ee014820c9be59553d6dd1167b2582d2/pipelex_tools_py-0.1.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3c329af0fbcf887c7a2e2bbf4b36c2247798c85765550e865d0621b3c9d4317e", size = 2629087, upload-time = "2026-06-24T11:17:35.239Z" },
-    { url = "https://files.pythonhosted.org/packages/b5/3a/eee68ebf310c2193c99105466f760c1cc662972052f9b94bb3623c5fc498/pipelex_tools_py-0.1.0-cp38-abi3-win32.whl", hash = "sha256:64facac1934b0ab702ae8f9f9d3b536126bb11acb4cf0b22013842eb6ffd51cd", size = 2395853, upload-time = "2026-06-24T11:17:36.917Z" },
-    { url = "https://files.pythonhosted.org/packages/8c/1a/15ce89a940a16f9a210a228da924511efd5f81e4f5c987f1bbe71c5a9fa6/pipelex_tools_py-0.1.0-cp38-abi3-win_amd64.whl", hash = "sha256:10affd1cf72be5a1726817df0d51269b28c57356269dc218dcbe516da21af7b7", size = 2632513, upload-time = "2026-06-24T11:17:38.847Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/51/701114de4b1744dbddf37ec172ab97649177d6c7c761d75689a4b1ea6788/pipelex_tools_py-0.1.1-cp38-abi3-macosx_10_12_x86_64.whl", hash = "sha256:69e930881da8787259cf3040eb33b669dfb4bd4ed13c8a68f082ee284f4fa3a7", size = 2490500, upload-time = "2026-06-29T10:22:48.96Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/4f/3f28ffe46d8a31760841f29a773519794b86c3e4a1d4eec70c9b74f97282/pipelex_tools_py-0.1.1-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:fe07dbf840deace1fa8bebe8154fef0abb4284177aae89961437edf9bddf3257", size = 2388577, upload-time = "2026-06-29T10:22:50.771Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/79/6d235117695c803946ae0fdcb5ad9410c11ed70f7182bf7a01460bf4d410/pipelex_tools_py-0.1.1-cp38-abi3-manylinux_2_12_i686.manylinux2010_i686.whl", hash = "sha256:29b818d6af5af6510bf25505acbe7d3cdca309f1443cd95299c61b0b7fd0e180", size = 2717460, upload-time = "2026-06-29T10:22:52.446Z" },
+    { url = "https://files.pythonhosted.org/packages/43/aa/31f70c2ef5b7417d0b46c3b1079f797d3d42a2fc60ceaf176a8a9d52938f/pipelex_tools_py-0.1.1-cp38-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:902b69127df66a91f80d3b3158217ff29aa40c2ad86917b46de7e9640a6f81ab", size = 2505388, upload-time = "2026-06-29T10:22:53.902Z" },
+    { url = "https://files.pythonhosted.org/packages/b9/4f/53f3e3e10391d3035bbc84966a80439277b04a9efc8cab09e890871a3cfe/pipelex_tools_py-0.1.1-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0f89c17a9c58161ff0ff515bc7054bfc58710c9edec3d4dfc842d07966f239ba", size = 2629996, upload-time = "2026-06-29T10:22:55.713Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/72/4a68e0b3f3c758c0808a888db40299d46af1f79b23aa0c3fcc442f3a68de/pipelex_tools_py-0.1.1-cp38-abi3-win32.whl", hash = "sha256:b26e93fd975682b7dc15d0d300ddb540650cfdf9dff917a6e4880cc1283e83c8", size = 2396611, upload-time = "2026-06-29T10:22:57.173Z" },
+    { url = "https://files.pythonhosted.org/packages/98/16/aa4ad4790c29d2f7d0a9160e3fe2faf1b8be12d9dde081f989654038fc63/pipelex_tools_py-0.1.1-cp38-abi3-win_amd64.whl", hash = "sha256:a925bdc2e0ee00dde3adc9fe360e227f2968376b2ed0bbe4e14bb82014d9ac7e", size = 2633419, upload-time = "2026-06-29T10:22:58.875Z" },
 ]
 
 [[package]]

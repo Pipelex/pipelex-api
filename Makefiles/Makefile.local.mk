@@ -28,13 +28,17 @@ define HELP_LOCAL
 	make temporal-server-bare$(RESET) ($(GREEN)ts-bare$(RESET)): Start it WITHOUT search attributes (reproduce the missing-attribute error).
 	make temporal-stop$(RESET) ($(GREEN)tstop$(RESET)):          Stop the local Temporal dev server.
 
-	$(YELLOW)Run an MTHDS bundle through the API (resolves like `pipelex run bundle`):$(RESET)
+	$(YELLOW)Send an MTHDS bundle through the API (resolves like `pipelex run bundle`):$(RESET)
 	make bundle-run$(RESET) BUNDLE=<dir|.mthds>:      POST the bundle to a running API and print the response (start `make run` first).
 	make bundle-validate$(RESET) BUNDLE=<dir|.mthds>: Dry-run validate the bundle via /v1/validate — no pipe_code/inputs, no inference, no cost.
+	make bundle-resolve$(RESET) BUNDLE=<dir|.mthds>:  Resolve the bundle to its normalized crate via /v1/resolve — no inference, no cost.
+	make bundle-codegen$(RESET) BUNDLE=<dir|.mthds> TARGET=<t>: Project typed artifacts + codegen.lock via /v1/codegen (ts-zod|python-pydantic|python-structures).
 	make bundle-curl$(RESET) BUNDLE=<dir|.mthds>:     Emit a ready-to-run curl command for the bundle.
-	make bundle-postman$(RESET) BUNDLE=<dir|.mthds>:  Push Execute/Start requests into the live Pipelex FastAPI Postman collection.
+	make bundle-postman$(RESET) BUNDLE=<dir|.mthds>:  Push request(s) into the live Pipelex FastAPI Postman collection.
 	make bundle-dry$(RESET) BUNDLE=<dir|.mthds>:      Print the request body only — touch nothing.
-	  Optional: ENDPOINT=execute|start|validate|both  PIPE=<code>  INPUTS=<path>  NAME=<folder>  ALLOW_SIGNATURES=1  CALLBACK_URL=<url>  BASE_URL=<url>  TOKEN=<bearer>  ARGS=<extra>
+	  Optional: ENDPOINT=execute|start|validate|resolve|codegen|build-inputs|build-output|build-runner|both
+	  PIPE=<code>  INPUTS=<path>  NAME=<folder>  ALLOW_SIGNATURES=1  TARGET=<codegen target>  OUTPUT_FORMAT=schema|json|python
+	  CALLBACK_URL=<url>  BASE_URL=<url>  TOKEN=<bearer>  ARGS=<extra>
 	  (the async start endpoint needs CALLBACK_URL — set it here, or via CALLBACK_URL in .env)
 
 endef
@@ -43,7 +47,7 @@ export HELP_LOCAL
 .PHONY: docker-build docker-run docker-run-hub docker-stop docker-logs
 .PHONY: check-pipelex-repo install-wip-pipelex run-wip wip
 .PHONY: temporal-server ts temporal-server-bare ts-bare tsb temporal-stop tstop
-.PHONY: check-bundle-arg bundle-run bundle-validate bundle-curl bundle-postman bundle-dry
+.PHONY: check-bundle-arg bundle-run bundle-validate bundle-resolve bundle-codegen bundle-curl bundle-postman bundle-dry
 
 #################################################################################
 #################################    API    #################################
@@ -186,22 +190,28 @@ tstop: temporal-stop
 #################################################################################
 
 # Resolve an MTHDS bundle the same way `pipelex run bundle <path>` does and send
-# it to the API as a request — run it directly, dry-run validate it, emit curl,
-# push a Postman query, or just print the body. Runs the skill's helper script
-# with OUR venv python.
+# it to the API as a request — run it directly, dry-run validate it, resolve it
+# to its normalized crate, project typed codegen artifacts, emit curl, push a
+# Postman query, or just print the body. Runs the skill's helper script with OUR
+# venv python.
 #
 #   make bundle-run      BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
 #   make bundle-validate BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
+#   make bundle-resolve  BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
+#   make bundle-codegen  BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard TARGET=ts-zod
 #   make bundle-curl     BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
 #   make bundle-postman  BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
 #   make bundle-dry      BUNDLE=../pipelex-demos/mthds-wip/fashion_moodboard
 #
-# bundle-validate hits /v1/validate — an inference-free dry-run that parses,
-# loads, and dry-runs every pipe (no pipe_code, no inputs, no cost). It is the
-# safe, free counterpart to bundle-run. The other modes accept ENDPOINT=validate
-# too (e.g. `make bundle-postman ENDPOINT=validate`).
+# Only execute/start trigger inference. bundle-validate (/v1/validate),
+# bundle-resolve (/v1/resolve), and bundle-codegen (/v1/codegen) are free —
+# parse/load/dry-run only — so they hardcode --run. The build routes
+# (/v1/build/{inputs,output,runner}) ride the generic targets via ENDPOINT=,
+# e.g. `make bundle-run ENDPOINT=build-inputs` or
+# `make bundle-postman ENDPOINT=build-output OUTPUT_FORMAT=json`.
 #
 # Optional pass-throughs: ENDPOINT, PIPE, INPUTS, NAME, ALLOW_SIGNATURES,
+# TARGET (codegen only — required), OUTPUT_FORMAT (build-output only),
 # RENDER (validate only — e.g. RENDER=markdown reproduces a skill-driven
 # validate, response carries rendered_markdown), CALLBACK_URL (all modes);
 # BASE_URL, TOKEN (run/curl); ARGS for anything else.
@@ -209,8 +219,8 @@ tstop: temporal-stop
 # CALLBACK_URL in .env (make exports it to the script). bundle-postman needs
 # POSTMAN_API_KEY in the environment (it lives in ~/.zshenv, so any zsh-launched
 # make has it).
-BUNDLE_SCRIPT := .claude/skills/postman-run-bundle/scripts/build_postman_query.py
-BUNDLE_OPTS    = $(if $(ENDPOINT),--endpoint $(ENDPOINT)) $(if $(PIPE),--pipe $(PIPE)) $(if $(INPUTS),--inputs $(INPUTS)) $(if $(NAME),--name $(NAME)) $(if $(ALLOW_SIGNATURES),--allow-signatures) $(if $(RENDER),--render $(RENDER)) $(if $(CALLBACK_URL),--callback-url '$(CALLBACK_URL)') $(ARGS)
+BUNDLE_SCRIPT := .claude/skills/postman-bundle/scripts/build_postman_query.py
+BUNDLE_OPTS    = $(if $(ENDPOINT),--endpoint $(ENDPOINT)) $(if $(PIPE),--pipe $(PIPE)) $(if $(INPUTS),--inputs $(INPUTS)) $(if $(NAME),--name $(NAME)) $(if $(ALLOW_SIGNATURES),--allow-signatures) $(if $(TARGET),--target $(TARGET)) $(if $(OUTPUT_FORMAT),--output-format $(OUTPUT_FORMAT)) $(if $(RENDER),--render $(RENDER)) $(if $(CALLBACK_URL),--callback-url '$(CALLBACK_URL)') $(ARGS)
 BUNDLE_RUN_OPTS = $(if $(BASE_URL),--base-url $(BASE_URL)) $(if $(TOKEN),--token $(TOKEN))
 
 check-bundle-arg:
@@ -227,6 +237,20 @@ bundle-run: env check-bundle-arg
 bundle-validate: env check-bundle-arg
 	$(call PRINT_TITLE,"Validating bundle via the API - dry-run with no inference")
 	$(VENV_PYTHON) $(BUNDLE_SCRIPT) $(BUNDLE) --run --endpoint validate $(if $(ALLOW_SIGNATURES),--allow-signatures) $(if $(RENDER),--render $(RENDER)) $(if $(NAME),--name $(NAME)) $(BUNDLE_RUN_OPTS) $(ARGS)
+
+# Resolve the bundle's closure to its normalized library crate via /v1/resolve —
+# no inference, no dry-run sweep, no cost. PIPE/INPUTS are intentionally
+# omitted — the crate routes take neither.
+bundle-resolve: env check-bundle-arg
+	$(call PRINT_TITLE,"Resolving bundle to its normalized crate via the API")
+	$(VENV_PYTHON) $(BUNDLE_SCRIPT) $(BUNDLE) --run --endpoint resolve $(if $(NAME),--name $(NAME)) $(BUNDLE_RUN_OPTS) $(ARGS)
+
+# Project typed artifacts + codegen.lock via /v1/codegen — no inference, no
+# cost. TARGET is required: ts-zod | python-pydantic | python-structures.
+bundle-codegen: env check-bundle-arg
+	@test -n "$(TARGET)" || { echo "ERROR: set TARGET=<ts-zod|python-pydantic|python-structures>, e.g. make bundle-codegen BUNDLE=... TARGET=ts-zod"; exit 1; }
+	$(call PRINT_TITLE,"Generating typed artifacts via the API codegen route")
+	$(VENV_PYTHON) $(BUNDLE_SCRIPT) $(BUNDLE) --run --endpoint codegen --target $(TARGET) $(if $(NAME),--name $(NAME)) $(BUNDLE_RUN_OPTS) $(ARGS)
 
 bundle-curl: env check-bundle-arg
 	$(call PRINT_TITLE,"Emitting curl for bundle")

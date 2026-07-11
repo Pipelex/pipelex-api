@@ -1,6 +1,6 @@
 # Postman sample bundles
 
-The `.mthds` bodies behind the test requests in the **Pipelex FastAPI** Postman collection (the `Validate` and `Pipeline` folders). Keeping them here as files — rather than only embedded in Postman — makes them reviewable, diffable, and editable. The collection requests carry a copy of each body inline; if you edit a file here, re-push it with the `postman-run-bundle` skill (or by hand) to keep the request in sync.
+The `.mthds` bodies behind the test requests in the **Pipelex FastAPI** Postman collection (the `Validate` and `Pipeline` folders). Keeping them here as files — rather than only embedded in Postman — makes them reviewable, diffable, and editable. The collection requests carry a copy of each body inline; if you edit a file here, re-push it with the `postman-bundle` skill (or by hand) to keep the request in sync.
 
 Each verdict below was confirmed against a live `POST /v1/validate`.
 
