@@ -44,15 +44,19 @@ ResolveResponse = Annotated[Union[ResolveValidReport, CrateInvalidReport], Field
     # On top of the composite router's shared 401/413/422/500: the `method_ref` closure selector
     # the envelope accepts but no server-side method registry resolves yet.
     responses={501: PROBLEM_501_METHOD_REF},
-    openapi_extra={"x-mthds-protocol": True},
+    # NOT tagged `x-mthds-protocol`: the MTHDS Protocol is the five operations `execute`, `start`,
+    # `validate`, `models`, `version`. `/resolve` is a Pipelex API extension. The *artifact* it
+    # emits — the normalized library crate — IS standard-owned (the MTHDS Library Crate Format), so
+    # its wire fields stay brand-neutral; the route that serves it over HTTP is ours.
 )
 async def resolve_mthds(request_data: MthdsFilesRequest) -> JSONResponse:
-    """Resolve a library closure into its normalized crate (MTHDS Protocol resolution capability).
+    """Resolve a library closure into its normalized crate (Pipelex API extension).
 
     Resolution is a first-class language operation alongside validation: assemble the closure from
     the inline `files[]`, load + statically validate the library, and emit the **normalized
     library crate** (fully qualified refs, refinement flattened, natives materialized, fingerprint
-    set). It runs no dry-run sweep — runnability is `/validate`'s vocabulary.
+    set) — the artifact shape the MTHDS standard specifies as the Library Crate Format. It runs no
+    dry-run sweep — runnability is `/validate`'s vocabulary.
 
     Response contract (the `/validate` discipline):
 

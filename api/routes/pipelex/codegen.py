@@ -50,8 +50,8 @@ class CodegenRequest(MthdsFilesRequest):
     target: CodegenTarget = Field(
         ...,
         description=(
-            "For whom: `ts-zod` (zod schemas + inferred types) and `python-pydantic` (self-contained BaseModels) are "
-            "MTHDS-protocol type projections; `python-structures` (runtime StructuredContent classes) is a Pipelex extension."
+            "For whom: `ts-zod` (zod schemas + inferred types), `python-pydantic` (self-contained BaseModels), or "
+            "`python-structures` (runtime StructuredContent classes, for a Pipelex host)."
         ),
     )
     pipe_ref: str | None = Field(
@@ -108,10 +108,12 @@ CodegenResponse = Annotated[Union[CodegenValidReport, CrateInvalidReport], Field
     # On top of the composite router's shared 401/413/422/500: the `method_ref` closure selector
     # the envelope accepts but no server-side method registry resolves yet (shared with `/resolve`).
     responses={501: PROBLEM_501_METHOD_REF},
-    openapi_extra={"x-mthds-protocol": True},
+    # NOT tagged `x-mthds-protocol` — a Pipelex API extension, like `/resolve`. The MTHDS standard
+    # specifies the crate this reads (the Library Crate Format); it specifies no type projection, so
+    # every `target` here — `ts-zod` and `python-pydantic` no less than `python-structures` — is ours.
 )
 async def codegen_mthds(request_data: CodegenRequest) -> JSONResponse:
-    """Generate typed artifacts from a library closure (MTHDS Protocol type-projection capability).
+    """Generate typed artifacts from a library closure (Pipelex API extension).
 
     Resolves the closure to its normalized crate (exactly like `POST /resolve`), then projects it
     through the requested `kind`/`target` axes and returns the **stamped** artifact set plus its

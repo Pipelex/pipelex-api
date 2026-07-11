@@ -2,6 +2,8 @@
 
 Resolve a library closure into its **normalized library crate**, and project that crate into typed artifacts (zod schemas, pydantic models, runtime structures) — over HTTP, with the same engine and the same trust chain as the local `pipelex resolve` / `pipelex codegen` commands.
 
+Both are **Pipelex API extensions**, not MTHDS Protocol routes: they are not tagged `x-mthds-protocol` in the [OpenAPI artifact](openapi/pipelex-api.openapi.yaml), and an MTHDS runner is not required to serve them. The *crate* is a different matter — its shape is the standard's [Library Crate Format](https://mthds.ai), so the wire fields are brand-neutral and any MTHDS tool can read one. What is ours is the HTTP surface that produces it, and the type projection on top (the standard specifies none).
+
 Both endpoints speak the [`POST /v1/validate`](pipe-validate.md) verdict discipline: a **produced verdict is always a `200`** discriminated on `is_valid`; the invalid arm carries the structured `validation_errors[]` from pipelex's one shared builder — each item optionally carrying a [`suggested_fix`](error-responses.md#suggested-fixes). Non-2xx is reserved for *no verdict could be produced*: request-shape errors (an unknown projection `kind`/`target`, a malformed closure selector) are `422` RFC 7807 `application/problem+json`, `method_ref` is `501`, auth is `401`/`403`, server faults are `5xx`.
 
 ## Selecting the closure
@@ -58,7 +60,7 @@ Resolution is a first-class language operation alongside validation: the closure
 Resolves the closure exactly like `/resolve`, then projects the crate through the two explicit axes:
 
 - `kind` (string, required): what to project. Served: `types` (the crate's concept set as typed models). Input templates are deliberately **not** a kind here — they ride [`POST /v1/build/inputs`](pipe-builder.md), the same projection already surfaced per pipe.
-- `target` (string, required): for whom. `ts-zod` (zod schemas + inferred types) and `python-pydantic` (self-contained pydantic models) are MTHDS-protocol type projections; `python-structures` (runtime `StructuredContent` classes) is a Pipelex extension.
+- `target` (string, required): for whom. `ts-zod` (zod schemas + inferred types), `python-pydantic` (self-contained pydantic models), or `python-structures` (runtime `StructuredContent` classes, for a Pipelex host).
 - `pipe_ref` (string, optional): pipe selector for future per-pipe kinds — not accepted for `types` (request-shape `422`).
 
 An unknown `kind` or `target` is a request-shape `422` problem+json, never a `200` with an error body.

@@ -86,6 +86,23 @@ Committed: artifact + code + tests, all gates green. Remaining phases are docs-s
 - [ ] **Optional, not done:** refresh the Postman collection. Deliberately skipped: the artifact's *request* surface did not change (only error responses and descriptions did), and a Postman collection carries requests, not error responses. Run `/update-postman` if you want the descriptions refreshed anyway.
 - [x] Cross-repo sanity: **no `docs/specs/` or `conformance/` edit needed**, as predicted. The protocol spec's error-presentation section (`docs/specs/pipelex-mthds-protocol.md`, "Validation status codes" table) already specifies exactly what this work published — 422 request-shape / 401 / 403 / 5xx as `problem+json`, with a produced verdict on a 200. This change documented existing behavior; it did not alter the contract.
 
+## Phase 5 — `/v1/resolve` + `/v1/codegen` are NOT MTHDS Protocol (decision, 2026-07-11) ✅ DONE
+
+Phase 3 spotted that `/v1/resolve` and `/v1/codegen` carried `x-mthds-protocol: true` while several specs still called the protocol "five routes", and aligned the docs *upward* to seven. **The owner reversed that:** the two routes are **Pipelex API extensions** and must not be tagged. The MTHDS standard's own normative OpenAPI (`mthds/docs/spec/openapi/mthds-protocol.openapi.yaml`) already defines exactly five operations and has never mentioned resolve or codegen — so the standard was right all along and the Pipelex side had drifted into it.
+
+**The ownership line, stated precisely (this is the subtle bit):** it runs through the **artifact**, not the surface. The normalized library crate **is** standard-owned — the MTHDS [Library Crate Format](../../mthds/docs/spec/library-crate.md) — so its wire fields stay brand-neutral (no `pipelex_` prefix) and any MTHDS tool can read one. Everything Pipelex builds *on top of* it is ours: the `resolve`/`codegen` CLI commands, the two HTTP routes, **every** projection target (`ts-zod` and `python-pydantic` no less than `python-structures` — the standard specifies no type projection at all), and the stamp/lock/check trust chain. No wire shape moved; only the routes' protocol membership.
+
+- [x] `api/routes/pipelex/resolve.py` + `codegen.py`: dropped `openapi_extra={"x-mthds-protocol": True}`, with a comment saying why. Route docstrings now say "Pipelex API extension"; the `target` Field description no longer calls `ts-zod`/`python-pydantic` "MTHDS-protocol type projections" (it was published verbatim in the artifact).
+- [x] `api/main.py` description, `docs/index.md`, `docs/codegen.md`, `CLAUDE.md`: back to five protocol routes, with resolve/codegen named among the Pipelex extensions and the crate's standard ownership spelled out so the distinction isn't lost again.
+- [x] `tests/unit/test_openapi_contract.py`: `MTHDS_PROTOCOL_OPERATIONS` pins the tagged set as an **exact set**, so a route silently joining OR leaving the protocol surface fails — plus a named test spelling out that resolve/codegen are extensions (this is the easy mistake: they *look* protocol-shaped).
+- [x] Workspace `docs/specs/pipelex-codegen.md`: new **`## Ownership`** section carrying the rule above; the "Capability flags" bullet inverted; the `target` bullet no longer calls type projection a protocol capability.
+- [x] Workspace `docs/specs/command-surface-map.md`: the `[6c]` node's protocol-capability line corrected.
+- [x] `conformance/tests/pipelex_api/test_codegen_routes.py`: module docstring corrected; new live-wire assertion that neither route is tagged **and** that the five protocol operations still are (both directions). A second `pytest.mark.spec(...#ownership)` links it to the new spec section; `make check-spec-links` green (it requires every `##` section to be verified or explicitly marked unverified — the new section is genuinely verified).
+- [x] **`../mthds` needed no change** — verified: its normative protocol OpenAPI has exactly the five paths and `docs/spec/protocol.md` never mentions resolve/codegen.
+- [x] Gates: pipelex-api `agent-check` + `agent-test` + `openapi-check`; conformance `agent-check` + `check-spec-links`; the codegen + tools conformance modules run live against a booted `pipelex-api`.
+
+**Left alone deliberately:** `wip/devx/track-d-design.md` and `wip/devx/devex-north-star.md` still describe resolution/type-projection as protocol capabilities. They are WIP design notes recording the *former* decision, and the workspace convention treats `wip/` as scratch (changelogs ignore it). They are now stale relative to the specs — if that bothers you, they should be corrected or archived, but I did not rewrite the design record.
+
 ### CHECKPOINT 2 — done ✅
 
 All phases complete. Two commits on `feature/Codegen`:

@@ -11,8 +11,8 @@ MTHDS Protocol  ⊂  Pipelex API (this server)  ⊂  Pipelex hosted API
 (the standard)     (protocol + build tooling)    (+ durable runs, catalog, account)
 ```
 
-- **MTHDS Protocol** — the run routes `POST /execute` and `POST /start`, the diagnostic `POST /validate`, the language capabilities `POST /resolve` (closure → normalized crate) and `POST /codegen` (crate → typed artifacts), and the discovery routes `GET /models` and `GET /version`. Tagged `x-mthds-protocol: true` in the [committed OpenAPI artifact](openapi/pipelex-api.openapi.yaml).
-- **Pipelex API (this server)** — the protocol verbatim, plus the build tooling extensions (`/build/*`) and editor tooling (`/lint`, `/format`). `/upload` and `/resolve-storage-url` exist but are NOT part of the published contract.
+- **MTHDS Protocol** — five routes: `POST /execute`, `POST /start`, `POST /validate`, `GET /models`, `GET /version`. Tagged `x-mthds-protocol: true` in the [committed OpenAPI artifact](openapi/pipelex-api.openapi.yaml), and **only** those five — the flag is how a conformance suite or a third-party runner extracts the portable subset.
+- **Pipelex API (this server)** — the protocol verbatim, plus the Pipelex extensions: resolve and codegen (`/resolve`, `/codegen`), build tooling (`/build/*`), and editor tooling (`/lint`, `/format`). `/upload` and `/resolve-storage-url` exist but are NOT part of the published contract.
 - **Pipelex hosted API** (`api.pipelex.com/v1`) — everything here, same shapes, plus durable runs, the method catalog, and account management.
 
 All routes are served under the `/v1` base path (clients compose `{base}/v1/{endpoint}`).
@@ -151,7 +151,7 @@ Validate MTHDS content to ensure pipelines are correctly defined before executio
 [Learn more →](pipe-validate.md)
 
 ### Resolve & Codegen
-Resolve a library closure into its normalized crate, and project that crate into typed artifacts.
+Resolve a library closure into its normalized crate, and project that crate into typed artifacts. Pipelex API extensions — not MTHDS Protocol routes, though the crate they emit is the standard's Library Crate Format.
 
 - `POST /v1/resolve` — Resolve a closure into the normalized library crate (fully qualified refs, flattened refinement, materialized natives, fingerprint)
 - `POST /v1/codegen` — Generate typed artifacts from the crate: `kind` (`types`) × `target` (`ts-zod`, `python-pydantic`, `python-structures`), plus the `codegen.lock` that makes the result reproducible offline

@@ -4,9 +4,9 @@ info:
   title: Pipelex API
   summary: The open-source Pipelex runner — implements MTHDS Protocol v0.6.0.
   description: 'This server implements the [MTHDS Protocol](https://mthds.ai) v0.6.0 (`POST /execute`, `POST /start`, `POST
-    /validate`, `POST /resolve`, `POST /codegen`, `GET /models`, `GET /version` — marked `x-mthds-protocol: true`) plus the
-    Pipelex build tooling extensions (`/build/*`) and editor tooling extensions (`/lint`, `/format`). Contract layering: MTHDS
-    Protocol ⊂ Pipelex API (this server) ⊂ Pipelex hosted API. Routes not in the published contract (`/upload`, `/resolve-storage-url`)
+    /validate`, `GET /models`, `GET /version` — marked `x-mthds-protocol: true`) plus the Pipelex API extensions: resolve
+    and codegen (`/resolve`, `/codegen`), build tooling (`/build/*`), and editor tooling (`/lint`, `/format`). Contract layering:
+    MTHDS Protocol ⊂ Pipelex API (this server) ⊂ Pipelex hosted API. Routes not in the published contract (`/upload`, `/resolve-storage-url`)
     are documented as non-contract in their descriptions. All endpoints are served under the `/v1` base path; every error
     is an RFC 7807 `application/problem+json` problem document, documented per operation as a `ProblemDocument`.'
   license:
@@ -791,16 +791,16 @@ paths:
       tags:
       - resolve
       summary: Resolve Mthds
-      description: "Resolve a library closure into its normalized crate (MTHDS Protocol resolution capability).\n\nResolution\
-        \ is a first-class language operation alongside validation: assemble the closure from\nthe inline `files[]`, load\
-        \ + statically validate the library, and emit the **normalized\nlibrary crate** (fully qualified refs, refinement\
-        \ flattened, natives materialized, fingerprint\nset). It runs no dry-run sweep — runnability is `/validate`'s vocabulary.\n\
-        \nResponse contract (the `/validate` discipline):\n\n- **Valid verdict (200, `is_valid: true`):** the crate on the\
-        \ valid arm.\n- **Invalid verdict (200, `is_valid: false`):** the library could not be parsed, loaded, or\n  validated\
-        \ — `validation_errors[]` from pipelex's one shared builder.\n- **No verdict (non-2xx):** a malformed request body\
-        \ (neither/both closure selectors, an\n  over-limit file) is a request-shape 422; `method_ref` is a 501 until server-side\
-        \ method\n  registry resolution exists; auth is 401/403; server fault is 5xx. All RFC 7807\n  `application/problem+json`\
-        \ via the global handlers."
+      description: "Resolve a library closure into its normalized crate (Pipelex API extension).\n\nResolution is a first-class\
+        \ language operation alongside validation: assemble the closure from\nthe inline `files[]`, load + statically validate\
+        \ the library, and emit the **normalized\nlibrary crate** (fully qualified refs, refinement flattened, natives materialized,\
+        \ fingerprint\nset) — the artifact shape the MTHDS standard specifies as the Library Crate Format. It runs no\ndry-run\
+        \ sweep — runnability is `/validate`'s vocabulary.\n\nResponse contract (the `/validate` discipline):\n\n- **Valid\
+        \ verdict (200, `is_valid: true`):** the crate on the valid arm.\n- **Invalid verdict (200, `is_valid: false`):**\
+        \ the library could not be parsed, loaded, or\n  validated — `validation_errors[]` from pipelex's one shared builder.\n\
+        - **No verdict (non-2xx):** a malformed request body (neither/both closure selectors, an\n  over-limit file) is a\
+        \ request-shape 422; `method_ref` is a 501 until server-side method\n  registry resolution exists; auth is 401/403;\
+        \ server fault is 5xx. All RFC 7807\n  `application/problem+json` via the global handlers."
       operationId: resolve_mthds_v1_resolve_post
       requestBody:
         content:
@@ -863,22 +863,21 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDocument'
-      x-mthds-protocol: true
   /v1/codegen:
     post:
       tags:
       - codegen
       summary: Codegen Mthds
-      description: "Generate typed artifacts from a library closure (MTHDS Protocol type-projection capability).\n\nResolves\
-        \ the closure to its normalized crate (exactly like `POST /resolve`), then projects it\nthrough the requested `kind`/`target`\
-        \ axes and returns the **stamped** artifact set plus its\n`codegen.lock` — everything a client needs to materialize\
-        \ a byte-identical local projection\nand run the offline drift check. There is deliberately **no** server-side check\
-        \ route: the\ncheck is offline by design.\n\nResponse contract (the `/validate` discipline):\n\n- **Valid verdict\
-        \ (200, `is_valid: true`):** the artifacts + lock on the valid arm.\n- **Invalid verdict (200, `is_valid: false`):**\
-        \ the library could not be parsed, loaded, or\n  validated — `validation_errors[]` from pipelex's one shared builder;\
-        \ no artifacts exist.\n- **No verdict (non-2xx):** an unknown projection `kind`/`target`, a `pipe_ref` on a\n  concept-set-wide\
-        \ kind, or a malformed closure selector is a request-shape 422 problem+json;\n  `method_ref` is a 501 until server-side\
-        \ method registry resolution exists; auth is 401/403;\n  server fault is 5xx."
+      description: "Generate typed artifacts from a library closure (Pipelex API extension).\n\nResolves the closure to its\
+        \ normalized crate (exactly like `POST /resolve`), then projects it\nthrough the requested `kind`/`target` axes and\
+        \ returns the **stamped** artifact set plus its\n`codegen.lock` — everything a client needs to materialize a byte-identical\
+        \ local projection\nand run the offline drift check. There is deliberately **no** server-side check route: the\ncheck\
+        \ is offline by design.\n\nResponse contract (the `/validate` discipline):\n\n- **Valid verdict (200, `is_valid: true`):**\
+        \ the artifacts + lock on the valid arm.\n- **Invalid verdict (200, `is_valid: false`):** the library could not be\
+        \ parsed, loaded, or\n  validated — `validation_errors[]` from pipelex's one shared builder; no artifacts exist.\n\
+        - **No verdict (non-2xx):** an unknown projection `kind`/`target`, a `pipe_ref` on a\n  concept-set-wide kind, or\
+        \ a malformed closure selector is a request-shape 422 problem+json;\n  `method_ref` is a 501 until server-side method\
+        \ registry resolution exists; auth is 401/403;\n  server fault is 5xx."
       operationId: codegen_mthds_v1_codegen_post
       requestBody:
         content:
@@ -941,7 +940,6 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDocument'
-      x-mthds-protocol: true
   /v1/lint:
     post:
       tags:
@@ -1763,8 +1761,8 @@ components:
           description: What to project. `types` projects the crate's concept set into typed models.
         target:
           $ref: '#/components/schemas/CodegenTarget'
-          description: 'For whom: `ts-zod` (zod schemas + inferred types) and `python-pydantic` (self-contained BaseModels)
-            are MTHDS-protocol type projections; `python-structures` (runtime StructuredContent classes) is a Pipelex extension.'
+          description: 'For whom: `ts-zod` (zod schemas + inferred types), `python-pydantic` (self-contained BaseModels),
+            or `python-structures` (runtime StructuredContent classes, for a Pipelex host).'
         pipe_ref:
           anyOf:
           - type: string

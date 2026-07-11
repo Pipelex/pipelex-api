@@ -10,6 +10,9 @@ this same `fastapi_app.openapi()`) tells a client about failures:
   409 duplicate run, `/resolve`'s 501 `method_ref`, …) are documented on that route.
 - The `suggested_fix` surface pipelex's codegen work added reaches the wire: a client reading
   the artifact can find it from a problem document, not just from `/validate`'s 200 arm.
+- `x-mthds-protocol` marks exactly the MTHDS Protocol operations and nothing else — the flag is
+  how a conformance suite or a third-party runner extracts the portable subset of this artifact,
+  so a Pipelex extension wearing it would misrepresent the standard.
 
 `api.main` is imported inside the fixture rather than at module scope so a bad env var fails
 THESE tests rather than the collection of every module that transitively imports the app.
@@ -34,6 +37,20 @@ COMMON_STATUSES = (401, 413, 422, 500)
 # `GET /v1/version` is the public protocol handshake: `api.main` mounts it OUTSIDE the composite
 # router (and outside the auth dependency), so it inherits none of the shared responses.
 PUBLIC_PATHS = ("/v1/version",)
+
+# The MTHDS Protocol operations — and nothing else — carry `x-mthds-protocol: true`. This is the
+# standard's five-operation surface (`execute`, `start`, `validate`, `models`, `version`; see the
+# normative `mthds/docs/spec/openapi/mthds-protocol.openapi.yaml`), NOT everything this server
+# serves. `/resolve` and `/codegen` are deliberately absent: they are Pipelex API extensions. The
+# crate `/resolve` emits is standard-owned (the MTHDS Library Crate Format), but the route serving
+# it is ours, and the standard specifies no type projection at all.
+MTHDS_PROTOCOL_OPERATIONS = {
+    ("/v1/execute", "post"),
+    ("/v1/start", "post"),
+    ("/v1/validate", "post"),
+    ("/v1/models", "get"),
+    ("/v1/version", "get"),
+}
 
 # The extra statuses each route can produce on top of COMMON_STATUSES.
 ROUTE_EXTRA_STATUSES = {
@@ -107,6 +124,22 @@ class TestOpenApiErrorContract:
             response = responses.get(str(status))
             assert response is not None, f"{method.upper()} {path} does not document {status}"
             assert list(response["content"]) == [PROBLEM_JSON_MEDIA_TYPE]
+
+    def test_x_mthds_protocol_tags_exactly_the_protocol_operations(self, openapi_schema: dict[str, Any]):
+        """The flag is how a conformance suite extracts the portable subset of this artifact, so it
+        must mark the standard's operations and nothing else. Asserted as an exact set — a route that
+        silently joins OR leaves the protocol surface fails here, in both directions.
+        """
+        tagged = {(path, method) for path, method, operation in self._operations(openapi_schema) if operation.get("x-mthds-protocol")}
+        assert tagged == MTHDS_PROTOCOL_OPERATIONS
+
+    def test_resolve_and_codegen_are_pipelex_extensions(self, openapi_schema: dict[str, Any]):
+        """Spelled out separately from the set assertion above, because this is the easy mistake:
+        `/resolve` and `/codegen` look protocol-shaped (they speak the `/validate` verdict discipline
+        and emit the standard's crate) but they are Pipelex API extensions and must not be tagged.
+        """
+        for path in ("/v1/resolve", "/v1/codegen"):
+            assert "x-mthds-protocol" not in openapi_schema["paths"][path]["post"]
 
     def test_auth_challenge_and_retry_hint_headers_are_documented(self, openapi_schema: dict[str, Any]):
         """A 401 carries `WWW-Authenticate: Bearer`; the provider-429 passthrough carries `Retry-After`."""
