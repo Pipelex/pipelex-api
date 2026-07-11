@@ -67,23 +67,30 @@ The core fix: make the published error responses match the RFC 7807 reality, wit
 
 Committed: artifact + code + tests, all gates green. Remaining phases are docs-site prose only.
 
-## Phase 3 — Docs site: catalog completeness + new pipelex surface
+## Phase 3 — Docs site: catalog completeness + new pipelex surface ✅ DONE
 
-- [ ] `docs/index.md` "API Endpoints": add a **Resolve & Codegen** section — `POST /v1/resolve`, `POST /v1/codegen`, `[Learn more →](codegen.md)` — mirroring the existing section style. Keep section order aligned with the nav in `mkdocs.yml`.
-- [ ] `docs/index.md`: decide whether to list `GET /` (recommend: one line under Health & Version; it exists and is unauthenticated).
-- [ ] `docs/index.md` "Uploader" section: leave as-is per finding 8 remedy, with ONE exception — the sentence claiming the routes work with `AUTH_MODE=api_key` is factually wrong (a shared key establishes no identity, so they 401 even with a valid key); replace just that sentence with "requires an authenticated user identity" and change nothing else.
-- [ ] `docs/error-responses.md` "Structured validation errors" table: add `suggested_fix` row (structured deterministic fix — `fix_code`, `description`, `safety: safe|unsafe`, optional `source`, `ops[]` of semantic TOML patch ops; present only when the fix planner derived one) and the missing `missing_pipe_code` row. Add a short subsection or example showing a `suggested_fix` payload (source of truth: `../_codegen/pipelex/suggested_fix.py` module docstring — "the ops are the machine contract; any rendered diff is presentation").
-- [ ] `docs/pipe-validate.md`: mention `suggested_fix` on validation error items where the item shape is described, cross-link to error-responses.md.
-- [ ] `docs/error-responses.md`: sanity-pass the "Status codes" section against the now-documented per-route responses (Phase 1) so prose and artifact agree; fix the stale `/pipeline/start` path mention in the 501 bullet if still present.
-- [ ] `docs/codegen.md` + `docs/pipe-builder.md`: quick currency pass against the shipped envelopes (both were rewritten on this branch — verify examples still match the regenerated schemas, especially any `validation_errors` examples that now may carry `suggested_fix`).
+- [x] `docs/index.md`: added the **Resolve & Codegen** section, placed after Pipe Validate (matches both the `mkdocs.yml` nav order and the natural validate → resolve → codegen reading order; the rest of the index's section order was left alone rather than churned to match the nav exactly).
+- [x] `docs/index.md`: `GET /` is cataloged, one line under Health & Version, as recommended.
+- [x] `docs/index.md` "Uploader": the one wrong sentence replaced. It now says the routes need an authenticated **user identity**, that `AUTH_MODE=api_key` does not establish one (shared key, not per-caller), and names the two configurations that do work (`AUTH_MODE=jwt`, or a trusted proxy + `TRUST_FORWARDED_IDENTITY_HEADERS=true`). Nothing else in that section touched.
+- [x] `docs/error-responses.md`: `suggested_fix` and `missing_pipe_code` rows added to the "Structured validation errors" table, plus a full **Suggested fixes** section — a realistic payload (`match-sequence-output`), the field semantics, the op-kind table, and the "ops are the machine contract; any rendered diff is presentation" rule.
+- [x] `docs/pipe-validate.md`: `suggested_fix` surfaced where the item shape is described, cross-linked both ways.
+- [x] `docs/error-responses.md` "Status codes": sanity-passed against the artifact. Fixed the stale `/pipeline/start` path, and added what was missing entirely — the **400** (`StartRequiresAsyncOrchestration`), the `orchestration_mode` **403** (it only mentioned the storage-ownership case), and the `method_ref` **501**. Added a closing note that an invalid bundle is a 200, not an error status.
+- [x] `docs/codegen.md` + `docs/pipe-builder.md`: currency pass. Envelopes still match the regenerated schemas; added the `suggested_fix` pointer to both, and the missing `method_ref` 501 to codegen.md's status list.
 
-## Phase 4 — Changelog + verification
+**Drift found in Phase 3 that the plan had not spotted:** `/v1/resolve` and `/v1/codegen` carry `x-mthds-protocol: true` (they are protocol *capabilities* — resolution and type-projection), so the protocol surface is **seven** operations, not five. The "five protocol routes" framing was stale in three places, all now fixed: the FastAPI app `description` (published verbatim in the artifact), `docs/index.md`'s three-layer-contract bullet, and this repo's `CLAUDE.md`. `CLAUDE.md`'s project-structure block was also missing `resolve.py` / `codegen.py` / `crate_ops.py` / `tools.py`, and now documents the two new `api/openapi_*.py` modules plus how to document a new failure status.
 
-- [ ] `CHANGELOG.md` [Unreleased]: add entries — (a) OpenAPI artifact now documents the RFC 7807 problem+json error responses on every route (was: FastAPI default `HTTPValidationError`), including auth/409/429/501 statuses; (b) `suggested_fix` structured fixes surfaced on `validation_errors[]` (from pipelex codegen); (c) docs catalog fixes. Mark anything breaking per workspace convention (plain "breaking").
-- [ ] Full gate: `make agent-check` && `make agent-test` && `make openapi-check`.
-- [ ] Optional: refresh the Postman collection (`/update-postman` skill) since the contract artifact changed.
-- [ ] Cross-repo sanity: this is documentation-of-existing-behavior — no MTHDS Protocol contract change, so no `docs/specs/` (workspace root) or `conformance/` edits expected. Verify by reading the protocol spec's error-presentation section once; if the spec documents the 422 shape, confirm wording still matches.
+## Phase 4 — Changelog + verification ✅ DONE
 
-### CHECKPOINT 2 — done
+- [x] `CHANGELOG.md` [Unreleased]: added the `suggested_fix` surface (Added), and under Changed: the RFC 7807 error contract in the artifact, the resolve/codegen protocol-route correction, and the docs fixes. Nothing here is breaking — it is documentation of behavior the server already had.
+- [x] Full gate: `make agent-check` && `make agent-test` && `make openapi-check` — all green.
+- [ ] **Optional, not done:** refresh the Postman collection. Deliberately skipped: the artifact's *request* surface did not change (only error responses and descriptions did), and a Postman collection carries requests, not error responses. Run `/update-postman` if you want the descriptions refreshed anyway.
+- [x] Cross-repo sanity: **no `docs/specs/` or `conformance/` edit needed**, as predicted. The protocol spec's error-presentation section (`docs/specs/pipelex-mthds-protocol.md`, "Validation status codes" table) already specifies exactly what this work published — 422 request-shape / 401 / 403 / 5xx as `problem+json`, with a produced verdict on a 200. This change documented existing behavior; it did not alter the contract.
 
-Update this file: tick everything, record decisions (e.g. whether 401 got documented on all routes, whether `GET /` was cataloged), note the regenerated artifact commit. If the pipelex editable pin changed meanwhile, re-run `make openapi-export` last.
+### CHECKPOINT 2 — done ✅
+
+All phases complete. Two commits on `feature/Codegen`:
+
+- `a155ad1` — the wire contract: `api/openapi_responses.py`, `api/openapi_schema.py`, router-level + per-route `responses=`, typed `/health` + `GET /`, D-code sweep, `tests/unit/test_openapi_contract.py`, regenerated artifact.
+- (this one) — docs-site prose, changelog, `CLAUDE.md`, and the resolve/codegen protocol-surface correction (which touched `api/main.py`'s description, hence a second artifact regeneration).
+
+If the pipelex editable pin (`[tool.uv.sources]` → `../_codegen`) moves before release, re-run `make openapi-export` and re-commit the artifact.

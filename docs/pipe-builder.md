@@ -57,6 +57,8 @@ Generate example input JSON for a pipe, showing the expected input structure wit
 }
 ```
 
+An item may also carry a `suggested_fix` — a structured, deterministic repair the runtime derived for that error. See [Error Responses → Suggested fixes](error-responses.md#suggested-fixes).
+
 ---
 
 ## Build Output

@@ -11,7 +11,7 @@ MTHDS Protocol  ⊂  Pipelex API (this server)  ⊂  Pipelex hosted API
 (the standard)     (protocol + build tooling)    (+ durable runs, catalog, account)
 ```
 
-- **MTHDS Protocol** — five routes: `POST /execute`, `POST /start`, `POST /validate`, `GET /models`, `GET /version`. Tagged `x-mthds-protocol: true` in the [committed OpenAPI artifact](openapi/pipelex-api.openapi.yaml).
+- **MTHDS Protocol** — the run routes `POST /execute` and `POST /start`, the diagnostic `POST /validate`, the language capabilities `POST /resolve` (closure → normalized crate) and `POST /codegen` (crate → typed artifacts), and the discovery routes `GET /models` and `GET /version`. Tagged `x-mthds-protocol: true` in the [committed OpenAPI artifact](openapi/pipelex-api.openapi.yaml).
 - **Pipelex API (this server)** — the protocol verbatim, plus the build tooling extensions (`/build/*`) and editor tooling (`/lint`, `/format`). `/upload` and `/resolve-storage-url` exist but are NOT part of the published contract.
 - **Pipelex hosted API** (`api.pipelex.com/v1`) — everything here, same shapes, plus durable runs, the method catalog, and account management.
 
@@ -23,10 +23,11 @@ The API currently allows you to:
 
 1. **Run** any Pipelex pipeline with flexible inputs (sync or async)
 2. **Validate** any Pipelex pipeline to ensure correctness
-3. **Build** pipeline components — generate input schemas, output representations, runner code, concepts, and pipe specs
-4. **Lint and format** single `.mthds` files for editor workflows
-5. **List** available model presets and configurations
-6. **Upload** files via presigned URLs
+3. **Resolve** a library closure into its normalized crate, and **codegen** typed artifacts from it (TypeScript/Zod, Pydantic, Pipelex structures)
+4. **Build** pipeline components — generate input schemas, output representations, runner code, concepts, and pipe specs
+5. **Lint and format** single `.mthds` files for editor workflows
+6. **List** available model presets and configurations
+7. **Upload** files via presigned URLs
 
 ## Deployment
 
@@ -126,8 +127,11 @@ docker run --name pipelex-api -p 8081:8081 \
 
 ## API Endpoints
 
+Every failure is an RFC 7807 `application/problem+json` problem document — see **[Error Responses →](error-responses.md)**, and the [committed OpenAPI artifact](openapi/pipelex-api.openapi.yaml) for the statuses each route can produce.
+
 ### Health & Version
 
+- `GET /` — Service identity banner (no auth required)
 - `GET /health` — Health check (no auth required)
 - `GET /v1/version` — MTHDS Protocol version handshake (no auth required): `{protocol_version, implementation, implementation_version, runtime_version}`. Replaces the former `/pipelex_version` and `/api_version` routes.
 
@@ -145,6 +149,14 @@ Validate MTHDS content to ensure pipelines are correctly defined before executio
 - `POST /v1/validate` — Parse, validate, and dry-run pipelines
 
 [Learn more →](pipe-validate.md)
+
+### Resolve & Codegen
+Resolve a library closure into its normalized crate, and project that crate into typed artifacts.
+
+- `POST /v1/resolve` — Resolve a closure into the normalized library crate (fully qualified refs, flattened refinement, materialized natives, fingerprint)
+- `POST /v1/codegen` — Generate typed artifacts from the crate: `kind` (`types`) × `target` (`ts-zod`, `python-pydantic`, `python-structures`), plus the `codegen.lock` that makes the result reproducible offline
+
+[Learn more →](codegen.md)
 
 ### MTHDS Tools
 Lint and format single `.mthds` files without loading or executing a pipeline.
@@ -172,7 +184,7 @@ Tools for AI agents building pipelines programmatically.
 
 ### Uploader (auth-gated, NON-CONTRACT)
 
-These endpoints exist in the server but are NOT part of the published Pipelex API contract — they are deployment conveniences slated for replacement by the storage redesign. They require `AUTH_MODE=api_key` or `AUTH_MODE=jwt` — they reject anonymous requests with 401.
+These endpoints exist in the server but are NOT part of the published Pipelex API contract — they are deployment conveniences slated for replacement by the storage redesign. They require an authenticated **user identity** and reject anonymous requests with 401; `AUTH_MODE=api_key` does not establish one (the key is shared, not per-caller), so use `AUTH_MODE=jwt`, or a trusted proxy forwarding `X-User-Id` with `TRUST_FORWARDED_IDENTITY_HEADERS=true`.
 
 - `POST /v1/upload` — Upload a base64-encoded file. Returns a `pipelex-storage://…` URI you can pass back as a `Document`/`Image` `url` in subsequent pipeline calls.
 - `POST /v1/resolve-storage-url` — Resolve a `pipelex-storage://…` URI to a presigned HTTPS URL (when the storage backend supports it).

@@ -2,7 +2,7 @@
 
 Resolve a library closure into its **normalized library crate**, and project that crate into typed artifacts (zod schemas, pydantic models, runtime structures) — over HTTP, with the same engine and the same trust chain as the local `pipelex resolve` / `pipelex codegen` commands.
 
-Both endpoints speak the [`POST /v1/validate`](pipe-validate.md) verdict discipline: a **produced verdict is always a `200`** discriminated on `is_valid`; the invalid arm carries the structured `validation_errors[]` from pipelex's one shared builder. Non-2xx is reserved for *no verdict could be produced*: request-shape errors (an unknown projection `kind`/`target`, a malformed closure selector) are `422` RFC 7807 `application/problem+json`, auth is `401`/`403`, server faults are `5xx`.
+Both endpoints speak the [`POST /v1/validate`](pipe-validate.md) verdict discipline: a **produced verdict is always a `200`** discriminated on `is_valid`; the invalid arm carries the structured `validation_errors[]` from pipelex's one shared builder — each item optionally carrying a [`suggested_fix`](error-responses.md#suggested-fixes). Non-2xx is reserved for *no verdict could be produced*: request-shape errors (an unknown projection `kind`/`target`, a malformed closure selector) are `422` RFC 7807 `application/problem+json`, `method_ref` is `501`, auth is `401`/`403`, server faults are `5xx`.
 
 ## Selecting the closure
 
