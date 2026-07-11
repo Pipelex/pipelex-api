@@ -1796,9 +1796,13 @@ components:
       - python-pydantic
       - ts-zod
       title: CodegenTarget
-      description: 'A codegen target flavor. `python-structures` is a Pipelex-runtime extension (StructuredContent
+      description: 'A codegen target flavor. All targets are Pipelex projections — the MTHDS standard specifies no
 
-        classes); `python-pydantic` and `ts-zod` are protocol-capability type projections (neutral shapes).'
+        type projection (see `docs/specs/pipelex-codegen.md` → "Ownership"). They differ in audience:
+
+        `ts-zod` and `python-pydantic` emit idiom-neutral types any consumer can use; `python-structures`
+
+        emits StructuredContent classes for a Pipelex runtime host.'
     CodegenValidReport:
       properties:
         is_valid:
