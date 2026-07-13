@@ -24,7 +24,10 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-pipelex = { path = "../pipelex", editable = true }
+# Pinned to a git rev, not a local editable path: CI has no sibling checkout, so `../pipelex` fails
+# `uv sync` on a runner. The rev carries the unreleased `codegen` engine this API rides; swap back to
+# a plain `==<version>` PyPI pin once a pipelex release ships it.
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "27e6f3e5776e479259b951367809a1744a15670e" }
 
 [build-system]
 requires = ["hatchling"]

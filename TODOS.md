@@ -63,9 +63,11 @@ All decisions are taken (conversation of 2026-07-13). None remain pending.
 
 **Files touched in Phase 1:**
 
-- `pipelex-api/`: `api/routes/pipelex/codegen.py`, `docs/codegen.md`, `CHANGELOG.md`, `docs/openapi/pipelex-api.openapi.yaml`, `TODOS.md` — committed on `chore/codegen-trust-chain-rationale`, PR opened against `feature/Codegen`.
-- `pipelex/`: `pipelex/codegen/emitters/target.py` (module docstring, `CodegenKind` docstring, `INPUTS` member removed). **Still uncommitted** — the repo is on branch `dev`, so branch before committing.
-- workspace: `docs/specs/pipelex-codegen.md` ("Two axes" + "Route envelopes"). **Still uncommitted.**
+- `pipelex-api/`: `api/routes/pipelex/codegen.py`, `docs/codegen.md`, `CHANGELOG.md`, `docs/openapi/pipelex-api.openapi.yaml`, `pyproject.toml` + `uv.lock` (the git pin below), `TODOS.md` — committed on `chore/codegen-trust-chain-rationale`, PR #38 against `feature/Codegen`.
+- `pipelex/`: `pipelex/codegen/emitters/target.py` (module docstring, `CodegenKind` docstring, `INPUTS` member removed) — committed on **`feature/Stabilize`** (worked in the `../_stable` worktree, **not** `../pipelex`, which stays on `dev` and clean) and pushed. The same push carries a second, pre-existing commit from that worktree: the `class_docstring` triple-quoting fix in `codegen/emitters/python_common.py` + its test.
+- workspace: `docs/specs/pipelex-codegen.md` ("Two axes" + "Route envelopes"). **Still uncommitted** — needs its own commit.
+
+**Dependency pin (this is what unblocked CI).** `pipelex-api` pinned `pipelex = { path = "../pipelex", editable = true }`, which **cannot install on a GitHub runner** — there is no sibling checkout, so `make install` (`uv sync`) failed before a single test ran. Repinned to the pushed rev: `pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "27e6f3e5776e479259b951367809a1744a15670e" }` (`feature/Stabilize`), `uv.lock` regenerated. Verified locally with a real `uv sync` from git plus `make gha-tests` (CI's own target) — green. **Any further `pipelex` change Phases 2–4 need must be pushed to `feature/Stabilize` and the `rev` bumped here**, or `pipelex-api` CI will test against stale engine code. At release, this reverts to a plain `==<version>` PyPI pin.
 
 **Carried into Phase 2 (found while reading, saves a re-read).** `inputs_cmd.py::_default_main_pipe_ref` is the reference semantics for D1's optional `pipe_ref`: it collects `f"{domain_code}.{domain.main_pipe}"` over every domain in the crate that declares one, then errors on **zero** candidates *and* on **more than one** (ambiguous closure). The route must mirror both arms — the plan's D1 only names the zero case ("422 when omitted and the closure declares none"); **the ambiguous case needs a 422 too.** Pipe lookup itself is `get_required_pipe(pipe_code=<qualified ref>)`, raising `PipeLibraryError` on a bad ref (→ 422, a request-shape error, not an invalid-crate verdict).
 
