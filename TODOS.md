@@ -1,6 +1,27 @@
 # Plan: unify the codegen/build underpinnings (without merging the routes)
 
-Status: **Phase 1 complete** (uncommitted, working trees of `pipelex/`, `pipelex-api/`, and the workspace spec). Phases 2–5 not started. This plan replaces the previous TODOS.md. It spans `pipelex-api/` (main), `pipelex/` (engine hygiene), the workspace spec (`Pipelex/docs/specs/pipelex-codegen.md`), and three JS consumers. No backward compatibility is owed anywhere — breaking wire changes are fine, noted in changelogs.
+Status: **Phase 1 shipped and merged.** Next up: **Phase 2**. This plan spans `pipelex-api/` (main), `pipelex/` (engine hygiene — done, nothing further expected), the workspace spec (`Pipelex/docs/specs/pipelex-codegen.md`), and three JS consumers. No backward compatibility is owed anywhere — breaking wire changes are fine, noted in changelogs.
+
+## Working setup — read this before touching code (cold start)
+
+**Where you are.** `pipelex-api` is on `feature/Codegen` (Phase 1 merged as PR #38, `770956a`). Work Phases 2–3 from there; open PRs **against `feature/Codegen`**, not `main`.
+
+**The engine is pinned by git rev — you do NOT need a local editable `pipelex`.** `pyproject.toml` has:
+
+```toml
+[tool.uv.sources]
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "27e6f3e5776e479259b951367809a1744a15670e" }
+```
+
+That rev is the tip of the `pipelex` repo's **`feature/Stabilize`** branch, which is checked out locally in the **`../_stable` worktree** (`../pipelex` itself is on `dev` and must stay clean — do not work there). The pin replaced a local editable path (`path = "../pipelex", editable = true`) that **could never install in CI** — a GitHub runner has no sibling checkout, so `uv sync` failed before any test ran. Keep the git pin: it is what makes CI green.
+
+**Phases 2–4 need no engine change.** Verified: every engine symbol these phases call already exists at the pinned rev — `render_inputs` / `render_inputs_toml` / `InputsTemplateFormat` (`pipelex/core/pipes/inputs/input_renderer.py`), `NoInputsRequiredError` (`pipelex/core/pipes/inputs/exceptions.py`), `render_output` (`pipelex/core/pipes/output/output_renderer.py`, already imported by `build/output.py` today), `resolve_crate_from_contents`, `get_required_pipe`, `ValidateBundleError`. The work is rewriting `pipelex-api` routes over engine functions that are already there.
+
+**If an engine change turns out to be needed anyway** (only then), the loop is:
+
+1. Iterate locally without touching the committed pin: `uv pip install -e ../_stable` into `pipelex-api`'s venv. This does *not* modify `pyproject.toml` / `uv.lock`, so CI stays green while you experiment. ⚠️ Any `make install` / `uv sync` re-pins the venv back to the git rev and silently undoes this — re-run the `uv pip install -e` after one.
+2. When the engine change is settled: commit it in `../_stable`, push to `feature/Stabilize`, then **bump `rev` in `pyproject.toml` and re-run `uv lock`**. Skipping the bump means `pipelex-api` CI silently tests against stale engine code.
+3. **Never commit an editable path pin.** At release this all reverts to a plain `pipelex[...]==<version>` PyPI pin once a `pipelex` release ships `codegen`.
 
 ## Background — read this first on a cold start
 
@@ -61,17 +82,26 @@ All decisions are taken (conversation of 2026-07-13). None remain pending.
 
 **Extra fix, same drift, not in the original box list.** Drift #1 (the incidental "mirroring the agent CLI" rationale) was *also* present in the spec's "Route envelopes" section, i.e. in the most authoritative document. Fixed there too — it now defers to the trust-chain rule. Left deliberately alone: the spec's *agent-CLI* sentence ("there is deliberately no `pipelex-agent codegen inputs` — the existing `pipelex-agent inputs` group already surfaces that projection"). That statement is about the agent CLI's own surface and is true on its own terms; the drift was only ever in *borrowing* it as the route-membership reason.
 
-**Files touched in Phase 1:**
+**Everything in Phase 1 is committed, pushed, and merged** (see "Working setup" at the top for the resulting branch/pin state):
 
-- `pipelex-api/`: `api/routes/pipelex/codegen.py`, `docs/codegen.md`, `CHANGELOG.md`, `docs/openapi/pipelex-api.openapi.yaml`, `pyproject.toml` + `uv.lock` (the git pin below), `TODOS.md` — committed on `chore/codegen-trust-chain-rationale`, PR #38 against `feature/Codegen`.
-- `pipelex/`: `pipelex/codegen/emitters/target.py` (module docstring, `CodegenKind` docstring, `INPUTS` member removed) — committed on **`feature/Stabilize`** (worked in the `../_stable` worktree, **not** `../pipelex`, which stays on `dev` and clean) and pushed. The same push carries a second, pre-existing commit from that worktree: the `class_docstring` triple-quoting fix in `codegen/emitters/python_common.py` + its test.
-- workspace: `docs/specs/pipelex-codegen.md` ("Two axes" + "Route envelopes"). **Still uncommitted** — needs its own commit.
+- `pipelex-api/`: `api/routes/pipelex/codegen.py`, `docs/codegen.md`, `CHANGELOG.md`, `docs/openapi/pipelex-api.openapi.yaml`, `pyproject.toml` + `uv.lock` (the git pin), `TODOS.md` — **PR #38, merged into `feature/Codegen` as `770956a`.** CI green on 3.11/3.12/3.13.
+- `pipelex/`: `pipelex/codegen/emitters/target.py` — pushed on **`feature/Stabilize`** as `27e6f3e` (worked in the `../_stable` worktree). That push also carries a second, pre-existing commit found uncommitted in the worktree and included with the user's approval: `e464c428` `fix(codegen): emit class docstrings as real triple-quoted strings` (`codegen/emitters/python_common.py` + its test) — `class_docstring` was returning a single-quoted literal from `escape_py_string` instead of a real triple-quoted docstring.
+- workspace: `docs/specs/pipelex-codegen.md` — pushed on **`feature/Follow-ups`** as `428c20f`.
 
-**Dependency pin (this is what unblocked CI).** `pipelex-api` pinned `pipelex = { path = "../pipelex", editable = true }`, which **cannot install on a GitHub runner** — there is no sibling checkout, so `make install` (`uv sync`) failed before a single test ran. Repinned to the pushed rev: `pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "27e6f3e5776e479259b951367809a1744a15670e" }` (`feature/Stabilize`), `uv.lock` regenerated. Verified locally with a real `uv sync` from git plus `make gha-tests` (CI's own target) — green. **Any further `pipelex` change Phases 2–4 need must be pushed to `feature/Stabilize` and the `rev` bumped here**, or `pipelex-api` CI will test against stale engine code. At release, this reverts to a plain `==<version>` PyPI pin.
+**The dependency pin was the load-bearing surprise of Phase 1.** `pipelex-api` CI had been failing at the install step on every run: the pin was a local editable path that cannot exist on a runner. Fixed by the git-rev pin. Full detail in "Working setup" above — read it before Phase 2.
 
 **Carried into Phase 2 (found while reading, saves a re-read).** `inputs_cmd.py::_default_main_pipe_ref` is the reference semantics for D1's optional `pipe_ref`: it collects `f"{domain_code}.{domain.main_pipe}"` over every domain in the crate that declares one, then errors on **zero** candidates *and* on **more than one** (ambiguous closure). The route must mirror both arms — the plan's D1 only names the zero case ("422 when omitted and the closure declares none"); **the ambiguous case needs a 422 too.** Pipe lookup itself is `get_required_pipe(pipe_code=<qualified ref>)`, raising `PipeLibraryError` on a bad ref (→ 422, a request-shape error, not an invalid-crate verdict).
 
 ## Phase 2 — server: `/build/inputs` + `/build/output` → files[] envelope + static core
+
+**START HERE. Current state, verified 2026-07-13** (so you don't have to re-derive it):
+
+- `api/routes/pipelex/build/` holds `inputs.py`, `output.py`, `runner.py`.
+- `inputs.py`: `BuildInputsRequest(MthdsContentsRequest)` → `BuildInputsValidReport`, on `@router.post("/build/inputs", response_model=BuildInputsResponse)` — **no `responses=` on the decorator yet** (it will need `501: PROBLEM_501_METHOD_REF` once it inherits the `method_ref` selector).
+- `output.py`: same shape — `BuildOutputRequest(MthdsContentsRequest)` → `BuildOutputValidReport`.
+- Both already ride the `200` + `is_valid` discriminated-union discipline; **Phase 2 changes the request envelope and the verdict semantics (static, no dry-run), not the union pattern.**
+- The two envelopes live in `api/schemas/models.py`: `MthdsFilesRequest` (line ~241, what `/resolve` + `/codegen` use) and `MthdsContentsRequest` (line ~273, what the build routes + `/validate` use today).
+- ⚠️ **`MthdsContentsRequest`'s own docstring goes stale in this phase.** It currently reads "Shared base for the build/validate routes … the build routes subclass it to add `pipe_code` (and `/build/output` a `format`)". After Phase 2+3 only `/validate` uses it — rewrite that docstring in the same change, or it becomes exactly the kind of drift Phase 1 existed to remove.
 
 - [ ] New request models: subclass `MthdsFilesRequest` adding `pipe_ref` (qualified, optional → `main_pipe`, per D1). Drop `allow_signatures`. Keep `MAX_PIPE_CODE_LEN`-style bounds on the ref. Note: `MthdsContentsRequest` stays — `/validate` still uses it (protocol-owned envelope, out of scope here).
 - [ ] `/build/inputs` request additionally gains `format` (`InputsTemplateFormat`, default json) and `explicit` (bool, default false) per D3 — mirror the CLI's allowed combos exactly.
