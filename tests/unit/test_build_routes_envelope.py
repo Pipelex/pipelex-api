@@ -135,13 +135,16 @@ class TestBuildRoutesEnvelope:
         assert "allow_signatures" not in response.json()
 
     @pytest.mark.parametrize("path", ["/v1/build/inputs", "/v1/build/output"])
-    def test_static_routes_accept_a_signature_bundle_unconditionally(self, path: str):
+    @pytest.mark.parametrize("pipe_ref", ["sig_api.caller_seq", "sig_api.summary_sig"], ids=["caller", "the-signature-itself"])
+    def test_static_routes_accept_a_signature_bundle_unconditionally(self, path: str, pipe_ref: str):
         # The corollary of dropping the sweep: an unimplemented `PipeSignature` is a *runnability*
         # fact, and these routes no longer speak runnability. So a signature bundle projects fine with
         # no flag to set — where `/validate` and `/build/runner` still surface it (see
         # test_allow_signatures.py, whose docstring points here for exactly this assertion).
+        # Both the caller *and* the signature pipe itself: a signature declares inputs/output, so it is
+        # statically projectable precisely because these routes read only the declaration.
         client = _build_client()
-        response = client.post(path, json={"files": [{"content": SIGNATURE_MTHDS}], "pipe_ref": "sig_api.caller_seq"})
+        response = client.post(path, json={"files": [{"content": SIGNATURE_MTHDS}], "pipe_ref": pipe_ref})
         assert response.status_code == 200, response.text
         assert response.json()["is_valid"] is True
 

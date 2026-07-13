@@ -96,7 +96,7 @@ def _reject_if_requested_pipe_skipped(sweep_result: dict[str, DryRunOutput], *, 
     422; unrelated SKIPPED pipes elsewhere in the bundle stay tolerated.
     """
     for output in sweep_result.values():
-        if pipe_ref not in (output.pipe_code, output.pipe_ref):
+        if pipe_ref != output.pipe_ref:
             continue
         match output.status:
             case DryRunStatus.SKIPPED:
