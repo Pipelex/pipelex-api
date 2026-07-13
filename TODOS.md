@@ -8,12 +8,12 @@ Status: **Phases 1–4 shipped. CHECKPOINT 3 (end-to-end) is DONE.** Only Phase 
 
 | Repo | Branch | State |
 | --- | --- | --- |
-| `pipelex-api` | **`feat/build-routes-files-envelope`** | Phases 2–3. Open as **PR #39 → `feature/Codegen`** (`00efee5`). Phase 1 already merged into `feature/Codegen` as PR #38 (`770956a`). |
-| `mthds-js` | `feature/Codegen` | **Phase 4 done, committed as `9e19d99`** (not pushed, no PR). |
-| `pipelex-sdk-js` | `feature/Support-new-endpoints` | **Phase 4 done, committed as `7226da2`** (not pushed, no PR). |
-| `pipelex-app` | `feature/Codegen` | **Phase 4 done, committed as `73d699c`** (not pushed, no PR). |
+| `pipelex-api` | **`feat/build-routes-files-envelope`** | Phases 1–5. Open as **PR #39 → `feature/Codegen`** (`5028e00`), pushed, **CI fully green + MERGEABLE**. Phase 1 already merged into `feature/Codegen` as PR #38 (`770956a`). |
+| `mthds-js` | `feature/Codegen` | **Phase 4 done, committed as `9e19d99`** (not pushed, no PR). Re-verified green. |
+| `pipelex-sdk-js` | `feature/Support-new-endpoints` | **Phase 4 done, committed as `7226da2`** (not pushed, no PR). Re-verified green. |
+| `pipelex-app` | `feature/Codegen` | **Phase 4 done, `73d699c` + `f13199c`** (not pushed, no PR). `f13199c` is the prettier fix — **`73d699c` alone fails `format:check`**; see the Phase 5 re-verification note. |
 
-⚠️ **Nothing in Phase 4 is pushed and no PR is open for the three JS repos.** Four commits across four repos are the deliverable; they need pushing + PRs against each repo's own base (see the note below — not `main`).
+⚠️ **Nothing in Phase 4 is pushed and no PR is open for the three JS repos.** That is the only work this plan still names. They need pushing + PRs against each repo's own base (see the note below — not `main`).
 
 ⚠️ **`pipelex-app` installs with `pnpm`, not `npm`.** `npm install` fails on an unrelated pre-existing peer-dep conflict (`@pipelex/mthds-ui` peer-wants `shiki@^3.22.0`; the root pins `^4.0.2`) and leaves a half-populated `node_modules` that makes `typecheck` report phantom "cannot find module" errors for `next-intl` etc. Use `pnpm install`. If `typecheck` reports errors inside `.next/dev/types/validator.ts`, that is a stale Next cache — `rm -rf .next`.
 
@@ -308,7 +308,19 @@ What was run, and how it is now pinned:
 - [x] `pipelex-api`: `make openapi-check` **clean** (artifact up to date — Phases 2–3 already regenerated it; Phase 4 touched no server code), `make agent-check` + `make agent-test` **green**. Per-consumer: `pipelex-sdk-js` `npm run check` + 134 unit + 24 e2e green; `pipelex-app` typecheck + lint + format + 1011 tests green; `mthds-js` was green at `9e19d99` and Phase 4 did not reopen it.
 - [x] `make check-spec-links` in `conformance/`: **OK.** (Phase 4 changed no spec text — the spec edits rode Phases 2–3, where the routes they describe actually changed.)
 
-**Phase 5 is done. The plan is complete**, modulo the follow-ups below and the push/PR step: **none of the four Phase-4 commits are pushed** (`pipelex-api` `feat/build-routes-files-envelope` → PR #39 is open; `mthds-js` `9e19d99`, `pipelex-sdk-js` `7226da2`, `pipelex-app` `73d699c` are local-only).
+### Phase 5 re-verification (2026-07-13, second pass) — one box above was WRONG
+
+Re-running every check from scratch rather than trusting the boxes turned up one false claim and two red herrings.
+
+**`pipelex-app` was NOT green — `format:check` failed on a clean tree at `73d699c`.** The box above says "typecheck + lint + format + 1011 tests green"; the format half was never true. Prettier wants `_emphasis_` where the commit wrote `*emphasis*`, in the two markdown files it touched (`CHANGELOG.md`, `docs/method-deploy.md`). Confirmed as *introduced by that commit* — the parent's (`a5b9f5c`) versions of both files pass. Fixed in **`f13199c`**; `pipelex-app` now genuinely passes typecheck + lint + format + tests. Content is unchanged (prose only, no rewrapping — `proseWrap` defaults to `preserve`, so this does not collide with the workspace's don't-hard-wrap-markdown rule).
+
+**Lesson worth keeping: verify the exit code, not the log tail.** The first re-run reported "exit 0" because the command ended in `; echo "exit=$?"` — the shell reports *echo's* status, which is always 0. A suite can fail while the wrapper says success. Assert on the real exit code (`exit $code`).
+
+**PR #39's red CI was a GitHub infra flake, not our code.** Lint (3.12/3.13/all) and CLAAssistant all failed inside `Set up job` with `Internal Server Error occurred while resolving "actions/checkout@v4"` / `Unable to resolve action ... unable to find version v1` — GitHub's action registry 500ing. The lint step never ran. Re-ran the failed jobs; **PR #39 is now fully green and MERGEABLE** (doc-check, Lint 3.11/3.12/3.13/all, Tests 3.11/3.12/3.13, CLAAssistant).
+
+**The two open cubic findings on `.claude/skills/postman-bundle/` were already fixed — they are stale, not open.** Both were raised against `63441a0` and closed by `00efee5`/`5028e00`: `--inputs-format` + `--explicit` are exposed in argparse and threaded into `build_build_body`; and a user-supplied `--pipe` now passes through **unqualified** (only `main_pipe`, which is guaranteed to live in the main file's domain, gets qualified with it). They are simply unreplied-to on the PR.
+
+**Phase 5 is done. The plan is complete**, modulo the follow-ups below and the push/PR step: **none of the three JS Phase-4 commits are pushed** (`pipelex-api` `feat/build-routes-files-envelope` → PR #39 is open and green; `mthds-js` `9e19d99`, `pipelex-sdk-js` `7226da2`, `pipelex-app` `73d699c`+`f13199c` are local-only). All three are verified green locally at those commits.
 
 ## Out of scope / follow-ups (deliberately not in this plan)
 
