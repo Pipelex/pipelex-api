@@ -84,6 +84,7 @@ CRATE_ENDPOINTS = {"resolve", "codegen"}
 
 CODEGEN_TARGETS = ["ts-zod", "python-pydantic", "python-structures"]
 OUTPUT_FORMATS = ["schema", "json", "python"]
+INPUTS_FORMATS = ["json", "toml"]
 
 
 def fail(msg: str) -> NoReturn:
@@ -345,6 +346,8 @@ def build_build_body(
     pipe_ref: str | None,
     allow_signatures: bool | None = None,
     output_format: str | None = None,
+    inputs_format: str | None = None,
+    explicit: bool | None = None,
 ) -> str:
     """Body for /build/{inputs,output,runner} — the SAME ``files[]`` closure envelope as
     /resolve and /codegen, plus a pipe selector.
@@ -354,9 +357,13 @@ def build_build_body(
     generated query is unambiguous and stays correct if the bundle later declares
     several main_pipes.
 
-    Each route projects one artifact for that pipe — an inputs template, an output
-    representation (``format``: schema | json | python, /build/output only), or a
-    runner script. No ``inputs`` on the wire — nothing runs.
+    Each route projects one artifact for that pipe — an inputs template (``format``:
+    json | toml, plus ``explicit``; /build/inputs only), an output representation
+    (``format``: schema | json | python; /build/output only), or a runner script. No
+    ``inputs`` on the wire — nothing runs.
+
+    ``format`` is a per-route axis with a different vocabulary on each, so the two are
+    threaded separately (``inputs_format`` vs ``output_format``) and only ever one is set.
 
     ``allow_signatures`` is sent only for /build/runner: it parameterizes the dry-run
     sweep, and the static /build/{inputs,output} projections dropped that sweep.
@@ -368,6 +375,10 @@ def build_build_body(
         body["allow_signatures"] = allow_signatures
     if output_format:
         body["format"] = output_format
+    if inputs_format:
+        body["format"] = inputs_format
+    if explicit is not None:
+        body["explicit"] = explicit
     body["files"] = [{"content": content, "source": source} for content, source in zip(mthds_contents, mthds_sources)]
     return json.dumps(body, indent=2, ensure_ascii=False)
 
@@ -514,7 +525,11 @@ def main() -> None:
     parser.add_argument(
         "--allow-signatures",
         action="store_true",
-        help="(validate + build routes) Tolerate unimplemented pipe signatures instead of rejecting the bundle. Default: strict.",
+        help=(
+            "(validate + build-runner) Tolerate unimplemented pipe signatures instead of rejecting the bundle. "
+            "Parameterizes the dry-run sweep, so the static build-inputs/build-output projections do not take it. "
+            "Default: strict."
+        ),
     )
     parser.add_argument(
         "--target",
@@ -529,7 +544,24 @@ def main() -> None:
         "--output-format",
         choices=OUTPUT_FORMATS,
         default="schema",
-        help="(build-output only) Output representation format (default: schema).",
+        help="(build-output only) Output representation format (default: schema). `python` returns source text in `output_python`.",
+    )
+    parser.add_argument(
+        "--inputs-format",
+        choices=INPUTS_FORMATS,
+        default="json",
+        help=(
+            "(build-inputs only) Inputs template encoding (default: json). `json` returns a parsed object in `inputs`; "
+            "`toml` returns raw text in `inputs_toml`, carrying the per-key `# concept:` comments JSON cannot."
+        ),
+    )
+    parser.add_argument(
+        "--explicit",
+        action="store_true",
+        help=(
+            "(build-inputs only) Emit the ceremonial {concept, content} envelope for every input instead of the "
+            "default light shape (a bare string for a Text input, and so on)."
+        ),
     )
     parser.add_argument(
         "--render",
@@ -662,12 +694,27 @@ def main() -> None:
         bodies["resolve"] = build_crate_body(mthds_contents, mthds_sources)
     if "codegen" in active_keys:
         bodies["codegen"] = build_crate_body(mthds_contents, mthds_sources, codegen_kind="types", codegen_target=args.target)
-    # The build routes take the QUALIFIED pipe ref (`domain.pipe_code`). A bundle that declares no
-    # domain leaves it unqualified — still accepted by the engine's pipe lookup, which matches a bare
-    # code too, and `--pipe` may already carry a qualified ref.
-    pipe_ref = pipe_code if (not domain or not pipe_code or "." in pipe_code) else f"{domain}.{pipe_code}"
+    # The build routes take the QUALIFIED pipe ref (`domain.pipe_code`).
+    #
+    # Only `main_pipe` is guaranteed to live in the MAIN file's domain, so only it may be qualified
+    # with that domain. A `--pipe` override is passed through verbatim: in a multi-file closure the
+    # user may well be naming a pipe in a sibling domain, and stapling the main file's domain onto it
+    # would silently select the wrong pipe (or 422 on a ref that doesn't exist). A bare `--pipe` still
+    # resolves — the engine's lookup matches a bare code too — and the user can always qualify it.
+    if args.pipe:
+        pipe_ref = args.pipe
+    elif domain and main_pipe:
+        pipe_ref = f"{domain}.{main_pipe}"
+    else:
+        pipe_ref = main_pipe
     if "build-inputs" in active_keys:
-        bodies["build_inputs"] = build_build_body(mthds_contents, mthds_sources, pipe_ref=pipe_ref)
+        bodies["build_inputs"] = build_build_body(
+            mthds_contents,
+            mthds_sources,
+            pipe_ref=pipe_ref,
+            inputs_format=args.inputs_format,
+            explicit=args.explicit or None,
+        )
     if "build-output" in active_keys:
         bodies["build_output"] = build_build_body(mthds_contents, mthds_sources, pipe_ref=pipe_ref, output_format=args.output_format)
     if "build-runner" in active_keys:

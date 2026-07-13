@@ -111,7 +111,7 @@ class RequestedPipe(NamedTuple):
     """The pipe a per-pipe projection was asked for: its resolved qualified ref and the live pipe."""
 
     ref: str
-    """The qualified `domain.pipe_code` actually projected — the request's `pipe_ref`, or the defaulted `main_pipe`."""
+    """The qualified `domain.pipe_code` actually projected — always qualified, whatever the request spelled."""
 
     pipe: PipeAbstract
     """The live pipe, read from the library `resolve_requested_crate` left loaded + current."""
@@ -126,14 +126,20 @@ def resolve_requested_pipe(crate: LibraryCrate, *, pipe_ref: str | None) -> Requ
     request-shape 422s, as is an unknown ref: nothing about the *closure* is wrong in any of them, so
     none of them is an invalid-crate verdict.
 
+    The returned `ref` is read back off the **resolved pipe**, never echoed from the request: the
+    engine's lookup accepts a bare code too (falling back across domains), so a caller that submits
+    `"echo"` must still be told `"smoke.echo"` — the valid arms promise a qualified ref, and echoing
+    the request back would quietly break that promise for exactly the callers who leaned on the
+    fallback.
+
     Must be called while the library `resolve_requested_crate` opened is still loaded + current.
     """
-    resolved_ref = pipe_ref or _default_main_pipe_ref(crate)
+    selector = pipe_ref or _default_main_pipe_ref(crate)
     try:
-        the_pipe = get_required_pipe(pipe_code=resolved_ref)
+        the_pipe = get_required_pipe(pipe_code=selector)
     except PipeLibraryError as exc:
-        raise_validation_error(f"Pipe '{resolved_ref}' not found in the submitted closure: {exc}")
-    return RequestedPipe(ref=resolved_ref, pipe=the_pipe)
+        raise_validation_error(f"Pipe '{selector}' not found in the submitted closure: {exc}")
+    return RequestedPipe(ref=the_pipe.pipe_ref, pipe=the_pipe)
 
 
 def _default_main_pipe_ref(crate: LibraryCrate) -> str:

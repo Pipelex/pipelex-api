@@ -106,12 +106,20 @@ def _reject_if_requested_pipe_skipped(sweep_result: dict[str, DryRunOutput], *, 
                 return
 
 
-def _output_is_list(blueprints: list[PipelexBundleBlueprint], *, pipe_code: str) -> bool:
-    """Whether the requested pipe's declared output carries a list multiplicity marker (mirrors the CLI)."""
+def _output_is_list(blueprints: list[PipelexBundleBlueprint], *, pipe_ref: str) -> bool:
+    """Whether the requested pipe's declared output carries a list multiplicity marker (mirrors the CLI).
+
+    Matched on the **qualified** ref. A blueprint's `pipe` map is keyed by bare code, so scanning by
+    bare code alone would return the first blueprint declaring that code — which in a multi-domain
+    closure can be a *different* pipe that merely shares the name, and whose multiplicity may differ.
+    The runner would then be generated with the wrong output handling. Compare the owning domain too.
+    """
+    domain_code, _, pipe_code = pipe_ref.rpartition(".")
     for blueprint in blueprints:
-        if blueprint.pipe and pipe_code in blueprint.pipe:
-            output_parse = parse_concept_with_multiplicity(blueprint.pipe[pipe_code].output)
-            return output_parse.multiplicity is not None
+        if blueprint.domain != domain_code or not blueprint.pipe or pipe_code not in blueprint.pipe:
+            continue
+        output_parse = parse_concept_with_multiplicity(blueprint.pipe[pipe_code].output)
+        return output_parse.multiplicity is not None
     return False
 
 
@@ -193,8 +201,7 @@ async def build_runner(request_data: BuildRunnerRequest) -> JSONResponse:
 
         python_code = generate_runner_code(
             pipe=requested_pipe.pipe,
-            # Keyed by the BARE code: blueprint.pipe is a per-bundle map of bare codes, not qualified refs.
-            output_multiplicity=_output_is_list(validate_result.blueprints, pipe_code=requested_pipe.pipe.code),
+            output_multiplicity=_output_is_list(validate_result.blueprints, pipe_ref=requested_pipe.ref),
             class_name_overrides=class_name_overrides,
         )
 

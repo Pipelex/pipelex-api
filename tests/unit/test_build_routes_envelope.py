@@ -16,10 +16,12 @@ from pytest_mock import MockerFixture
 from api.exception_handlers import register_exception_handlers
 from api.routes import router as api_router
 from tests.unit._constants import (
+    COLLIDING_ECHO_LIST_MTHDS,
     INVALID_MAIN_PIPE_MTHDS,
     NO_INPUTS_MTHDS,
     NO_MAIN_PIPE_MTHDS,
     SECOND_MAIN_PIPE_MTHDS,
+    SIGNATURE_MTHDS,
     VALID_MTHDS,
 )
 
@@ -123,14 +125,38 @@ class TestBuildRoutesEnvelope:
         assert "bundles/broken.mthds" in sources, f"no diagnostic carried the submitted source: {body['validation_errors']}"
 
     @pytest.mark.parametrize("path", ["/v1/build/inputs", "/v1/build/output"])
-    def test_static_routes_reject_allow_signatures(self, path: str):
+    def test_static_routes_ignore_allow_signatures(self, path: str):
         # `allow_signatures` only ever parameterized the dry-run sweep. The static projections dropped
-        # the sweep, so the flag is gone — and `MthdsFilesRequest` forbids nothing implicitly, so this
-        # pins that it is genuinely absent rather than silently ignored.
+        # the sweep, so the flag is gone from their request models — and since the envelope does not
+        # forbid extras, a client still sending it is simply ignored rather than rejected.
         client = _build_client()
         response = client.post(path, json={"files": [{"content": VALID_MTHDS}], "allow_signatures": True})
         assert response.status_code == 200, response.text
         assert "allow_signatures" not in response.json()
+
+    @pytest.mark.parametrize("path", ["/v1/build/inputs", "/v1/build/output"])
+    def test_static_routes_accept_a_signature_bundle_unconditionally(self, path: str):
+        # The corollary of dropping the sweep: an unimplemented `PipeSignature` is a *runnability*
+        # fact, and these routes no longer speak runnability. So a signature bundle projects fine with
+        # no flag to set — where `/validate` and `/build/runner` still surface it (see
+        # test_allow_signatures.py, whose docstring points here for exactly this assertion).
+        client = _build_client()
+        response = client.post(path, json={"files": [{"content": SIGNATURE_MTHDS}], "pipe_ref": "sig_api.caller_seq"})
+        assert response.status_code == 200, response.text
+        assert response.json()["is_valid"] is True
+
+    @pytest.mark.parametrize("path", BUILD_PATHS)
+    def test_a_bare_pipe_code_still_resolves_but_is_echoed_qualified(self, path: str):
+        # The engine's pipe lookup accepts a bare code, falling back across domains. A caller who leans
+        # on that must still be told the QUALIFIED ref — the valid arms promise one, so echoing the
+        # request's own bare spelling back would quietly break that promise. The resolved ref is read
+        # off the live pipe, never off the request.
+        client = _build_client()
+        response = client.post(path, json={"files": [{"content": VALID_MTHDS}], "pipe_ref": "echo"})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["pipe_ref"] == "smoke.echo", "the resolved ref must be qualified, not the bare code the caller sent"
+        assert body["requested_pipe_ref"] == "echo", "the echo of the request must stay verbatim"
 
     @pytest.mark.parametrize("path", BUILD_PATHS)
     def test_empty_files_rejected(self, path: str):
@@ -222,6 +248,29 @@ class TestBuildRoutesEnvelope:
         else:
             assert isinstance(body["output_python"], str)
             assert "output" not in body
+
+    @pytest.mark.parametrize(
+        ("pipe_ref", "expects_list"),
+        [("smoke.echo", False), ("twin.echo", True)],
+        ids=["scalar-output", "list-output"],
+    )
+    def test_runner_reads_output_multiplicity_from_the_right_domain(self, pipe_ref: str, expects_list: bool):
+        # Two domains declare a pipe with the same BARE code `echo`, with OPPOSITE output multiplicity.
+        # The runner reads the requested pipe's multiplicity out of the blueprints, whose `pipe` maps are
+        # keyed by bare code — so a bare-code scan returns whichever blueprint came first and can emit a
+        # runner with the wrong output handling. The lookup must compare the owning domain too.
+        client = _build_client()
+        response = client.post(
+            "/v1/build/runner",
+            json={"files": [{"content": VALID_MTHDS}, {"content": COLLIDING_ECHO_LIST_MTHDS}], "pipe_ref": pipe_ref},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["pipe_ref"] == pipe_ref
+        # The multiplicity decides the script's result cast: `main_stuff_as_items(item_type=...)` for a
+        # list output vs `main_stuff_as(content_type=...)` for a scalar one.
+        python_code = body["python_code"]
+        assert ("main_stuff_as_items(" in python_code) is expects_list, f"wrong output multiplicity for {pipe_ref}:\n{python_code}"
 
     def test_runner_still_sweeps_and_still_takes_allow_signatures(self, mocker: MockerFixture):
         # `/build/runner` is the one projection that keeps the dry-run (a runner script is a promise the

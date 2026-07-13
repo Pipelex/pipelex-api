@@ -12,7 +12,7 @@ All three take the same **closure selector** as [`POST /v1/resolve` and `POST /v
 - `method_ref` (string): a reference to an installed/published method. Accepted by the envelope, but this server answers `501` until server-side method-registry resolution exists.
 - `pipe_ref` (string, **optional**): the qualified pipe ref `domain.pipe_code` to project — the same selector as `pipelex codegen inputs --pipe`. Omitted, it defaults to the closure's declared `main_pipe`. A closure that declares **no** `main_pipe`, or **several** across domains, cannot be defaulted: an omitted `pipe_ref` is a `422` there.
 
-Every valid arm echoes both `pipe_ref` (the ref actually projected, always qualified) and `requested_pipe_ref` (the ref as submitted — **absent** when it was omitted and defaulted), so a caller can always see which pipe it got.
+Every valid arm echoes both `pipe_ref` (the ref actually projected) and `requested_pipe_ref` (the ref as submitted — **absent** when it was omitted and defaulted), so a caller can always see which pipe it got. The echoed `pipe_ref` is **always qualified**, read back off the resolved pipe: a bare code still resolves (the engine's lookup falls back across domains), but you are told `smoke.echo`, not the `echo` you sent.
 
 ## Static projections vs. the runner
 

@@ -74,6 +74,21 @@ output = "Text"
 prompt = "Say hello"
 """
 
+# A pipe whose BARE code collides with VALID_MTHDS's `echo`, in a different domain, and whose output
+# carries the opposite multiplicity (a list). Submitted alongside VALID_MTHDS it catches any lookup
+# that matches a pipe by bare code alone: `/build/runner` reads the requested pipe's output
+# multiplicity out of the blueprints, and a bare-code scan would return whichever `echo` came first.
+COLLIDING_ECHO_LIST_MTHDS = """\
+domain = "twin"
+
+[pipe.echo]
+type = "PipeLLM"
+description = "Echo, but many"
+inputs = { text = "Text" }
+output = "Text[]"
+prompt = "@text"
+"""
+
 # An invalid `main_pipe` deterministically fails blueprint validation, producing a categorized
 # BLUEPRINT_VALIDATION error that carries the blueprint's `source` — the cheapest way to exercise
 # the structured `validation_errors` 422 and its `source` threading. (Mirrors the pipelex
