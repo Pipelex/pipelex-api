@@ -1,113 +1,101 @@
-# Endpoint documentation overhaul — implementation plan
+# Plan: unify the codegen/build underpinnings (without merging the routes)
 
-Goal: bring the endpoint documentation (committed OpenAPI artifact, route docstrings, docs site) to high quality and fully up to date, including the new surface coming from the pipelex codegen branch (`suggested_fix` on validation errors).
+Status: **not started**. This plan replaces the previous TODOS.md. It spans `pipelex-api/` (main), `pipelex/` (engine hygiene), the workspace spec (`Pipelex/docs/specs/pipelex-codegen.md`), and three JS consumers. No backward compatibility is owed anywhere — breaking wire changes are fine, noted in changelogs.
 
-## Cold-start context
+## Background — read this first on a cold start
 
-- **Repo:** `pipelex-api` (open-source FastAPI runner), branch `feature/Codegen`.
-- **Pipelex pin:** `pyproject.toml` declares `pipelex==0.38.0` but `[tool.uv.sources]` overrides it to an **editable local worktree**: `pipelex = { path = "../_codegen", editable = true }`. That worktree is the pipelex repo on branch `feature/Devex-codegen`. This is intentional dev wiring for the codegen feature; the committed OpenAPI artifact must be regenerated against it so the artifact reflects what this branch's server actually serves. (Before release, the pin moves to a released pipelex — that's the release process, out of scope here.)
-- **What the codegen pipelex adds to the API surface:** `ValidationErrorItem` (in `../_codegen/pipelex/base_exceptions.py`) gained an optional `suggested_fix: SuggestedFix` field. `SuggestedFix` / `FixOp` / `FixOpKind` / `FixSafety` live in `../_codegen/pipelex/suggested_fix.py` — structured, deterministic fixes (semantic TOML patch ops: `set_key`, `ensure_table`, `delete_key`, `delete_table`, `rename_table_key`; `safety: safe|unsafe`; `fix_code` kebab-case rule id; `ops[]` addressed by `table_path`). These flow into every place `validation_errors[]` appears: the `/validate` (and `/build/*`, `/resolve`, `/codegen`) invalid-verdict 200 bodies and the RFC 7807 problem documents.
-- **Key commands:** `make openapi-export` (regenerate `docs/openapi/pipelex-api.openapi.yaml`), `make openapi-check` (drift gate), `make agent-check` (lint+types, silent on success), `make agent-test` (unit tests, silent on success).
-- **Key files:** routes under `api/routes/` (see `CLAUDE.md` project structure); global error handlers `api/exception_handlers.py`; problem-document builder `api/problem_document.py`; API-authored error helpers `api/errors.py`; wire-contract doc `docs/error-responses.md`; docs-site endpoint catalog `docs/index.md`; committed contract `docs/openapi/pipelex-api.openapi.yaml`.
+The question that triggered this plan: *should `POST /v1/codegen` and `POST /v1/build/inputs` be united into one route?* The answer is **no — but they must share more of their underpinnings than they do today.** The full reasoning:
 
-## Audit findings driving this plan (2026-07-11)
+**The dividing line is tracked-artifact vs editable scaffold, not codegen vs build.** The engine draws it explicitly in `pipelex/pipelex/codegen/emission.py` (module docstring): "Input templates (`codegen inputs`) are deliberately *not* stamped or locked: they are user-editable scaffolds, not tracked generated code." `/codegen`'s whole contract is the stamp/lock/offline-check trust chain (`CodegenValidReport.lock` is required; the docstring promises byte-identical materialization and a passing offline `codegen check`). An `inputs` kind cannot honor that, and the axes don't align either: `target` (ts-zod / python-pydantic / python-structures) is meaningless for inputs, while inputs' own axes (json/toml format, `--explicit`) are meaningless for types. Merging would fork the request and response contracts per kind — unification in name only.
 
-1. **Stale artifact:** `make openapi-check` fails — regenerating adds `FixOp`/`FixOpKind`/`FixSafety` component schemas (from the editable pipelex) missing from the committed YAML.
-2. **Error contract misdocumented:** every error is actually rendered as RFC 7807 `application/problem+json` (global handlers — including FastAPI `RequestValidationError`), but the OpenAPI publishes FastAPI's default `HTTPValidationError` (`application/json`) 422 on nearly every route. Only `/v1/lint` and `/v1/format` opted into the correct shape via `PROBLEM_422_RESPONSE` (`api/routes/pipelex/tools.py:15`), and even that one is an untyped `additionalProperties: true` object.
-3. **`/v1/execute` and `/v1/start` document no failure responses at all** (raw-`Request` body parsing means FastAPI doesn't even auto-add a 422). No route documents 401/403/409/413/429/500/501 despite `docs/error-responses.md` specifying exactly when each occurs.
-4. **`docs/index.md` endpoint catalog is missing `/v1/resolve` and `/v1/codegen`** (this branch's own additions — `docs/codegen.md` exists but nothing on the index links it). `GET /` isn't mentioned anywhere.
-5. **`/health` and `GET /` have no docstrings** → auto-generated stubs in the artifact ("Get Health", `Response Get Health Health Get`).
-6. **Internal jargon in the published artifact:** `/v1/build/runner` description says "riding the codegen types projection (D9)" — internal plan-phase code (`api/routes/pipelex/build/runner.py:102`).
-7. **Docs gaps vs the new pipelex:** `docs/error-responses.md` "Structured validation errors" table lacks `suggested_fix` (and pre-existing gap: `missing_pipe_code`). `suggested_fix` appears nowhere in `docs/`.
-8. **`docs/index.md` misstates the auth requirement on `/v1/upload` + `/v1/resolve-storage-url`.** It says they "require `AUTH_MODE=api_key` or `AUTH_MODE=jwt`". Actually both handlers require an **established user identity** (`request.state.user`, checked at `api/routes/uploader.py:82` / `api/routes/storage.py:139`): (a) `AUTH_MODE=api_key` does NOT work — `verify_api_key` never sets an identity (shared key, by design per its docstring), so these routes 401 even with a valid key; (b) `AUTH_MODE=none` + `TRUST_FORWARDED_IDENTITY_HEADERS=true` + proxy-forwarded `X-User-Id` DOES work (the hosted configuration). **Remedy decided (2026-07-11): the uploader pair is a temporary feature — do not invest in documenting it. Leave existing docstrings and docs prose exactly as they are (including the "NON-CONTRACT" paragraphs); add nothing new (no per-route error responses, no temporary-framing). Sole exception: the one factually wrong `AUTH_MODE=api_key` sentence in `docs/index.md` gets a minimal one-sentence correction.**
+**The durable route-membership rule** (this is the principle every change below serves): *a projection that rides the stamp/lock trust chain lives on `/codegen` (per-pipe kinds select via the already-reserved `pipe_ref` field); an editable scaffold lives on `/build`.* Future per-pipe kinds from the spec (`docs`, `tools`, `tests`) will be stamped generated code → they land on `/codegen`. Inputs stays on `/build` for a reason that won't age.
 
----
+**Drift discovered while answering the question** (these are the things to fix):
 
-## Phase 1 — Typed problem-document contract in OpenAPI ✅ DONE
+1. **Stated rationale is incidental, not principled.** `CodegenRouteKind`'s docstring (`api/routes/pipelex/codegen.py`) justifies the split as "mirroring the agent CLI's deliberate absence of a `codegen inputs` mirror" — which wobbles the moment you notice the *bare* CLI **does** have `pipelex codegen inputs` (`pipelex/pipelex/cli/commands/codegen/inputs_cmd.py`). Replace with the trust-chain rule.
+2. **Engine docstring contradiction.** `CodegenKind`'s docstring (`pipelex/pipelex/codegen/emitters/target.py`) claims "Only the kinds that emit tracked artifacts today are listed: `types` … and `inputs`", directly contradicting `emission.py`'s "inputs deliberately not stamped or locked". `emission.py` is authoritative — the CLI writes inputs via plain `save_text_to_path`, bypassing the stamping layer entirely.
+3. **Request-envelope drift.** `/resolve` and `/codegen` ride `MthdsFilesRequest` (`files[]` with per-file `source` labels XOR `method_ref`, 501 until the method registry lands) — `api/schemas/models.py`. The `/build/*` routes still ride the older `MthdsContentsRequest` (bare `mthds_contents` strings + `allow_signatures`). Consequences: build diagnostics can't carry a `source`, and when `method_ref` resolution lands, `/build/*` needs a second breaking migration.
+4. **Verdict-vocabulary divergence.** The bare CLI's `pipelex codegen inputs` is **static** (crate loader, no dry-run), while `/build/inputs` and `/build/output` **dry-run** the requested pipe via `validate_bundle(dry_run_pipe_codes=[...])`. Same projection, two verdict semantics. The engine treats template rendering as a static read of declared inputs; runnability is `/validate`'s vocabulary. `/build/runner` is different: it genuinely needs the dry-run (a pipe recorded SKIPPED by the sweep → honest 422, per spec).
 
-The core fix: make the published error responses match the RFC 7807 reality, with real schemas.
+**Key plumbing fact enabling the fix:** `resolve_requested_crate()` in `api/routes/pipelex/crate_ops.py` inherits the engine's loaded-on-success contract — on success the library is loaded + current so a route can read live pipes from it (its docstring literally names "input templates" as the use case), and the route owns teardown via `teardown_current_library()`. So `/build/inputs` and `/build/output` can become thin per-pipe reads over the *same* core `/codegen` uses: shared closure selector, shared static resolution, shared `CrateInvalidReport` invalid arm — two presentations of one engine. That is the real unification.
 
-- [x] Created `api/openapi_responses.py`: the documentation-only `ProblemDocument` Pydantic model + the shared response dicts. Pipelex exports **no** reusable problem-document model (only `ErrorReport`, whose `to_problem_document()` returns a plain `dict`), so the model is hand-written here — but its `validation_errors` field reuses pipelex's own `ValidationErrorItem`, and `user_action` / `provider_metadata` reuse `UserAction` / `ProviderErrorMetadata`, so the published schema cannot drift from the wire.
-- [x] Shared response dicts: `PROBLEM_400_START_REQUIRES_ASYNC`, `PROBLEM_401` (documents `WWW-Authenticate`), `PROBLEM_403_ORCHESTRATION_MODE`, `PROBLEM_409_DUPLICATE_RUN`, `PROBLEM_413`, `PROBLEM_422`, `PROBLEM_429` (documents `Retry-After`), `PROBLEM_500`, `PROBLEM_501_ASYNC_NOT_ENABLED`, `PROBLEM_501_METHOD_REF`.
-- [x] Deleted the local `PROBLEM_422_RESPONSE` in `api/routes/pipelex/tools.py`; `/lint` + `/format` now inherit the shared typed 422.
-- [x] Applied per route. `HTTPValidationError` is gone from the artifact entirely (not even a component).
-- [x] Unit coverage: `tests/unit/test_openapi_contract.py`.
-- [x] `make agent-check` && `make agent-test` && `make openapi-check` all green.
+**Consumers of `/build/inputs` today** (all post `{mthds_contents, pipe_code}`):
 
-**Decisions taken in Phase 1:**
+- `mthds-js/src/runners/api/client.ts` — `buildInputs()` (posts to `build/inputs`)
+- `pipelex-sdk-js/src/client.ts` — `buildInputs()` (same shape)
+- `pipelex-app/src/actions/build-inputs.ts` — `buildInputsTemplate()` server action → `src/components/deploy/deploy-dialog.tsx` (+ its `__tests__`), `src/lib/deploy-snippets.ts`
+- `pipelex-api/.claude/skills/postman-bundle/` — request templates for the build routes
+- `n8n-nodes-pipelex/` — checked: does **not** call `build/inputs`
 
-1. **Router-level `responses=` works.** `APIRouter(responses=COMMON_PROBLEM_RESPONSES)` on the composite router in `api/routes/__init__.py` merges into every composed operation (FastAPI folds the including router's `responses` into each route's own, route-level entries winning on a status collision). Declaring a `422` there **does** suppress FastAPI's auto-`HTTPValidationError` (the guard is `fastapi/openapi/utils.py:456`). Shared set: **401, 413, 422, 500** — 413 is included because the body-size middleware wraps every route, not just the ones with a declared body.
-2. **The media type needed an app-class override.** FastAPI renders a `responses` entry's `model` under the *route's* response-class media type (`application/json`) and offers **no** per-response override (`route_response_media_type`, `fastapi/openapi/utils.py:436`). Hand-writing `content: {application/problem+json: ...}` would have meant hand-writing a `$ref` too and forfeiting component registration for `ProblemDocument`. So: **`api/openapi_schema.py`** holds `PipelexFastAPI(FastAPI)`, which overrides `openapi()` to re-key every 4xx/5xx response onto `application/problem+json` after generation (FastAPI's documented "Extending OpenAPI" seam). It lives in its own **import-side-effect-free** module — same rationale `api/exception_handlers.py` documents — so tests can build a production-faithful app without `api.main`'s startup chain. `api/main.py` now instantiates `PipelexFastAPI` instead of `FastAPI`. (A monkeypatched `app.openapi = fn` was rejected: mypy's `method-assign`, and it would have needed a `type: ignore`.)
-3. **`responses=` and `openapi_extra` compose** on `/execute` + `/start` — confirmed in the regenerated artifact. They touch different members of the operation object.
-4. **`/execute` gets NO 409.** Answering the plan's open question: unlike `/start`, `/execute` accepts no client-supplied `pipeline_run_id` (pipelex's base `execute` doesn't take the arg — it generates the id per call), so a caller cannot collide with an in-flight run. `/execute` gets 403 + 429 only; it is also the *only* route that runs inference, hence the only one that can be rate-limited upstream.
-5. **`/start` gets a 400 the plan didn't list.** The code raises `StartRequiresAsyncOrchestration` (400) when the resolved orchestrator is blocking-only — the reachable failure on the `direct` base. The 501 `AsyncExecutionNotEnabledError` is still documented (it *is* raised, by the `pipelex-temporal` plugin). Final set for `/start`: **400, 403, 409, 501**. Note `docs/error-responses.md` currently documents only the 501 and names a stale `/pipeline/start` path — fixed in Phase 3.
-6. **Uploader pair untouched**, per finding 8: they inherit the router-level 401/413/422/500 and get no per-route documentation.
+**Reference implementations to mirror:** `pipelex/pipelex/cli/commands/codegen/inputs_cmd.py` (per-pipe selection over a loaded crate: qualified `--pipe` ref, defaults to the closure's `main_pipe`) and `api/routes/pipelex/codegen.py` (the `resolve_requested_crate` → work → `teardown_current_library()` in `finally` pattern).
 
-**Final status matrix (verified in the artifact):**
+**Spec anchor:** `Pipelex/docs/specs/pipelex-codegen.md` — sections "Two axes", the HTTP request-envelope paragraph, and the paragraph describing the `/v1/build/*` migration onto the verdict discipline. Spec edits ride the same phase as the code they describe; run `make check-spec-links` in `conformance/` after spec edits.
 
-| Route | Documented failures |
-|---|---|
-| every auth-wrapped `/v1` route | 401, 413, 422, 500 |
-| `POST /v1/execute` | + 403, 429 |
-| `POST /v1/start` | + 400, 403, 409, 501 |
-| `POST /v1/validate` | + 403 |
-| `POST /v1/resolve`, `POST /v1/codegen` | + 501 |
-| `GET /v1/version` (public, outside the composite router) | 500 only — never 401 |
-| `GET /health`, `GET /` | none (cannot fail) |
+## Decisions
 
-## Phase 2 — Route docstring / description polish ✅ DONE
+All decisions are taken (conversation of 2026-07-13). None remain pending.
 
-- [x] `api/routes/health.py`: `HealthResponse` model + summary + docstring (liveness probe, no auth, touches no dependency).
-- [x] `api/main.py` `GET /`: `ServiceIdentity` model + summary + docstring, tagged `health`.
-- [x] `api/routes/pipelex/build/runner.py`: dropped "(D9)".
-- [x] Swept the published surfaces. **Field descriptions and model docstrings land in the artifact too, not just route docstrings** — so the fixes were: `/start` route docstring ("protocol D11" → prose), `build/inputs` + `build/output` route docstrings ("the D6 loaded-on-success contract" → "the loaded-on-success contract"), and the two `rendered_markdown` **Field descriptions** in `validate.py` ("(D-D)"). Internal comments, private-helper docstrings (`_decode_body`'s `wip/` reference), the non-schema `RenderFormat` enum docstring, and `api_config.py` all stay as-is — none of them are published.
-- [x] Regenerated; `make openapi-check` green.
+- **Do not merge** `/codegen` and `/build/inputs`. Adopt the trust-chain rule as the stated route-membership criterion.
+- **Migrate `/build/*` onto the `MthdsFilesRequest` selector** (`files[]` XOR `method_ref`), breaking the wire shape.
+- **Make `/build/inputs` and `/build/output` static** (ride `resolve_requested_crate`, drop the dry-run). `/build/runner` keeps its dry-run (SKIPPED detection is load-bearing).
+- `allow_signatures` disappears from `/build/inputs` and `/build/output` (it only parameterized the dry-run sweep). `/build/runner` keeps it.
+- **D1 — pipe selector:** `pipe_ref` — qualified `domain.pipe_code`, **optional**, defaulting to the closure's declared `main_pipe` (422 when omitted and the closure declares none). Replaces `pipe_code` on all three build routes. Matches `pipelex codegen inputs --pipe` and the field `/codegen` reserves. Mirror `inputs_cmd.py` for the default-resolution semantics.
+- **D2 — `CodegenKind.INPUTS`:** **remove it** from the engine enum; the enum is the stamped-kind vocabulary and nothing can ever stamp an inputs file. The Phase-1 grep is a verification step, not a decision gate — if it turns up a live reference (stamp parsing, telemetry), surface it before proceeding rather than silently keeping the member.
+- **D3 — CLI parity on `/build/inputs`: FULL parity** (user chose this over the light-JSON-only recommendation). The request gains `format` (`json` | `toml`, default `json` — reuse `InputsTemplateFormat` from `pipelex.core.pipes.inputs.input_renderer`) and `explicit` (bool, default false — the ceremonial `{concept, content}` envelope). Render via the same `render_inputs` / `render_inputs_toml` the CLI uses, and mirror the CLI's semantics exactly, including which `format`×`explicit` combos it allows or rejects. **Response-shape consequence:** TOML cannot ride as a parsed dict — the valid arm must carry the template as a parsed `dict` for `format=json` but a raw string for `format=toml`. Design this deliberately in Phase 2 (e.g. echoed `format` + a single content field whose JSON type follows it, or two mutually exclusive fields with a model validator) — do not silently stringify the JSON case, since the dict shape is what the deploy dialog and SDKs consume.
+- **D4 — sequencing:** Phase 1 ships as **its own PR** (non-breaking hygiene lands immediately); the breaking migration (Phases 2–4) follows as a coherent breaking change.
 
-### CHECKPOINT 1 — contract landed ✅
+## Phase 1 — rationale & engine hygiene (non-breaking, shippable as its own PR per D4)
 
-Committed: artifact + code + tests, all gates green. Remaining phases are docs-site prose only.
+- [ ] `pipelex/`: grep usages of `CodegenKind.INPUTS`, then **remove it** per D2 (if the grep finds a live reference in stamping or telemetry, stop and surface it first).
+- [ ] `pipelex/`: fix the `CodegenKind` docstring in `pipelex/codegen/emitters/target.py` to state the trust-chain line ("kinds that ride the stamp/lock chain") consistently with `emission.py`.
+- [ ] `pipelex/`: if the spec's "Two axes" wording implies the enum contains `inputs`, adjust `Pipelex/docs/specs/pipelex-codegen.md` accordingly; run `make check-spec-links` in `conformance/`.
+- [ ] `pipelex-api/`: rewrite the `CodegenRouteKind` docstring in `api/routes/pipelex/codegen.py` — served-kind membership is decided by the trust-chain rule, not by mirroring the agent CLI. Update the matching prose in `docs/codegen.md` if it repeats the old rationale.
+- [ ] `pipelex/`: changelog entry (docstring/enum hygiene). `pipelex-api/`: changelog entry if any wire-visible OpenAPI description changed → `make openapi-export`.
+- [ ] Run `make agent-check` + `make agent-test` in both repos.
 
-## Phase 3 — Docs site: catalog completeness + new pipelex surface ✅ DONE
+**CHECKPOINT 1** — natural handoff: Phase 1 is self-contained and non-breaking. Update this file (mark boxes, record the D2 outcome and any surprises) before starting Phase 2 in a fresh session if context is heavy.
 
-- [x] `docs/index.md`: added the **Resolve & Codegen** section, placed after Pipe Validate (matches both the `mkdocs.yml` nav order and the natural validate → resolve → codegen reading order; the rest of the index's section order was left alone rather than churned to match the nav exactly).
-- [x] `docs/index.md`: `GET /` is cataloged, one line under Health & Version, as recommended.
-- [x] `docs/index.md` "Uploader": the one wrong sentence replaced. It now says the routes need an authenticated **user identity**, that `AUTH_MODE=api_key` does not establish one (shared key, not per-caller), and names the two configurations that do work (`AUTH_MODE=jwt`, or a trusted proxy + `TRUST_FORWARDED_IDENTITY_HEADERS=true`). Nothing else in that section touched.
-- [x] `docs/error-responses.md`: `suggested_fix` and `missing_pipe_code` rows added to the "Structured validation errors" table, plus a full **Suggested fixes** section — a realistic payload (`match-sequence-output`), the field semantics, the op-kind table, and the "ops are the machine contract; any rendered diff is presentation" rule.
-- [x] `docs/pipe-validate.md`: `suggested_fix` surfaced where the item shape is described, cross-linked both ways.
-- [x] `docs/error-responses.md` "Status codes": sanity-passed against the artifact. Fixed the stale `/pipeline/start` path, and added what was missing entirely — the **400** (`StartRequiresAsyncOrchestration`), the `orchestration_mode` **403** (it only mentioned the storage-ownership case), and the `method_ref` **501**. Added a closing note that an invalid bundle is a 200, not an error status.
-- [x] `docs/codegen.md` + `docs/pipe-builder.md`: currency pass. Envelopes still match the regenerated schemas; added the `suggested_fix` pointer to both, and the missing `method_ref` 501 to codegen.md's status list.
+## Phase 2 — server: `/build/inputs` + `/build/output` → files[] envelope + static core
 
-**Drift found in Phase 3 that the plan had not spotted:** `/v1/resolve` and `/v1/codegen` carry `x-mthds-protocol: true` (they are protocol *capabilities* — resolution and type-projection), so the protocol surface is **seven** operations, not five. The "five protocol routes" framing was stale in three places, all now fixed: the FastAPI app `description` (published verbatim in the artifact), `docs/index.md`'s three-layer-contract bullet, and this repo's `CLAUDE.md`. `CLAUDE.md`'s project-structure block was also missing `resolve.py` / `codegen.py` / `crate_ops.py` / `tools.py`, and now documents the two new `api/openapi_*.py` modules plus how to document a new failure status.
+- [ ] New request models: subclass `MthdsFilesRequest` adding `pipe_ref` (qualified, optional → `main_pipe`, per D1). Drop `allow_signatures`. Keep `MAX_PIPE_CODE_LEN`-style bounds on the ref. Note: `MthdsContentsRequest` stays — `/validate` still uses it (protocol-owned envelope, out of scope here).
+- [ ] `/build/inputs` request additionally gains `format` (`InputsTemplateFormat`, default json) and `explicit` (bool, default false) per D3 — mirror the CLI's allowed combos exactly.
+- [ ] Design the `/build/inputs` valid arm for D3's dict-or-string consequence (parsed `dict` for json, raw string for toml; echoed `format` + `explicit`); keep `/build/output`'s `output: dict` shape unchanged (it already has its own `ConceptRepresentationFormat` field).
+- [ ] Rewrite `api/routes/pipelex/build/inputs.py`: `resolve_requested_crate(request_data)` → catch `ValidateBundleError` → `invalid_crate_report_response` (unchanged invalid arm); on success read the pipe from the loaded library (mirror `inputs_cmd.py` for qualified-ref lookup + `main_pipe` default), render via `render_inputs` / `render_inputs_toml`, tear down with `teardown_current_library()` in `finally`. The route also inherits the `method_ref` → 501 behavior — declare `PROBLEM_501_METHOD_REF` on the decorator like `/codegen` does.
+- [ ] Same rewrite for `api/routes/pipelex/build/output.py` (via `render_output`).
+- [ ] Valid arms: echo the pipe selector as requested + as resolved (so a defaulted `main_pipe` is visible to the caller).
+- [ ] Update unit tests (`tests/unit/`) and any e2e touching these routes; verify `tests/unit/test_openapi_contract.py` still pins the `x-mthds-protocol` set unchanged (these routes were never tagged).
+- [ ] Docs: `docs/codegen.md`, `docs/pipe-builder.md`, `docs/index.md` where the build envelopes are described; state the static-verdict semantics (structural invalidity only — runnability is `/validate`'s vocabulary; a valid build verdict is not a promise the pipe runs).
+- [ ] Spec: update the `/v1/build/*` paragraph in `Pipelex/docs/specs/pipelex-codegen.md` (new envelope, static verdicts for inputs/output, `allow_signatures` removal); update the conformance skeletons it names; `make check-spec-links` in `conformance/`.
+- [ ] `make openapi-export` + commit artifact; CHANGELOG entry (breaking: build route request/response shapes).
+- [ ] `make agent-check` + `make agent-test`.
 
-## Phase 4 — Changelog + verification ✅ DONE
+## Phase 3 — server: `/build/runner` → files[] envelope (keeps its dry-run)
 
-- [x] `CHANGELOG.md` [Unreleased]: added the `suggested_fix` surface (Added), and under Changed: the RFC 7807 error contract in the artifact, the resolve/codegen protocol-route correction, and the docs fixes. Nothing here is breaking — it is documentation of behavior the server already had.
-- [x] Full gate: `make agent-check` && `make agent-test` && `make openapi-check` — all green.
-- [ ] **Optional, not done:** refresh the Postman collection. Deliberately skipped: the artifact's *request* surface did not change (only error responses and descriptions did), and a Postman collection carries requests, not error responses. Run `/update-postman` if you want the descriptions refreshed anyway.
-- [x] Cross-repo sanity: **no `docs/specs/` or `conformance/` edit needed**, as predicted. The protocol spec's error-presentation section (`docs/specs/pipelex-mthds-protocol.md`, "Validation status codes" table) already specifies exactly what this work published — 422 request-shape / 401 / 403 / 5xx as `problem+json`, with a produced verdict on a 200. This change documented existing behavior; it did not alter the contract.
+- [ ] Read `api/routes/pipelex/build/runner.py` fully before touching it — it already straddles both worlds (dry-run via `validate_bundle` **and** a crate-based stamped `structures/` projection built inline with `normalize_crate` + `emit_types`). Migration opportunity: after the envelope switch it may be able to reuse `resolve_requested_crate`/`crate_ops` for the crate half instead of its inline duplication — assess, don't force.
+- [ ] New request model: subclass `MthdsFilesRequest` + pipe selector (per D1) + keep `allow_signatures` (the sweep needs it).
+- [ ] Keep the SKIPPED → 422 no-verdict carve-out and the stamped structures projection exactly as spec'd.
+- [ ] Tests, docs, spec paragraph, `make openapi-export`, CHANGELOG, `make agent-check` + `make agent-test` — same drill as Phase 2.
 
-## Phase 5 — `/v1/resolve` + `/v1/codegen` are NOT MTHDS Protocol (decision, 2026-07-11) ✅ DONE
+**CHECKPOINT 2** — server surface is fully migrated and the OpenAPI artifact regenerated; consumers are now broken against a locally-run server. Update this file with the final wire shapes (paste the new request/response JSON of each route) so Phase 4 can run without re-reading the server code.
 
-Phase 3 spotted that `/v1/resolve` and `/v1/codegen` carried `x-mthds-protocol: true` while several specs still called the protocol "five routes", and aligned the docs *upward* to seven. **The owner reversed that:** the two routes are **Pipelex API extensions** and must not be tagged. The MTHDS standard's own normative OpenAPI (`mthds/docs/spec/openapi/mthds-protocol.openapi.yaml`) already defines exactly five operations and has never mentioned resolve or codegen — so the standard was right all along and the Pipelex side had drifted into it.
+## Phase 4 — consumers
 
-**The ownership line, stated precisely (this is the subtle bit):** it runs through the **artifact**, not the surface. The normalized library crate **is** standard-owned — the MTHDS [Library Crate Format](../../mthds/docs/spec/library-crate.md) — so its wire fields stay brand-neutral (no `pipelex_` prefix) and any MTHDS tool can read one. Everything Pipelex builds *on top of* it is ours: the `resolve`/`codegen` CLI commands, the two HTTP routes, **every** projection target (`ts-zod` and `python-pydantic` no less than `python-structures` — the standard specifies no type projection at all), and the stamp/lock/check trust chain. No wire shape moved; only the routes' protocol membership.
+- [ ] `mthds-js`: update `BuildInputsRequest` type + `buildInputs()` in `src/runners/api/client.ts` (and the build/output/runner siblings) to the new envelope; update its tests.
+- [ ] `pipelex-sdk-js`: same in `src/client.ts`; remember the one-way dep `@pipelex/sdk → mthds` — if the request types live in `mthds/protocol` types, fix them there first. Check whether these are protocol-typed or SDK-local (build routes are Pipelex extensions, so they should be SDK-local — flag if not).
+- [ ] `pipelex-app`: `src/actions/build-inputs.ts` (new payload; pipe selector per D1 — the deploy dialog currently holds bare pipe codes), `src/components/deploy/deploy-dialog.tsx` + `__tests__`, `src/lib/deploy-snippets.ts` (the snippets it renders for users must show the new wire shape too).
+- [ ] `pipelex-api/.claude/skills/postman-bundle/`: update the build-route request templates; run `/update-postman` if the live collection carries the old shapes.
+- [ ] Each repo: its own test suite + changelog.
 
-- [x] `api/routes/pipelex/resolve.py` + `codegen.py`: dropped `openapi_extra={"x-mthds-protocol": True}`, with a comment saying why. Route docstrings now say "Pipelex API extension"; the `target` Field description no longer calls `ts-zod`/`python-pydantic` "MTHDS-protocol type projections" (it was published verbatim in the artifact).
-- [x] `api/main.py` description, `docs/index.md`, `docs/codegen.md`, `CLAUDE.md`: back to five protocol routes, with resolve/codegen named among the Pipelex extensions and the crate's standard ownership spelled out so the distinction isn't lost again.
-- [x] `tests/unit/test_openapi_contract.py`: `MTHDS_PROTOCOL_OPERATIONS` pins the tagged set as an **exact set**, so a route silently joining OR leaving the protocol surface fails — plus a named test spelling out that resolve/codegen are extensions (this is the easy mistake: they *look* protocol-shaped).
-- [x] Workspace `docs/specs/pipelex-codegen.md`: new **`## Ownership`** section carrying the rule above; the "Capability flags" bullet inverted; the `target` bullet no longer calls type projection a protocol capability.
-- [x] Workspace `docs/specs/command-surface-map.md`: the `[6c]` node's protocol-capability line corrected.
-- [x] `conformance/tests/pipelex_api/test_codegen_routes.py`: module docstring corrected; new live-wire assertion that neither route is tagged **and** that the five protocol operations still are (both directions). A second `pytest.mark.spec(...#ownership)` links it to the new spec section; `make check-spec-links` green (it requires every `##` section to be verified or explicitly marked unverified — the new section is genuinely verified).
-- [x] **`../mthds` needed no change** — verified: its normative protocol OpenAPI has exactly the five paths and `docs/spec/protocol.md` never mentions resolve/codegen.
-- [x] Gates: pipelex-api `agent-check` + `agent-test` + `openapi-check`; conformance `agent-check` + `check-spec-links`; the codegen + tools conformance modules run live against a booted `pipelex-api`.
+**CHECKPOINT 3** — end-to-end: run the API locally (`make run`), drive the webapp deploy dialog against it, and exercise `buildInputs` from both JS clients (their test suites or a scratch script). Record results here.
 
-**Left alone deliberately:** `wip/devx/track-d-design.md` and `wip/devx/devex-north-star.md` still describe resolution/type-projection as protocol capabilities. They are WIP design notes recording the *former* decision, and the workspace convention treats `wip/` as scratch (changelogs ignore it). They are now stale relative to the specs — if that bothers you, they should be corrected or archived, but I did not rewrite the design record.
+## Phase 5 — final sweep
 
-### CHECKPOINT 2 — done ✅
+- [ ] Re-read this file top to bottom; every unchecked box is either done-and-checked or explicitly moved to follow-ups with a reason.
+- [ ] `pipelex-api`: `make openapi-check` clean; full `make agent-check` + `make agent-test` in every touched repo.
+- [ ] Verify spec/conformance sync one last time: `make check-spec-links` in `conformance/`.
 
-All phases complete. Two commits on `feature/Codegen`:
+## Out of scope / follow-ups (deliberately not in this plan)
 
-- `a155ad1` — the wire contract: `api/openapi_responses.py`, `api/openapi_schema.py`, router-level + per-route `responses=`, typed `/health` + `GET /`, D-code sweep, `tests/unit/test_openapi_contract.py`, regenerated artifact.
-- (this one) — docs-site prose, changelog, `CLAUDE.md`, and the resolve/codegen protocol-surface correction (which touched `api/main.py`'s description, hence a second artifact regeneration).
-
-If the pipelex editable pin (`[tool.uv.sources]` → `../_codegen`) moves before release, re-run `make openapi-export` and re-commit the artifact.
+- **`/validate`'s envelope** stays on `MthdsContentsRequest`: it is an MTHDS Protocol route, so moving it to `files[]`-with-sources (which would benefit its diagnostics most of all) is a protocol-level change owned by the `mthds/` spec — raise separately.
+- **Hosted deploy dance** (bump `API_VERSION` in `pipelex-api-hosted/`, `api_image_tag` in `pipelex-api-infra/`) happens at release time, not in this plan.
+- **Future `/codegen` kinds** (`docs`, `tools`, `tests`): when they arrive they take `pipe_ref` on `/codegen` per the trust-chain rule; the reserved-field validator in `codegen.py` already documents how an arm gets added.
