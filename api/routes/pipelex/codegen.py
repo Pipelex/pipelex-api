@@ -28,9 +28,13 @@ router = APIRouter(tags=["codegen"])
 class CodegenRouteKind(StrEnum):
     """The projection kinds this route serves — the `kind` axis of the codegen request.
 
-    Deliberately narrower than the engine's kind axis: input templates ride `POST /build/inputs`
-    (the same projection, already surfaced per pipe), mirroring the agent CLI's deliberate absence
-    of a `codegen inputs` mirror. An unknown kind is a request-shape 422 listing the served set.
+    Membership follows the **trust chain**: a kind is served here exactly when its artifacts are
+    stamped and locked, so a client can write them verbatim and pass the offline `codegen check` —
+    the promise this route's valid arm makes by carrying a `lock`. Input templates are user-editable
+    scaffolds, never stamped or locked, so they cannot make that promise; they ride
+    `POST /build/inputs` instead and `inputs` is therefore not a kind here. Future per-pipe kinds
+    (`docs`, `tools`, `tests`) do emit tracked artifacts, so they join this enum and select their
+    pipe via `pipe_ref`. An unknown kind is a request-shape 422 listing the served set.
     """
 
     TYPES = "types"
