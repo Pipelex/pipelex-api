@@ -340,25 +340,35 @@ def build_crate_body(
 
 def build_build_body(
     mthds_contents: list[str],
-    allow_signatures: bool,
+    mthds_sources: list[str],
     *,
-    pipe_code: str,
+    pipe_ref: str | None,
+    allow_signatures: bool | None = None,
     output_format: str | None = None,
 ) -> str:
-    """Body for /build/{inputs,output,runner}: pipe_code + mthds_contents.
+    """Body for /build/{inputs,output,runner} — the SAME ``files[]`` closure envelope as
+    /resolve and /codegen, plus a pipe selector.
 
-    These routes validate the bundle (scoping the dry-run sweep to the requested
-    pipe) and project one artifact for that pipe — an inputs template, an output
+    ``pipe_ref`` is the qualified ``domain.pipe_code`` and is optional on the wire
+    (it defaults to the closure's ``main_pipe``); it is sent explicitly here so the
+    generated query is unambiguous and stays correct if the bundle later declares
+    several main_pipes.
+
+    Each route projects one artifact for that pipe — an inputs template, an output
     representation (``format``: schema | json | python, /build/output only), or a
     runner script. No ``inputs`` on the wire — nothing runs.
+
+    ``allow_signatures`` is sent only for /build/runner: it parameterizes the dry-run
+    sweep, and the static /build/{inputs,output} projections dropped that sweep.
     """
-    body: dict[str, Any] = {
-        "pipe_code": pipe_code,
-        "mthds_contents": mthds_contents,
-        "allow_signatures": allow_signatures,
-    }
+    body: dict[str, Any] = {}
+    if pipe_ref:
+        body["pipe_ref"] = pipe_ref
+    if allow_signatures is not None:
+        body["allow_signatures"] = allow_signatures
     if output_format:
         body["format"] = output_format
+    body["files"] = [{"content": content, "source": source} for content, source in zip(mthds_contents, mthds_sources)]
     return json.dumps(body, indent=2, ensure_ascii=False)
 
 
@@ -652,14 +662,19 @@ def main() -> None:
         bodies["resolve"] = build_crate_body(mthds_contents, mthds_sources)
     if "codegen" in active_keys:
         bodies["codegen"] = build_crate_body(mthds_contents, mthds_sources, codegen_kind="types", codegen_target=args.target)
+    # The build routes take the QUALIFIED pipe ref (`domain.pipe_code`). A bundle that declares no
+    # domain leaves it unqualified — still accepted by the engine's pipe lookup, which matches a bare
+    # code too, and `--pipe` may already carry a qualified ref.
+    pipe_ref = pipe_code if (not domain or not pipe_code or "." in pipe_code) else f"{domain}.{pipe_code}"
     if "build-inputs" in active_keys:
-        bodies["build_inputs"] = build_build_body(mthds_contents, args.allow_signatures, pipe_code=cast("str", pipe_code))
+        bodies["build_inputs"] = build_build_body(mthds_contents, mthds_sources, pipe_ref=pipe_ref)
     if "build-output" in active_keys:
-        bodies["build_output"] = build_build_body(
-            mthds_contents, args.allow_signatures, pipe_code=cast("str", pipe_code), output_format=args.output_format
-        )
+        bodies["build_output"] = build_build_body(mthds_contents, mthds_sources, pipe_ref=pipe_ref, output_format=args.output_format)
     if "build-runner" in active_keys:
-        bodies["build_runner"] = build_build_body(mthds_contents, args.allow_signatures, pipe_code=cast("str", pipe_code))
+        # Only /build/runner still runs the dry-run sweep that `allow_signatures` parameterizes.
+        bodies["build_runner"] = build_build_body(
+            mthds_contents, mthds_sources, pipe_ref=pipe_ref, allow_signatures=args.allow_signatures
+        )
 
     print(f"Bundle:      {main_file}")
     print(f"mthds files: {', '.join(path.name for path in all_mthds)}")

@@ -1,23 +1,25 @@
 # Plan: unify the codegen/build underpinnings (without merging the routes)
 
-Status: **Phase 1 shipped and merged.** Next up: **Phase 2**. This plan spans `pipelex-api/` (main), `pipelex/` (engine hygiene — done, nothing further expected), the workspace spec (`Pipelex/docs/specs/pipelex-codegen.md`), and three JS consumers. No backward compatibility is owed anywhere — breaking wire changes are fine, noted in changelogs.
+Status: **Phases 1–3 shipped.** The whole server surface is migrated. Next up: **Phase 4 (consumers)**. This plan spans `pipelex-api/` (main), `pipelex/` (engine — one small typing fix landed in Phase 2; nothing further expected), the workspace spec (`Pipelex/docs/specs/pipelex-codegen.md`), and three JS consumers. No backward compatibility is owed anywhere — breaking wire changes are fine, noted in changelogs.
 
 ## Working setup — read this before touching code (cold start)
 
-**Where you are.** `pipelex-api` is on `feature/Codegen` (Phase 1 merged as PR #38, `770956a`). Work Phases 2–3 from there; open PRs **against `feature/Codegen`**, not `main`.
+**Where you are.** `pipelex-api` is on `feature/Codegen` (Phase 1 merged as PR #38, `770956a`; Phases 2–3 on top). Work Phase 4 from there; open PRs **against `feature/Codegen`**, not `main`.
 
 **The engine is pinned by git rev — you do NOT need a local editable `pipelex`.** `pyproject.toml` has:
 
 ```toml
 [tool.uv.sources]
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "27e6f3e5776e479259b951367809a1744a15670e" }
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "4519ae3d7ef6bc0ffe1d7d6eeed364171b87e1a3" }
 ```
 
 That rev is the tip of the `pipelex` repo's **`feature/Stabilize`** branch, which is checked out locally in the **`../_stable` worktree** (`../pipelex` itself is on `dev` and must stay clean — do not work there). The pin replaced a local editable path (`path = "../pipelex", editable = true`) that **could never install in CI** — a GitHub runner has no sibling checkout, so `uv sync` failed before any test ran. Keep the git pin: it is what makes CI green.
 
-**Phases 2–4 need no engine change.** Verified: every engine symbol these phases call already exists at the pinned rev — `render_inputs` / `render_inputs_toml` / `InputsTemplateFormat` (`pipelex/core/pipes/inputs/input_renderer.py`), `NoInputsRequiredError` (`pipelex/core/pipes/inputs/exceptions.py`), `render_output` (`pipelex/core/pipes/output/output_renderer.py`, already imported by `build/output.py` today), `resolve_crate_from_contents`, `get_required_pipe`, `ValidateBundleError`. The work is rewriting `pipelex-api` routes over engine functions that are already there.
+**Phase 4 needs no engine change** (it is JS/TS consumers only). Phases 2–3 needed exactly one, and it landed — see below.
 
-**If an engine change turns out to be needed anyway** (only then), the loop is:
+**The one engine change Phases 2–3 did need** (the plan predicted none; this was the miss): `validate_bundle`'s `mthds_sources` param was annotated `list[str] | None`, while its sibling `resolve_crate_from_contents` takes `Sequence[str | None] | None` — and `validate_bundle`'s own **body already handled `None` entries**. The annotation was just narrower than the implementation, and it blocked `/build/runner` (the one build route that must keep `validate_bundle`) from threading the `files[]` envelope's optional per-file `source` labels. Widened to match the sibling; strictly widening, so no caller could break and no runtime behavior changed. Landed on `feature/Stabilize` as **`4519ae3`**, and the pin above was bumped to it.
+
+**If a further engine change turns out to be needed** (only then), the loop is:
 
 1. Iterate locally without touching the committed pin: `uv pip install -e ../_stable` into `pipelex-api`'s venv. This does *not* modify `pyproject.toml` / `uv.lock`, so CI stays green while you experiment. ⚠️ Any `make install` / `uv sync` re-pins the venv back to the git rev and silently undoes this — re-run the `uv pip install -e` after one.
 2. When the engine change is settled: commit it in `../_stable`, push to `feature/Stabilize`, then **bump `rev` in `pyproject.toml` and re-run `uv lock`**. Skipping the bump means `pipelex-api` CI silently tests against stale engine code.
@@ -45,7 +47,7 @@ The question that triggered this plan: *should `POST /v1/codegen` and `POST /v1/
 - `mthds-js/src/runners/api/client.ts` — `buildInputs()` (posts to `build/inputs`)
 - `pipelex-sdk-js/src/client.ts` — `buildInputs()` (same shape)
 - `pipelex-app/src/actions/build-inputs.ts` — `buildInputsTemplate()` server action → `src/components/deploy/deploy-dialog.tsx` (+ its `__tests__`), `src/lib/deploy-snippets.ts`
-- `pipelex-api/.claude/skills/postman-bundle/` — request templates for the build routes
+- `pipelex-api/.claude/skills/postman-bundle/` — request templates for the build routes (**done in Phase 3** — it lives in this repo, so it shipped with the server change rather than waiting for Phase 4)
 - `n8n-nodes-pipelex/` — checked: does **not** call `build/inputs`
 
 **Reference implementations to mirror:** `pipelex/pipelex/cli/commands/codegen/inputs_cmd.py` (per-pipe selection over a loaded crate: qualified `--pipe` ref, defaults to the closure's `main_pipe`) and `api/routes/pipelex/codegen.py` (the `resolve_requested_crate` → work → `teardown_current_library()` in `finally` pattern).
@@ -92,44 +94,105 @@ All decisions are taken (conversation of 2026-07-13). None remain pending.
 
 **Carried into Phase 2 (found while reading, saves a re-read).** `inputs_cmd.py::_default_main_pipe_ref` is the reference semantics for D1's optional `pipe_ref`: it collects `f"{domain_code}.{domain.main_pipe}"` over every domain in the crate that declares one, then errors on **zero** candidates *and* on **more than one** (ambiguous closure). The route must mirror both arms — the plan's D1 only names the zero case ("422 when omitted and the closure declares none"); **the ambiguous case needs a 422 too.** Pipe lookup itself is `get_required_pipe(pipe_code=<qualified ref>)`, raising `PipeLibraryError` on a bad ref (→ 422, a request-shape error, not an invalid-crate verdict).
 
-## Phase 2 — server: `/build/inputs` + `/build/output` → files[] envelope + static core
+## Phase 2 — server: `/build/inputs` + `/build/output` → files[] envelope + static core — ✅ DONE
 
-**START HERE. Current state, verified 2026-07-13** (so you don't have to re-derive it):
+- [x] New request base `MthdsPipeRequest(MthdsFilesRequest)` in `api/schemas/models.py`: adds optional qualified `pipe_ref` (bounded by `MAX_PIPE_CODE_LEN`). `allow_signatures` dropped from the static routes; the shared description moved to an `ALLOW_SIGNATURES_DESCRIPTION` constant so `/validate` and `/build/runner` cannot drift apart on it.
+- [x] `/build/inputs` gains `format` (`InputsTemplateFormat`, default json) + `explicit` (default false), per D3. **All four `format`×`explicit` combos are served** — verified against `inputs_cmd.py::_render`, which rejects none of them.
+- [x] Valid arms designed for the dict-or-string consequence: **two mutually exclusive fields + a `model_validator`**, chosen over a `dict | str` union so the JSON case stays a real object for the deploy dialog and SDKs. Dumped with `exclude_none=True`, so the field the format did not select is **absent** from the body, not `null`.
+- [x] `inputs.py` and `output.py` rewritten over `resolve_requested_crate` → `resolve_requested_pipe` → render → `teardown_current_library()` in `finally`. Both declare `501: PROBLEM_501_METHOD_REF`.
+- [x] Valid arms echo `pipe_ref` (resolved) + `requested_pipe_ref` (as submitted; absent when defaulted).
+- [x] Tests: new `tests/unit/test_build_routes_envelope.py` (the migration's pin — selector defaulting incl. both un-defaultable arms, source-label threading, format×field mapping, 501, library conservation); `test_build_and_agent_routes.py` + `test_allow_signatures.py` updated. `test_openapi_contract.py` unchanged and still green (these routes were never tagged).
+- [x] Docs: `docs/pipe-builder.md` rewritten (shared envelope + static-vs-runner semantics + the format→field rule); `docs/index.md` catalog refreshed. `docs/codegen.md` needed no change (its trust-chain bullet already pointed at `/build/inputs`).
+- [x] Spec: `Pipelex/docs/specs/pipelex-codegen.md` → "Route envelopes" gains three paragraphs (shared envelope + pipe selector; static projection vs. runnable promise; the format axis deciding the payload's JSON type). `make check-spec-links` in `conformance/`: **OK**.
+- [x] `make openapi-export` + artifact committed; CHANGELOG entries. `make agent-check` + `make agent-test` + `make openapi-check` — all green **against the pinned engine** (not just the editable one).
 
-- `api/routes/pipelex/build/` holds `inputs.py`, `output.py`, `runner.py`.
-- `inputs.py`: `BuildInputsRequest(MthdsContentsRequest)` → `BuildInputsValidReport`, on `@router.post("/build/inputs", response_model=BuildInputsResponse)` — **no `responses=` on the decorator yet** (it will need `501: PROBLEM_501_METHOD_REF` once it inherits the `method_ref` selector).
-- `output.py`: same shape — `BuildOutputRequest(MthdsContentsRequest)` → `BuildOutputValidReport`.
-- Both already ride the `200` + `is_valid` discriminated-union discipline; **Phase 2 changes the request envelope and the verdict semantics (static, no dry-run), not the union pattern.**
-- The two envelopes live in `api/schemas/models.py`: `MthdsFilesRequest` (line ~241, what `/resolve` + `/codegen` use) and `MthdsContentsRequest` (line ~273, what the build routes + `/validate` use today).
-- ⚠️ **`MthdsContentsRequest`'s own docstring goes stale in this phase.** It currently reads "Shared base for the build/validate routes … the build routes subclass it to add `pipe_code` (and `/build/output` a `format`)". After Phase 2+3 only `/validate` uses it — rewrite that docstring in the same change, or it becomes exactly the kind of drift Phase 1 existed to remove.
+**Two pre-existing bugs found and fixed while here** (workspace rule: flag and fix):
 
-- [ ] New request models: subclass `MthdsFilesRequest` adding `pipe_ref` (qualified, optional → `main_pipe`, per D1). Drop `allow_signatures`. Keep `MAX_PIPE_CODE_LEN`-style bounds on the ref. Note: `MthdsContentsRequest` stays — `/validate` still uses it (protocol-owned envelope, out of scope here).
-- [ ] `/build/inputs` request additionally gains `format` (`InputsTemplateFormat`, default json) and `explicit` (bool, default false) per D3 — mirror the CLI's allowed combos exactly.
-- [ ] Design the `/build/inputs` valid arm for D3's dict-or-string consequence (parsed `dict` for json, raw string for toml; echoed `format` + `explicit`); keep `/build/output`'s `output: dict` shape unchanged (it already has its own `ConceptRepresentationFormat` field).
-- [ ] Rewrite `api/routes/pipelex/build/inputs.py`: `resolve_requested_crate(request_data)` → catch `ValidateBundleError` → `invalid_crate_report_response` (unchanged invalid arm); on success read the pipe from the loaded library (mirror `inputs_cmd.py` for qualified-ref lookup + `main_pipe` default), render via `render_inputs` / `render_inputs_toml`, tear down with `teardown_current_library()` in `finally`. The route also inherits the `method_ref` → 501 behavior — declare `PROBLEM_501_METHOD_REF` on the decorator like `/codegen` does.
-- [ ] Same rewrite for `api/routes/pipelex/build/output.py` (via `render_output`).
-- [ ] Valid arms: echo the pipe selector as requested + as resolved (so a defaulted `main_pipe` is visible to the caller).
-- [ ] Update unit tests (`tests/unit/`) and any e2e touching these routes; verify `tests/unit/test_openapi_contract.py` still pins the `x-mthds-protocol` set unchanged (these routes were never tagged).
-- [ ] Docs: `docs/codegen.md`, `docs/pipe-builder.md`, `docs/index.md` where the build envelopes are described; state the static-verdict semantics (structural invalidity only — runnability is `/validate`'s vocabulary; a valid build verdict is not a promise the pipe runs).
-- [ ] Spec: update the `/v1/build/*` paragraph in `Pipelex/docs/specs/pipelex-codegen.md` (new envelope, static verdicts for inputs/output, `allow_signatures` removal); update the conformance skeletons it names; `make check-spec-links` in `conformance/`.
-- [ ] `make openapi-export` + commit artifact; CHANGELOG entry (breaking: build route request/response shapes).
-- [ ] `make agent-check` + `make agent-test`.
+1. **`/v1/build/output` with `format=python` was a hard 500.** The route ran `json.loads` on *every* format and typed the field `dict`, so the Python-source representation crashed on arrival. Confirmed live before touching it (`schema`→200, `json`→200, `python`→**500**). The dict-or-string design D3 forced for inputs+TOML is exactly the fix, so `output` (object, for `schema`/`json`) and `output_python` (text) now split the same way. **This is why `/build/output` did NOT keep its `output: dict` shape unchanged, as the plan's Phase-2 box assumed** — that box was written before the bug was known.
+2. **`render_output`'s bare `ValueError`** (a `native.Anything` output with no determinable options — documented in its docstring) escaped as an unhandled 500. Now a request-shape 422: it is a fact about the requested *pipe*, not an invalid-closure verdict.
 
-## Phase 3 — server: `/build/runner` → files[] envelope (keeps its dry-run)
+## Phase 3 — server: `/build/runner` → files[] envelope (keeps its dry-run) — ✅ DONE
 
-- [ ] Read `api/routes/pipelex/build/runner.py` fully before touching it — it already straddles both worlds (dry-run via `validate_bundle` **and** a crate-based stamped `structures/` projection built inline with `normalize_crate` + `emit_types`). Migration opportunity: after the envelope switch it may be able to reuse `resolve_requested_crate`/`crate_ops` for the crate half instead of its inline duplication — assess, don't force.
-- [ ] New request model: subclass `MthdsFilesRequest` + pipe selector (per D1) + keep `allow_signatures` (the sweep needs it).
-- [ ] Keep the SKIPPED → 422 no-verdict carve-out and the stamped structures projection exactly as spec'd.
-- [ ] Tests, docs, spec paragraph, `make openapi-export`, CHANGELOG, `make agent-check` + `make agent-test` — same drill as Phase 2.
+- [x] **Assessment (the plan said "assess, don't force"): `/build/runner` cannot use `resolve_requested_crate` — do not try.** It must ride `validate_bundle` for the dry-run sweep, and `validate_bundle` already leaves its own library loaded + current; calling `resolve_requested_crate` would open a **second** library and orphan the first (the exact leak `test_build_routes_envelope.py::test_routes_open_exactly_one_library_and_tear_it_down` pins). Its crate still comes from `library_manager.get_crate(library_id)` + `normalize_crate`. What it *does* now share: `selected_files` (the `method_ref`→501 guard, extracted for it), `resolve_requested_pipe`, `teardown_current_library`, `invalid_crate_report_response`.
+- [x] `BuildRunnerRequest(MthdsPipeRequest)` + `allow_signatures` (kept — the sweep needs it).
+- [x] SKIPPED → 422 carve-out and the stamped structures projection kept exactly as spec'd (the guard is now keyed by the resolved qualified `pipe_ref`).
+- [x] Tests, docs, spec, `make openapi-export`, CHANGELOG, `make agent-check` + `make agent-test`.
 
-**CHECKPOINT 2** — server surface is fully migrated and the OpenAPI artifact regenerated; consumers are now broken against a locally-run server. Update this file with the final wire shapes (paste the new request/response JSON of each route) so Phase 4 can run without re-reading the server code.
+**Three sharp edges found in Phase 3 — read before touching `runner.py` again:**
+
+- **`dry_run_pipe_codes` cannot be scoped when `pipe_ref` is omitted.** The default resolves off the *crate*, which only exists after `validate_bundle` has run — chicken-and-egg. So an omitted `pipe_ref` sweeps the **whole closure** (`dry_run_pipe_codes=None`) and then defaults to `main_pipe`. That is a stricter verdict than the scoped path (a broken *sibling* pipe can now sink the request), which is the honest answer for a caller who did not say which pipe they meant. Documented in the route docstring, the spec, and `docs/pipe-builder.md`.
+- **`_output_is_list` must be fed the BARE pipe code, not the qualified ref.** It looks the pipe up in `blueprint.pipe`, which is a per-bundle map keyed by bare code. Passing `requested_pipe.ref` there would silently return `False` for every pipe and quietly emit a non-list runner for a list-output pipe. It gets `requested_pipe.pipe.code`. (`_reject_if_requested_pipe_skipped` is the opposite — it matches on *either*, so the qualified ref is fine there.)
+- **`PipeNotFoundError` escapes `validate_bundle` untranslated, deliberately** — the engine's `translate_to_validate_bundle_error` has an explicit `except PipeNotFoundError:` arm that re-raises so callers can own it. The route now catches it → **422** (a pipe ref naming nothing in the closure is a request-shape error, not an invalid-closure verdict), matching what `resolve_requested_pipe` does on the static routes. Before this it would have surfaced as a generic PipelexError problem document.
+
+**CHECKPOINT 2** — reached 2026-07-13. Server surface fully migrated; the OpenAPI artifact is regenerated and committed. Consumers are now broken against a locally-run server — that is Phase 4.
+
+### The new wire shapes (captured live from the running server — Phase 4 needs no server re-read)
+
+**Shared request envelope** (all three): `files[]` (each `{content, source?}`) **XOR** `method_ref` (→ 501), plus optional qualified `pipe_ref` (defaults to the closure's `main_pipe`; 422 when the closure declares none, or several).
+
+```jsonc
+// POST /v1/build/inputs  — request
+{ "files": [{ "content": "<mthds text>", "source": "smoke.mthds" }],
+  "pipe_ref": "smoke.echo",           // optional
+  "format": "json",                   // "json" (default) | "toml"
+  "explicit": false }                 // default false
+// 200 valid arm (format=json)
+{ "is_valid": true, "pipe_ref": "smoke.echo", "requested_pipe_ref": "smoke.echo",
+  "format": "json", "explicit": false,
+  "inputs": { "text": "text_value" },
+  "message": "Inputs template generated successfully" }
+// 200 valid arm (format=toml) — note `inputs` is ABSENT, and the concept comment is
+// precisely what a parsed-dict shape would have destroyed. This is D3's whole point.
+{ "is_valid": true, "pipe_ref": "smoke.echo",   // requested_pipe_ref absent = it was defaulted
+  "format": "toml", "explicit": false,
+  "inputs_toml": "# concept: native.Text\ntext = \"text_value\"\n",
+  "message": "Inputs template generated successfully" }
+```
+
+```jsonc
+// POST /v1/build/output  — request
+{ "files": [{ "content": "<mthds text>" }],
+  "pipe_ref": "smoke.echo",           // optional
+  "format": "schema" }                // "schema" (default) | "json" | "python"
+// 200 valid arm (schema|json → parsed object in `output`)
+{ "is_valid": true, "pipe_ref": "smoke.echo", "requested_pipe_ref": "smoke.echo",
+  "format": "schema",
+  "output": { "concept": "native.Text",
+              "content": { "type": "object", "title": "TextContent",
+                           "properties": { "text": { "type": "string", "title": "Text", "description": "The text" } },
+                           "required": ["text"] } },
+  "message": "Output representation generated successfully" }
+// 200 valid arm (python → source text in `output_python`; `output` ABSENT)
+{ "is_valid": true, "pipe_ref": "smoke.echo", "format": "python",
+  "output_python": "<python source>", "message": "..." }
+```
+
+```jsonc
+// POST /v1/build/runner  — request
+{ "files": [{ "content": "<mthds text>" }],
+  "pipe_ref": "smoke.echo",           // optional
+  "allow_signatures": false }         // ONLY this build route still takes it
+// 200 valid arm (unchanged apart from the selector fields)
+{ "is_valid": true, "pipe_ref": "smoke.echo", "requested_pipe_ref": "smoke.echo",
+  "python_code": "<python source>",
+  "structures": { "directory": "structures",
+                  "artifacts": [{ "path": "structures.py", "content": "# >>> pipelex-codegen-stamp >>>\n..." }],
+                  "lock": "<toml>", "lock_filename": "codegen.lock" },
+  "message": "Runner code generated successfully" }
+```
+
+**Invalid arm (all three, 200):** unchanged — `{ "is_valid": false, "validation_errors": [...], "message": "..." }`, and `validation_errors[].source` now carries the submitted per-file label.
+
+**Non-2xx (all three):** 422 for an unknown `pipe_ref`, an omitted `pipe_ref` on a closure with no/several `main_pipe`, a malformed selector, an unrenderable `native.Anything` output (`/build/output`), or a SKIPPED requested pipe (`/build/runner`); 501 for `method_ref`; auth 401/403; 5xx server fault. All RFC 7807 `problem+json`.
+
+**Renamed/removed fields Phase 4 must chase:** `mthds_contents[]` → `files[]`; `pipe_code` → `pipe_ref` (**and it is now qualified** — `smoke.echo`, not `echo`); `allow_signatures` gone from `/build/{inputs,output}`; valid arms echo `pipe_ref`/`requested_pipe_ref` instead of `pipe_code`.
 
 ## Phase 4 — consumers
 
 - [ ] `mthds-js`: update `BuildInputsRequest` type + `buildInputs()` in `src/runners/api/client.ts` (and the build/output/runner siblings) to the new envelope; update its tests.
 - [ ] `pipelex-sdk-js`: same in `src/client.ts`; remember the one-way dep `@pipelex/sdk → mthds` — if the request types live in `mthds/protocol` types, fix them there first. Check whether these are protocol-typed or SDK-local (build routes are Pipelex extensions, so they should be SDK-local — flag if not).
 - [ ] `pipelex-app`: `src/actions/build-inputs.ts` (new payload; pipe selector per D1 — the deploy dialog currently holds bare pipe codes), `src/components/deploy/deploy-dialog.tsx` + `__tests__`, `src/lib/deploy-snippets.ts` (the snippets it renders for users must show the new wire shape too).
-- [ ] `pipelex-api/.claude/skills/postman-bundle/`: update the build-route request templates; run `/update-postman` if the live collection carries the old shapes.
+- [x] `pipelex-api/.claude/skills/postman-bundle/`: done in Phase 3 (in-repo, so it could not be left broken behind the server change). `build_postman_query.py::build_build_body` now emits the `files[]` envelope + a qualified `pipe_ref` (built from the bundle's `domain` + `main_pipe`), and sends `allow_signatures` **only** for `build-runner`. Smoke-tested against `postman/sample-bundles/fashion_moodboard.mthds`. ⚠️ Still to do: run `/update-postman` if the **live Postman collection** carries the old shapes.
 - [ ] Each repo: its own test suite + changelog.
 
 **CHECKPOINT 3** — end-to-end: run the API locally (`make run`), drive the webapp deploy dialog against it, and exercise `buildInputs` from both JS clients (their test suites or a scratch script). Record results here.

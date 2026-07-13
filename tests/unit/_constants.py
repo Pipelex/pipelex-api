@@ -34,7 +34,8 @@ prompt = "@text"
 """
 
 # A valid single-pipe bundle that declares NO main_pipe — validates fine (D2: no main-pipe
-# precondition on /validate) and simply yields no graph.
+# precondition on /validate) and simply yields no graph. On the per-pipe `/build/*` projections it is
+# also the closure that cannot default its pipe selector: an omitted `pipe_ref` is a 422 there.
 NO_MAIN_PIPE_MTHDS = """\
 domain = "nomain"
 
@@ -44,6 +45,33 @@ description = "Echo"
 inputs = { text = "Text" }
 output = "Text"
 prompt = "@text"
+"""
+
+# A second domain declaring its own main_pipe. Submitted alongside VALID_MTHDS it makes the closure's
+# main_pipe *ambiguous* — the other arm an omitted `pipe_ref` must reject with a 422.
+SECOND_MAIN_PIPE_MTHDS = """\
+domain = "other"
+main_pipe = "shout"
+
+[pipe.shout]
+type = "PipeLLM"
+description = "Shout"
+inputs = { text = "Text" }
+output = "Text"
+prompt = "@text"
+"""
+
+# A pipe that declares no inputs at all. Its inputs template is empty — a valid verdict, not an error
+# (the engine renderers raise NoInputsRequiredError; the CLI exits 0 on it).
+NO_INPUTS_MTHDS = """\
+domain = "noinputs"
+main_pipe = "greet"
+
+[pipe.greet]
+type = "PipeLLM"
+description = "Greet nobody in particular"
+output = "Text"
+prompt = "Say hello"
 """
 
 # An invalid `main_pipe` deterministically fails blueprint validation, producing a categorized

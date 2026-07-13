@@ -19,7 +19,7 @@ from mthds.protocol.working_memory import WorkingMemoryAbstract
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.functional_validators import SkipValidation
 
-from api.limits import MAX_CALLBACK_URL_LEN, MAX_CALLBACK_URLS, MAX_MTHDS_FILE_BYTES, MAX_MTHDS_FILES_PER_REQUEST
+from api.limits import MAX_CALLBACK_URL_LEN, MAX_CALLBACK_URLS, MAX_MTHDS_FILE_BYTES, MAX_MTHDS_FILES_PER_REQUEST, MAX_PIPE_CODE_LEN
 
 
 def _ensure_mthds_file_within_bytes_limit(content: str) -> None:
@@ -270,14 +270,43 @@ class MthdsFilesRequest(BaseModel):
         return self
 
 
-class MthdsContentsRequest(BaseModel):
-    """Shared base for the build/validate routes.
+class MthdsPipeRequest(MthdsFilesRequest):
+    """Shared base for the per-pipe `/build/*` projections: the closure selector plus a pipe selector.
 
-    Carries the bounded `mthds_contents` payload, the `allow_signatures` opt-in, and the single
-    per-file size guard that every validation-performing route needs. `/validate` uses it as-is;
-    the build routes subclass it to add `pipe_code` (and `/build/output` a `format`). Keeping the
-    field, its public OpenAPI description, and the validator in one place stops them drifting across
-    the four endpoints.
+    The pipe selector is the **qualified** ref `domain.pipe_code`, mirroring `pipelex codegen inputs
+    --pipe`. It is optional: omitted, it resolves to the closure's declared `main_pipe`, which is
+    what a single-bundle caller almost always wants. A closure that declares no `main_pipe` — or
+    several, across domains — cannot be defaulted, so an omitted selector is a request-shape 422
+    there (the same two arms the CLI rejects on).
+    """
+
+    pipe_ref: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_PIPE_CODE_LEN,
+        description=(
+            "Qualified pipe ref (`domain.pipe_code`) to project. Optional — defaults to the closure's declared "
+            "`main_pipe`; a closure declaring none, or several, requires it explicitly."
+        ),
+    )
+
+
+ALLOW_SIGNATURES_DESCRIPTION = (
+    "When true, the validation sweep tolerates unimplemented pipe signatures instead of rejecting the "
+    "bundle (signatures dry-run trivially by minting a mock). Defaults to false (strict)."
+)
+"""Shared by the two routes that still run the dry-run sweep (`/validate`, `/build/runner`) — the flag only
+parameterizes that sweep, so the static `/build/{inputs,output}` projections do not accept it."""
+
+
+class MthdsContentsRequest(BaseModel):
+    """The `POST /validate` request envelope: bare `mthds_contents` strings plus the sweep's `allow_signatures`.
+
+    This is the *older* envelope, now used by `/validate` alone. Every other content-taking route has
+    moved to `MthdsFilesRequest` (`files[]` with per-file `source` labels XOR a `method_ref`), which
+    carries the source labels diagnostics need and the method-registry selector. `/validate` stays
+    here deliberately: it is an MTHDS Protocol route, so changing its envelope is a protocol-level
+    decision owned by the `mthds/` spec, not this server's to take (see `TODOS.md` → follow-ups).
     """
 
     mthds_contents: list[str] = Field(
@@ -286,11 +315,7 @@ class MthdsContentsRequest(BaseModel):
         max_length=MAX_MTHDS_FILES_PER_REQUEST,
         description="MTHDS contents to load (always an array, even for a single file).",
     )
-    allow_signatures: bool = Field(
-        default=False,
-        description="When true, the validation sweep tolerates unimplemented pipe signatures instead of rejecting the "
-        "bundle (signatures dry-run trivially by minting a mock). Defaults to false (strict).",
-    )
+    allow_signatures: bool = Field(default=False, description=ALLOW_SIGNATURES_DESCRIPTION)
 
     @field_validator("mthds_contents")
     @classmethod

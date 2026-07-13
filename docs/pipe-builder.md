@@ -1,12 +1,28 @@
 # Pipe Builder
 
-Generate input templates, output representations, and Python runner code for pipelines defined in MTHDS content.
+Generate input templates, output representations, and Python runner code for a pipe of an MTHDS library closure.
 
 All three build endpoints speak the same verdict discipline as [`POST /v1/validate`](pipe-validate.md): a **produced verdict is always a `200`** discriminated on the body's `is_valid` field. The valid arm carries the built artifact; the invalid arm carries the structured `validation_errors[]` built by pipelex's one shared error builder. Non-2xx is reserved for *no verdict could be produced* — request-shape `422`, auth `401`/`403`, server `5xx` — rendered as RFC 7807 `application/problem+json` (see [Error Responses](error-responses.md)).
 
+## The shared request envelope
+
+All three take the same **closure selector** as [`POST /v1/resolve` and `POST /v1/codegen`](codegen.md) — inline `files[]` **XOR** a `method_ref` — plus a **pipe selector**:
+
+- `files` (list, required unless `method_ref`): the inline MTHDS bundles forming the closure. Each item is `{ "content": "<mthds text>", "source": "<optional logical path>" }`. The optional `source` is threaded onto the blueprint, so diagnostics point at the owning file.
+- `method_ref` (string): a reference to an installed/published method. Accepted by the envelope, but this server answers `501` until server-side method-registry resolution exists.
+- `pipe_ref` (string, **optional**): the qualified pipe ref `domain.pipe_code` to project — the same selector as `pipelex codegen inputs --pipe`. Omitted, it defaults to the closure's declared `main_pipe`. A closure that declares **no** `main_pipe`, or **several** across domains, cannot be defaulted: an omitted `pipe_ref` is a `422` there.
+
+Every valid arm echoes both `pipe_ref` (the ref actually projected, always qualified) and `requested_pipe_ref` (the ref as submitted — **absent** when it was omitted and defaulted), so a caller can always see which pipe it got.
+
+## Static projections vs. the runner
+
+`/build/inputs` and `/build/output` are **static**: they resolve the closure to its normalized crate and read the requested pipe's **declared** IO. There is no dry-run sweep, and therefore no `allow_signatures` flag (it only ever parameterized that sweep). A valid verdict from them says the closure is structurally sound and the projection matches what the pipe *declares* — it is **not** a promise the pipe runs. Runnability is [`/validate`](pipe-validate.md)'s vocabulary; ask it.
+
+`/build/runner` is the exception. A runner script *is* a promise the pipe can run, so it keeps the dry-run sweep and keeps `allow_signatures`.
+
 ## Build Inputs
 
-Generate example input JSON for a pipe, showing the expected input structure with concept types and placeholder content.
+Generate an example inputs template for a pipe — the same projection `pipelex codegen inputs` writes, on both of its axes.
 
 **Endpoint:** `POST /v1/build/inputs`
 
@@ -14,36 +30,40 @@ Generate example input JSON for a pipe, showing the expected input structure wit
 
 ```json
 {
-  "mthds_contents": ["domain = \"cv_matching\"\ndescription = \"CV job matching\"\nmain_pipe = \"analyze_cv_job_match\"\n\n[concept.MatchAnalysis]\ndescription = \"Match analysis result\"\n\n[concept.MatchAnalysis.structure]\nscore = { type = \"integer\", description = \"Match score 0-100\" }\n\n[pipe.analyze_cv_job_match]\ntype = \"PipeLLM\"\ndescription = \"Analyze CV against job offer\"\ninputs = { cv_text = \"native.Text\", job_offer = \"native.Text\" }\noutput = \"MatchAnalysis\""],
-  "pipe_code": "analyze_cv_job_match"
+  "files": [
+    { "content": "domain = \"cv_matching\"\nmain_pipe = \"analyze_cv_job_match\"\n\n[pipe.analyze_cv_job_match]\ntype = \"PipeLLM\"\ndescription = \"Analyze CV against job offer\"\ninputs = { cv_text = \"native.Text\", job_offer = \"native.Text\" }\noutput = \"MatchAnalysis\"", "source": "cv_matching.mthds" }
+  ],
+  "pipe_ref": "cv_matching.analyze_cv_job_match"
 }
 ```
 
-**Request Fields:**
+**Request Fields:** the shared envelope above, plus:
 
-- `mthds_contents` (list[str], required): MTHDS contents to load pipes from (always an array, even for a single file)
-- `pipe_code` (string, required): Pipe code to generate inputs JSON for
-- `allow_signatures` (boolean, optional): Tolerate unimplemented pipe signatures in the dry-run sweep (default `false`)
+- `format` (string, optional): `"json"` (default) or `"toml"`.
+- `explicit` (boolean, optional, default `false`): when `true`, emit the ceremonial `{concept, content}` envelope for every input. The default is the *light*, signature-driven shape — a bare string for a Text-refining input, a bare number for a Number-refining one, and so on — which is what smart inputs accepts.
 
-**Response (valid verdict):**
+**The template rides the field its `format` names.** JSON is a parsed object in `inputs`; TOML is raw text in `inputs_toml`. TOML cannot ride as a parsed object without losing the concept comments and key order that are the reason to ask for it, and the JSON case must stay a real object because that is what clients feed straight into a run. The field the format did not select is **omitted from the body entirely**.
+
+**Response (valid verdict, default light JSON):**
 
 ```json
 {
   "is_valid": true,
-  "pipe_code": "analyze_cv_job_match",
+  "pipe_ref": "cv_matching.analyze_cv_job_match",
+  "requested_pipe_ref": "cv_matching.analyze_cv_job_match",
+  "format": "json",
+  "explicit": false,
   "inputs": {
-    "cv_text": {
-      "concept": "native.Text",
-      "content": { "text": "text_value" }
-    },
-    "job_offer": {
-      "concept": "native.Text",
-      "content": { "text": "text_value" }
-    }
+    "cv_text": "text_value",
+    "job_offer": "text_value"
   },
   "message": "Inputs template generated successfully"
 }
 ```
+
+With `"explicit": true`, each value becomes its `{ "concept": "native.Text", "content": { "text": "text_value" } }` envelope instead. With `"format": "toml"`, the body carries `inputs_toml` (a string) in place of `inputs`.
+
+A pipe that declares **no inputs** is a *valid* verdict, not an error: the template is simply empty (`{}` / `""`) and `message` says so — mirroring the CLI, which exits 0 on it.
 
 **Response (invalid verdict):** `200` with `is_valid: false` and `validation_errors[]` — the same invalid arm every build endpoint returns:
 
@@ -51,7 +71,7 @@ Generate example input JSON for a pipe, showing the expected input structure wit
 {
   "is_valid": false,
   "validation_errors": [
-    { "category": "blueprint_validation", "message": "...", "source": "..." }
+    { "category": "blueprint_validation", "message": "...", "source": "cv_matching.mthds" }
   ],
   "message": "..."
 }
@@ -71,31 +91,30 @@ Generate the output representation for a pipe in one of three formats.
 
 ```json
 {
-  "mthds_contents": ["...your MTHDS content..."],
-  "pipe_code": "analyze_cv_job_match",
+  "files": [{ "content": "...your MTHDS content..." }],
+  "pipe_ref": "cv_matching.analyze_cv_job_match",
   "format": "schema"
 }
 ```
 
-**Request Fields:**
+**Request Fields:** the shared envelope above, plus:
 
-- `mthds_contents` (list[str], required): MTHDS contents to load pipes from
-- `pipe_code` (string, required): Pipe code to generate output for
-- `format` (string, optional): Output format — `"schema"` (default), `"json"`, or `"python"`. **Must be lowercase.**
-- `allow_signatures` (boolean, optional): Tolerate unimplemented pipe signatures in the dry-run sweep (default `false`)
+- `format` (string, optional): `"schema"` (default), `"json"`, or `"python"`. **Must be lowercase.**
 
 **Format Options:**
 
-- `schema` — JSON Schema representation of the output concept
-- `json` — Example JSON instance of the output
-- `python` — Python code defining the output class
+- `schema` — JSON Schema representation of the output concept → parsed object in `output`
+- `json` — Example JSON instance of the output → parsed object in `output`
+- `python` — Python source defining the output class → raw text in `output_python`
+
+As with `/build/inputs`, the representation rides the field its `format` names, and the other is omitted.
 
 **Response (valid verdict, schema format):**
 
 ```json
 {
   "is_valid": true,
-  "pipe_code": "analyze_cv_job_match",
+  "pipe_ref": "cv_matching.analyze_cv_job_match",
   "format": "schema",
   "output": {
     "concept": "MatchAnalysis",
@@ -111,6 +130,8 @@ Generate the output representation for a pipe in one of three formats.
 }
 ```
 
+One no-verdict special case: a pipe whose output is `native.Anything` and whose concrete options cannot be determined has no representation to render — a request-shape `422`, since that is a fact about the requested pipe, not about the closure.
+
 The invalid verdict is the shared `is_valid: false` arm shown under Build Inputs.
 
 ---
@@ -125,23 +146,23 @@ Generate a Python runner script for executing a pipe. The script's imports, exam
 
 ```json
 {
-  "mthds_contents": ["...your MTHDS content..."],
-  "pipe_code": "analyze_cv_job_match"
+  "files": [{ "content": "...your MTHDS content..." }],
+  "pipe_ref": "cv_matching.analyze_cv_job_match"
 }
 ```
 
-**Request Fields:**
+**Request Fields:** the shared envelope above, plus:
 
-- `mthds_contents` (list[str], required): MTHDS contents to load and generate runner code for
-- `pipe_code` (string, required): Pipe code to generate runner code for
-- `allow_signatures` (boolean, optional): Tolerate unimplemented pipe signatures in the dry-run sweep (default `false`)
+- `allow_signatures` (boolean, optional): tolerate unimplemented pipe signatures in the dry-run sweep (default `false`). This is the only build route that takes it — the only one that still sweeps.
+
+The sweep is scoped to the requested pipe, so unrelated broken siblings do not block a good pipe. When `pipe_ref` is omitted the scope cannot be known before the closure loads, so the **whole closure** is swept and the pipe then defaults to its `main_pipe` — a stricter verdict, and the honest one for a caller who did not say which pipe they meant.
 
 **Response (valid verdict):**
 
 ```json
 {
   "is_valid": true,
-  "pipe_code": "analyze_cv_job_match",
+  "pipe_ref": "cv_matching.analyze_cv_job_match",
   "python_code": "import sys\nfrom pathlib import Path\n...",
   "structures": {
     "directory": "structures",

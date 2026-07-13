@@ -3,10 +3,15 @@
 After the signatures-as-data reframe, an unimplemented `PipeSignature` is **never** a validation
 error — it is a *runnability fact*. `allow_signatures` no longer gates acceptance; it only controls
 whether signature pipes are mock-run during the dry-run sweep (and therefore listed in
-`validated_pipes`). So a bundle containing a signature is accepted in BOTH modes across the
-validate/build routes. On `/validate` the outstanding signature surfaces as `pending_signatures` +
-`is_runnable: false` (a 200 `ValidReport`, since the verdict is "sound but not runnable"), and the
-only mode difference is whether the signature pipe appears in `validated_pipes`.
+`validated_pipes`). So a bundle containing a signature is accepted in BOTH modes on the two routes
+that still run that sweep — `/validate` and `/build/runner`. On `/validate` the outstanding signature
+surfaces as `pending_signatures` + `is_runnable: false` (a 200 `ValidReport`, since the verdict is
+"sound but not runnable"), and the only mode difference is whether the signature pipe appears in
+`validated_pipes`.
+
+The static projections (`/build/{inputs,output}`) dropped the sweep entirely, so they no longer take
+the flag at all — a signature bundle is simply accepted there, and that is asserted in
+`test_build_routes_envelope.py`, not here.
 
 (`SignaturesNotAllowedError` — the strict-mode rejection this module used to assert — was removed
 with the de-raise; the build routes no longer reject a signature bundle.)
@@ -33,15 +38,13 @@ class TestAllowSignatures:
         ("path", "payload_base"),
         [
             ("/v1/validate", {"mthds_contents": [SIGNATURE_MTHDS]}),
-            ("/v1/build/runner", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq"}),
-            ("/v1/build/inputs", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq"}),
-            ("/v1/build/output", {"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq"}),
+            ("/v1/build/runner", {"files": [{"content": SIGNATURE_MTHDS}], "pipe_ref": "sig_api.caller_seq"}),
         ],
     )
     @pytest.mark.parametrize("allow_signatures", [False, True], ids=["strict", "lenient"])
     def test_signature_bundle_accepted_in_both_modes(self, path: str, payload_base: dict[str, object], allow_signatures: bool):
-        # An unimplemented signature is never a rejection (D-B): both modes answer 200 on every
-        # validate/build route. Strict no longer differs from lenient on acceptance.
+        # An unimplemented signature is never a rejection (D-B): both modes answer 200 on the two routes
+        # that still sweep. Strict no longer differs from lenient on acceptance.
         client = _build_client()
         response = client.post(path, json={**payload_base, "allow_signatures": allow_signatures})
         assert response.status_code == 200, response.text
@@ -82,10 +85,10 @@ class TestAllowSignatures:
         client = _build_client()
         response = client.post(
             "/v1/build/runner",
-            json={"mthds_contents": [SIGNATURE_MTHDS], "pipe_code": "caller_seq", "allow_signatures": True},
+            json={"files": [{"content": SIGNATURE_MTHDS}], "pipe_ref": "sig_api.caller_seq", "allow_signatures": True},
         )
         assert response.status_code == 200, response.text
         body = response.json()
         assert body["is_valid"] is True
-        assert body["pipe_code"] == "caller_seq"
+        assert body["pipe_ref"] == "sig_api.caller_seq"
         assert body["python_code"]

@@ -79,12 +79,12 @@ class TestBuildAndAgentRoutes:
     # D2) — a bundle without `main_pipe` now answers 200 with `graph_spec=null`. The
     # regression pin for that behavior (both backends) lives in `test_validate_envelope.py`.
 
-    def test_build_inputs_rejects_oversized_pipe_code(self):
+    def test_build_inputs_rejects_oversized_pipe_ref(self):
         client = _build_client()
-        long_code = "x" * 1024
+        long_ref = "x" * 1024
         response = client.post(
             "/v1/build/inputs",
-            json={"mthds_contents": [VALID_MTHDS], "pipe_code": long_code},
+            json={"files": [{"content": VALID_MTHDS}], "pipe_ref": long_ref},
         )
         assert response.status_code == 422
         assert response.headers["content-type"] == "application/problem+json"
@@ -168,18 +168,11 @@ class TestBuildAndAgentRoutes:
         assert {model["type"] for model in body["models"]} == {"llm"}
         assert set(body["aliases"]) <= {"llm"}
 
-    @pytest.mark.parametrize(
-        ("path", "payload"),
-        [
-            ("/v1/validate", {"mthds_contents": []}),
-            ("/v1/build/inputs", {"mthds_contents": [], "pipe_code": "x"}),
-            ("/v1/build/output", {"mthds_contents": [], "pipe_code": "x"}),
-            ("/v1/build/runner", {"mthds_contents": [], "pipe_code": "x"}),
-        ],
-    )
-    def test_empty_mthds_contents_rejected(self, path: str, payload: dict[str, object]):
+    def test_empty_mthds_contents_rejected(self):
+        # `/validate` is the last route on the `mthds_contents` envelope (it is protocol-owned; the
+        # build routes moved to `files[]`, whose empty-selector rejection lives in the envelope suite).
         client = _build_client()
-        response = client.post(path, json=payload)
+        response = client.post("/v1/validate", json={"mthds_contents": []})
         assert response.status_code == 422
         assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "ValidationError"
@@ -207,7 +200,7 @@ class TestBuildAndAgentRoutes:
         client = TestClient(app, raise_server_exceptions=False)
         response = client.post(
             "/v1/build/runner",
-            json={"mthds_contents": [VALID_MTHDS], "pipe_code": "echo"},
+            json={"files": [{"content": VALID_MTHDS}], "pipe_ref": "smoke.echo"},
         )
 
         # The synthetic RuntimeError propagates to the global Exception handler.
@@ -234,7 +227,7 @@ class TestBuildAndAgentRoutes:
         client = TestClient(app, raise_server_exceptions=False)
         response = client.post(
             "/v1/build/runner",
-            json={"mthds_contents": [VALID_MTHDS], "pipe_code": "echo"},
+            json={"files": [{"content": VALID_MTHDS}], "pipe_ref": "smoke.echo"},
         )
 
         assert response.status_code == 500, response.text
@@ -250,13 +243,13 @@ class TestBuildAndAgentRoutes:
         client = _build_client()
         response = client.post(
             "/v1/build/runner",
-            json={"mthds_contents": [VALID_MTHDS], "pipe_code": "echo"},
+            json={"files": [{"content": VALID_MTHDS}], "pipe_ref": "smoke.echo"},
         )
         assert response.status_code == 200, response.text
         body = response.json()
         assert body["is_valid"] is True
         assert "success" not in body
-        assert body["pipe_code"] == "echo"
+        assert body["pipe_ref"] == "smoke.echo"
         assert body["python_code"]
         assert "echo" in body["python_code"]
         structures = body["structures"]
@@ -276,30 +269,13 @@ class TestBuildAndAgentRoutes:
         client = _build_client()
         response = client.post(
             "/v1/build/runner",
-            json={"mthds_contents": [VALID_MTHDS], "pipe_code": "echo"},
+            json={"files": [{"content": VALID_MTHDS}], "pipe_ref": "smoke.echo"},
         )
         assert response.status_code == 200, response.text
         teardown_spy.assert_called_once()
 
-    @pytest.mark.parametrize("path", ["/v1/build/inputs", "/v1/build/output", "/v1/build/runner"])
-    def test_build_route_reuses_validate_bundle_library_without_leaking(self, path: str, mocker: MockerFixture):
-        # C-2 / Q-5: the build routes must NOT open a second library. validate_bundle
-        # opens exactly one library and leaves it loaded + current on success; the route reads the pipe
-        # from that library and tears down the same id. Before the fix the route opened a SECOND library
-        # and tore down only that one, orphaning validate_bundle's library on every successful call.
-        library_manager = get_library_manager()
-        open_spy = mocker.spy(library_manager, "open_library")
-        teardown_spy = mocker.spy(library_manager, "teardown")
-
-        client = _build_client()
-        response = client.post(path, json={"mthds_contents": [VALID_MTHDS], "pipe_code": "echo"})
-
-        assert response.status_code == 200, response.text
-        # Exactly one library opened (inside validate_bundle) — no second open in the route.
-        assert open_spy.call_count == 1
-        created_library_id, _ = open_spy.spy_return
-        # ...and that exact library is the one torn down — no orphan left in LibraryManager._libraries.
-        teardown_spy.assert_called_once_with(library_id=created_library_id)
+    # NOTE: the "opens exactly one library, tears down that same id" property (C-2 / Q-5) is pinned for
+    # all three build routes in `test_build_routes_envelope.py`, which covers both cores they now ride.
 
     def test_build_runner_rejects_when_requested_pipe_is_skipped(self, mocker: MockerFixture):
         # C-3: a cross-package unresolved dependency makes validate_pipes record the requested pipe
@@ -326,7 +302,7 @@ class TestBuildAndAgentRoutes:
         client = _build_client()
         response = client.post(
             "/v1/build/runner",
-            json={"mthds_contents": [VALID_MTHDS], "pipe_code": "echo"},
+            json={"files": [{"content": VALID_MTHDS}], "pipe_ref": "smoke.echo"},
         )
 
         assert response.status_code == 422, response.text
@@ -354,7 +330,7 @@ class TestBuildAndAgentRoutes:
         client = _build_client()
         response = client.post(
             "/v1/build/runner",
-            json={"mthds_contents": [VALID_MTHDS], "pipe_code": "echo"},
+            json={"files": [{"content": VALID_MTHDS}], "pipe_ref": "smoke.echo"},
         )
 
         assert response.status_code == 200, response.text

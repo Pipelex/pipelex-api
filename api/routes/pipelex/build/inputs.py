@@ -1,73 +1,179 @@
 import json
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal, Self, Union
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from pipelex.hub import clear_current_library, get_current_library_id_or_none, get_library_manager, get_required_pipe
+from pipelex.core.pipes.inputs.exceptions import NoInputsRequiredError
+from pipelex.core.pipes.inputs.input_renderer import InputsTemplateFormat, render_inputs, render_inputs_toml
 from pipelex.pipeline.exceptions import ValidateBundleError
-from pipelex.pipeline.validate_bundle import validate_bundle
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-from api.limits import MAX_PIPE_CODE_LEN
-from api.routes.pipelex.crate_ops import CrateInvalidReport, invalid_crate_report_response
-from api.schemas.models import MthdsContentsRequest
+from api.openapi_responses import PROBLEM_501_METHOD_REF
+from api.routes.pipelex.crate_ops import (
+    CrateInvalidReport,
+    RequestedPipe,
+    invalid_crate_report_response,
+    resolve_requested_crate,
+    resolve_requested_pipe,
+    teardown_current_library,
+)
+from api.schemas.models import MthdsPipeRequest
 
 router = APIRouter(tags=["build"])
 
+INPUTS_GENERATED_MESSAGE = "Inputs template generated successfully"
+NO_INPUTS_MESSAGE = "This pipe declares no inputs — the template is empty."
 
-class BuildInputsRequest(MthdsContentsRequest):
-    pipe_code: str = Field(..., min_length=1, max_length=MAX_PIPE_CODE_LEN, description="Pipe code to generate inputs JSON for.")
+
+class BuildInputsRequest(MthdsPipeRequest):
+    """The inputs-template request: the shared closure + pipe selectors, plus the two rendering axes.
+
+    Both axes mirror `pipelex codegen inputs` exactly — `--format` and `--explicit` — and every
+    combination of them is served, as on the CLI.
+    """
+
+    format: InputsTemplateFormat = Field(
+        default=InputsTemplateFormat.JSON,
+        description="Template encoding. `json` returns the parsed template in `inputs`; `toml` returns the raw text in `inputs_toml`.",
+    )
+    explicit: bool = Field(
+        default=False,
+        description=(
+            "When true, emit the ceremonial `{concept, content}` envelope for every input. Defaults to false — the light, "
+            "signature-driven shape that smart inputs accepts (a bare string for a Text input, and so on)."
+        ),
+    )
 
 
 class BuildInputsValidReport(BaseModel):
-    """The 200 **valid** arm: the example inputs template for the requested pipe."""
+    """The 200 **valid** arm: the example inputs template for the requested pipe.
+
+    The template rides **one of two fields, chosen by `format`** — `inputs` (parsed object) for
+    `json`, `inputs_toml` (raw text) for `toml`. TOML cannot be carried as a parsed object without
+    losing what makes it worth asking for (its concept comments and key order), and the JSON case
+    must stay a real object, since that is what the deploy dialog and the SDKs consume. So the two
+    are separate, honestly-typed fields, and the unused one is omitted from the body entirely.
+
+    A pipe that declares no inputs is a *valid* verdict, not an error (the CLI likewise exits 0):
+    the template is simply empty, and `message` says so.
+    """
 
     is_valid: Literal[True] = True
-    pipe_code: str = Field(..., description="The pipe the inputs template was generated for (echo of the request).")
-    inputs: dict[str, Any] = Field(..., description="Example input JSON for the pipe (the same template `pipelex codegen inputs` renders).")
-    message: str = Field(default="Inputs template generated successfully", description="Status message")
+    pipe_ref: str = Field(..., description="The qualified pipe the template was generated for — the resolved selector.")
+    requested_pipe_ref: str | None = Field(
+        default=None,
+        description="The `pipe_ref` as submitted. Absent when it was omitted and defaulted to the closure's `main_pipe`.",
+    )
+    format: InputsTemplateFormat = Field(..., description="The template encoding (echo of the request).")
+    explicit: bool = Field(..., description="Whether the ceremonial envelope shape was emitted (echo of the request).")
+    inputs: dict[str, Any] | None = Field(
+        default=None,
+        description="The parsed inputs template — present exactly when `format` is `json`.",
+    )
+    inputs_toml: str | None = Field(
+        default=None,
+        description="The inputs template as TOML text — present exactly when `format` is `toml`.",
+    )
+    message: str = Field(default=INPUTS_GENERATED_MESSAGE, description="Status message")
+
+    @model_validator(mode="after")
+    def _template_field_matches_format(self) -> Self:
+        # The invariant the two-field shape exists to keep: the caller can read the field its own
+        # `format` names, without probing. A route bug that set the other one would be a silent
+        # contract break, so it fails loudly here instead.
+        match self.format:
+            case InputsTemplateFormat.JSON:
+                if self.inputs is None or self.inputs_toml is not None:
+                    msg = "format='json' must carry `inputs` and no `inputs_toml`"
+                    raise ValueError(msg)
+            case InputsTemplateFormat.TOML:
+                if self.inputs_toml is None or self.inputs is not None:
+                    msg = "format='toml' must carry `inputs_toml` and no `inputs`"
+                    raise ValueError(msg)
+        return self
 
 
-# Discriminated 200 response union: the `/validate` discipline — the verdict rides `is_valid`,
-# never the HTTP status (breaking change from the previous bare-JSON body).
+# Discriminated 200 response union: the `/validate` discipline — the verdict rides `is_valid`, never
+# the HTTP status.
 BuildInputsResponse = Annotated[Union[BuildInputsValidReport, CrateInvalidReport], Field(discriminator="is_valid")]
 
 
-@router.post("/build/inputs", response_model=BuildInputsResponse)
-async def build_inputs(request_data: BuildInputsRequest) -> JSONResponse:
-    """Generate example input JSON for a pipe (the inputs projection, per pipe).
+def _render_report(*, requested: BuildInputsRequest, requested_pipe: RequestedPipe) -> BuildInputsValidReport:
+    """Render the requested pipe's declared inputs into the valid arm, on the `format` axis.
 
-    `validate_bundle` opens a single library, loads the bundle, and on success leaves it loaded +
-    current (the loaded-on-success contract); on failure it tears that library down itself. So
-    this route reuses the already-current library directly — no second `open_library` /
-    `load_from_blueprints` — and owns the teardown only on the success path it reaches. Scoping the
-    sweep to the requested pipe (`dry_run_pipe_codes`) avoids dry-running unrelated sibling pipes.
-
-    Response contract (the `/validate` discipline): an invalid bundle is a produced verdict —
-    a **200** `is_valid: false` with the structured `validation_errors[]` — not a 422. Non-2xx is
-    reserved for no-verdict conditions (request shape, auth, server fault), rendered RFC 7807 by
-    the global handlers.
+    A pipe with no inputs raises `NoInputsRequiredError` out of the engine renderers. That is not a
+    failure — it is the honest answer "run this with nothing" — so it lands on the valid arm as an
+    empty template, mirroring the CLI's exit-0.
     """
-    library_manager = get_library_manager()
+    inputs: dict[str, Any] | None = None
+    inputs_toml: str | None = None
+    message: str = INPUTS_GENERATED_MESSAGE
+    match requested.format:
+        case InputsTemplateFormat.JSON:
+            try:
+                inputs = json.loads(render_inputs(requested_pipe.pipe, explicit=requested.explicit))
+            except NoInputsRequiredError:
+                inputs = {}
+                message = NO_INPUTS_MESSAGE
+        case InputsTemplateFormat.TOML:
+            try:
+                inputs_toml = render_inputs_toml(requested_pipe.pipe, explicit=requested.explicit)
+            except NoInputsRequiredError:
+                inputs_toml = ""
+                message = NO_INPUTS_MESSAGE
+    return BuildInputsValidReport(
+        pipe_ref=requested_pipe.ref,
+        requested_pipe_ref=requested.pipe_ref,
+        format=requested.format,
+        explicit=requested.explicit,
+        inputs=inputs,
+        inputs_toml=inputs_toml,
+        message=message,
+    )
 
+
+@router.post(
+    "/build/inputs",
+    response_model=BuildInputsResponse,
+    # On top of the composite router's shared 401/413/422/500: the `method_ref` closure selector the
+    # envelope accepts but no server-side method registry resolves yet (shared with /resolve, /codegen).
+    responses={501: PROBLEM_501_METHOD_REF},
+)
+async def build_inputs(request_data: BuildInputsRequest) -> JSONResponse:
+    """Generate an example inputs template for a pipe (the inputs projection, per pipe).
+
+    Rides the **same static core** as `POST /resolve` and `POST /codegen`: the closure is resolved to
+    its normalized crate, the requested pipe is read live from the library that leaves loaded, and its
+    *declared* inputs are rendered — the exact projection `pipelex codegen inputs` writes, on both of
+    its axes (`format`, `explicit`).
+
+    Static is the point: a template is a read of the pipe's declared IO, so there is **no dry-run
+    sweep** here (that is `/validate`'s vocabulary, and `/build/runner`'s need). A valid verdict says
+    the closure is structurally sound and the template matches what the pipe declares — it is *not* a
+    promise the pipe runs. Ask `/validate` for that.
+
+    This projection is deliberately **not** a `/codegen` kind: the templates are user-editable
+    scaffolds, never stamped or locked, so they cannot ride the trust chain `/codegen`'s valid arm
+    promises (see `CodegenRouteKind`).
+
+    Response contract (the `/validate` discipline):
+
+    - **Valid verdict (200, `is_valid: true`):** the template, in `inputs` or `inputs_toml` per `format`.
+    - **Invalid verdict (200, `is_valid: false`):** the closure could not be parsed, loaded, or
+      validated — `validation_errors[]` from pipelex's one shared builder; no template exists.
+    - **No verdict (non-2xx):** an unknown pipe ref, an omitted `pipe_ref` on a closure with no (or
+      several) `main_pipe`, or a malformed closure selector is a request-shape 422 problem+json;
+      `method_ref` is a 501 until server-side method-registry resolution exists.
+    """
     try:
-        # If this raises, validate_bundle has already torn down its own library — nothing to clean up here.
-        await validate_bundle(
-            mthds_contents=request_data.mthds_contents,
-            allow_signatures=request_data.allow_signatures,
-            dry_run_pipe_codes=[request_data.pipe_code],
-        )
+        crate = resolve_requested_crate(request_data)
     except ValidateBundleError as validate_error:
         return invalid_crate_report_response(validate_error.to_error_report())
-
-    # Success: validate_bundle left its library loaded + current. Read the pipe from it, then own its teardown.
-    library_id = get_current_library_id_or_none()
     try:
-        the_pipe = get_required_pipe(pipe_code=request_data.pipe_code)
-        inputs_json_str = the_pipe.inputs.render_inputs(indent=2)
-        report = BuildInputsValidReport(pipe_code=request_data.pipe_code, inputs=json.loads(inputs_json_str))
-        return JSONResponse(content=report.model_dump(mode="json", by_alias=True))
+        requested_pipe = resolve_requested_pipe(crate, pipe_ref=request_data.pipe_ref)
+        report = _render_report(requested=request_data, requested_pipe=requested_pipe)
+        # exclude_none drops the template field the `format` did not select (and an absent
+        # `requested_pipe_ref`), so exactly the fields the caller's own request implies are present.
+        return JSONResponse(content=report.model_dump(mode="json", by_alias=True, exclude_none=True))
     finally:
-        clear_current_library()
-        if library_id is not None:
-            library_manager.teardown(library_id=library_id)
+        teardown_current_library()

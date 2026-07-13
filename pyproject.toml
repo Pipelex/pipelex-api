@@ -27,7 +27,7 @@ dependencies = [
 # Pinned to a git rev, not a local editable path: CI has no sibling checkout, so `../pipelex` fails
 # `uv sync` on a runner. The rev carries the unreleased `codegen` engine this API rides; swap back to
 # a plain `==<version>` PyPI pin once a pipelex release ships it.
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "27e6f3e5776e479259b951367809a1744a15670e" }
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "4519ae3d7ef6bc0ffe1d7d6eeed364171b87e1a3" }
 
 [build-system]
 requires = ["hatchling"]

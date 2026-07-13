@@ -167,10 +167,10 @@ Lint and format single `.mthds` files without loading or executing a pipeline.
 [Learn more →](mthds-tools.md)
 
 ### Pipe Builder
-Generate input schemas, output representations, and runner code for pipelines.
+Generate input templates, output representations, and runner code for one pipe of a library closure. All three take the same closure selector as `/v1/resolve` and `/v1/codegen` (inline `files[]` XOR `method_ref`), plus an optional qualified `pipe_ref` defaulting to the closure's `main_pipe`.
 
-- `POST /v1/build/inputs` — Generate example input JSON for a pipe
-- `POST /v1/build/output` — Generate output representation (schema, JSON, or Python)
+- `POST /v1/build/inputs` — Generate an example inputs template for a pipe (JSON or TOML)
+- `POST /v1/build/output` — Generate an output representation (schema, JSON, or Python)
 - `POST /v1/build/runner` — Generate Python runner code for a pipe
 
 [Learn more →](pipe-builder.md)

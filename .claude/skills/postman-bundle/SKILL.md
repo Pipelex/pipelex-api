@@ -25,16 +25,16 @@ This is a focused, one-bundle-at-a-time tool. It is **not** the full collection 
 
 ## Endpoint cheat sheet
 
-| `--endpoint` | Route | Body envelope | Needs `pipe_code`? | Needs `inputs`? | Inference? |
+| `--endpoint` | Route | Body envelope | Needs a pipe? | Needs `inputs`? | Inference? |
 |---|---|---|---|---|---|
-| `execute` | `POST /v1/execute` | run | yes | yes | **YES — costs money** |
+| `execute` | `POST /v1/execute` | run (`pipe_code`) | yes | yes | **YES — costs money** |
 | `start` | `POST /v1/start` | run + `callback_urls` | yes | yes | **YES — costs money** |
 | `validate` | `POST /v1/validate` | `mthds_contents` | no | no | no (free dry-run) |
 | `resolve` | `POST /v1/resolve` | `files[]` crate | no | no | no (free) |
 | `codegen` | `POST /v1/codegen` | `files[]` crate + `kind`/`target` | no | no | no (free) |
-| `build-inputs` | `POST /v1/build/inputs` | `mthds_contents` + `pipe_code` | yes | no | no (free) |
-| `build-output` | `POST /v1/build/output` | + `format` | yes | no | no (free) |
-| `build-runner` | `POST /v1/build/runner` | `mthds_contents` + `pipe_code` | yes | no | no (free) |
+| `build-inputs` | `POST /v1/build/inputs` | `files[]` + `pipe_ref` + `format`/`explicit` | optional | no | no (free) |
+| `build-output` | `POST /v1/build/output` | `files[]` + `pipe_ref` + `format` | optional | no | no (free) |
+| `build-runner` | `POST /v1/build/runner` | `files[]` + `pipe_ref` + `allow_signatures` | optional | no | no (free) |
 
 Every non-run endpoint answers with the **`/validate` verdict discipline**: a produced verdict is always a `200` discriminated on `is_valid` — the artifact on the valid arm, structured `validation_errors[]` on the invalid arm. Non-2xx is reserved for no-verdict conditions (request-shape `422`, auth `401`/`403`, server `5xx`), rendered as RFC 7807 `problem+json`.
 
@@ -56,7 +56,7 @@ Which requests appear depends on `--endpoint`: the default `both` is `execute` +
 
 ## The two request envelopes
 
-**Run/validate/build routes** carry the bundle as parallel lists — `mthds_contents` (full text of each `.mthds` file, main one first) plus, on `/validate`, `mthds_sources` (one filename per content, so `validation_errors[].source` names the owning file):
+**Run + validate routes** carry the bundle as parallel lists — `mthds_contents` (full text of each `.mthds` file, main one first) plus, on `/validate`, `mthds_sources` (one filename per content, so `validation_errors[].source` names the owning file):
 
 ```json
 {
@@ -67,9 +67,9 @@ Which requests appear depends on `--endpoint`: the default `both` is `execute` +
 }
 ```
 
-(`pipe_code` rides execute/start/build-*; `inputs` rides execute/start only; `allow_signatures` rides validate/build-*.)
+(`pipe_code` and `inputs` ride execute/start only; `allow_signatures` rides validate.)
 
-**Crate routes** (`resolve`, `codegen`) pair each content with its source in one `files[]` entry — the envelope the codegen spec pins. No `pipe_code`, no `inputs`; the closure is the whole request:
+**Crate + build routes** (`resolve`, `codegen`, `build-*`) pair each content with its source in one `files[]` entry — the envelope the codegen spec pins. No `inputs`; the closure is the whole request. The build routes add a `pipe_ref` (the **qualified** `domain.pipe_code`; optional on the wire, defaulting to the closure's `main_pipe` — this skill always sends it explicitly):
 
 ```json
 {
@@ -79,14 +79,14 @@ Which requests appear depends on `--endpoint`: the default `both` is `execute` +
 }
 ```
 
-(`kind`/`target` are codegen-only.) The **start** body additionally carries `callback_urls` (see [Callback URLs](#callback-urls-the-async-start-endpoint)). The **validate** body optionally carries `render` (see below).
+(`kind`/`target` are codegen-only; `pipe_ref` is build-only.) The **start** body additionally carries `callback_urls` (see [Callback URLs](#callback-urls-the-async-start-endpoint)). The **validate** body optionally carries `render` (see below).
 
 ## Validate = the API's dry-run
 
 `POST /v1/validate` is the API's dry-run: it parses, loads, and dry-runs every pipe with mock inputs and **zero inference** (no LLM calls, no cost), then returns the validated bundle blueprint, a `graph_spec`, and per-pipe input/output JSON-Schema `pipe_io_contracts`. It confirms the whole pipeline wires up without ever running it — the safe, free counterpart to `execute`/`start`. Reach for it to "just check" or "dry-run" a bundle.
 
 - **`main_pipe` is optional for `/validate`.** A bundle with no `main_pipe` still validates (200, `is_valid: true`) — you just get `graph_spec: null`. `--pipe` is ignored.
-- **`allow_signatures`** (`--allow-signatures`) tolerates unimplemented pipe signatures instead of rejecting the bundle (each dry-runs trivially by minting a mock). Useful for in-progress bundles. Also applies to the build routes. Default strict.
+- **`allow_signatures`** (`--allow-signatures`) tolerates unimplemented pipe signatures instead of rejecting the bundle (each dry-runs trivially by minting a mock). Useful for in-progress bundles. It parameterizes the **dry-run sweep**, so it rides `validate` and `build-runner` only — the static `build-inputs`/`build-output` projections dropped the sweep and do not accept it. Default strict.
 - **`render`** (`--render markdown`) opts into a server-rendered Markdown view of the verdict, riding the 200 on both arms as `rendered_markdown`. This is what a **skill**-driven validate sends; a **hook** omits it and reads the structured `is_valid`. The structured fields stay the contract; the Markdown is the view.
 
 ## Resolve & Codegen (the crate routes)
@@ -105,10 +105,12 @@ The valid arm carries the **stamped** artifact set plus its `codegen.lock`: a cl
 
 ## Build routes (per-pipe projections)
 
-`POST /v1/build/{inputs,output,runner}` validate the bundle (dry-run sweep scoped to the requested pipe, no inference) and project one artifact for that pipe. They take `pipe_code` — resolved from the bundle's `main_pipe`, or `--pipe`:
+`POST /v1/build/{inputs,output,runner}` project one artifact for one pipe of the closure, with no inference. They ride the same `files[]` closure selector as the crate routes plus a `pipe_ref` — resolved here from the bundle's `domain` + `main_pipe`, or from `--pipe`.
 
-- **`build-inputs`** → the inputs JSON template for the pipe (what an `inputs.json` should look like).
-- **`build-output`** → the pipe's output representation; `--output-format schema|json|python` (default `schema`).
+`build-inputs` and `build-output` are **static**: they resolve the closure and read the pipe's *declared* IO — no dry-run sweep, so a valid verdict from them is not a promise the pipe runs (ask `validate` for that). `build-runner` keeps the sweep, because a runner script *is* that promise.
+
+- **`build-inputs`** → the inputs template for the pipe (what an `inputs.json` should look like). The valid arm carries `inputs` (a parsed object) for the default `format: json`, or `inputs_toml` (raw text) for `format: toml`; `explicit: true` swaps the light values for the ceremonial `{concept, content}` envelopes.
+- **`build-output`** → the pipe's output representation; `--output-format schema|json|python` (default `schema`). `schema`/`json` land in `output` (a parsed object); `python` lands in `output_python` (source text).
 - **`build-runner`** → a Python runner script spelling its imports with the **emitted** class names, plus the `structures` projection it imports from (stamped `structures.py` + `codegen.lock`, to write into a `structures/` directory beside the script) — matching what a local `pipelex build runner` scaffolds. A pipe recorded SKIPPED by the sweep (unresolved cross-package dependency) is a request-shape `422`.
 
 ## Callback URLs (the async `start` endpoint)
@@ -180,7 +182,7 @@ Useful options (apply across modes):
 | `--allow-signatures` | (validate + build routes) Tolerate unimplemented pipe signatures. Default strict. |
 | `--render <fmt>` | (validate only) Opt-in server-side view, e.g. `--render markdown` → response carries `rendered_markdown` (what a skill-driven validate sends). Omit for the lean structured body a hook reads. Repeatable. |
 | `--inputs <path>` | Inputs JSON lives elsewhere, or you point at a `.mthds` file directly (file mode does not auto-detect inputs). execute/start only. |
-| `--pipe <pipe_code>` | The bundle has no `main_pipe`, or you want a different pipe. Used by execute/start and the build routes; ignored by validate/resolve/codegen. |
+| `--pipe <pipe_code>` | The bundle has no `main_pipe`, or you want a different pipe. Used by execute/start (as `pipe_code`) and the build routes (qualified into `pipe_ref`); ignored by validate/resolve/codegen. |
 | `--callback-url <url>` | (start only) Webhook the async result is POSTed to. Repeatable. Falls back to `CALLBACK_URL` in env/`.env`. |
 | `--base-url` / `--token` | Target server + bearer for `--run`/`--curl`. |
 | `--name <folder>` | Override the per-bundle Postman subfolder name. |
@@ -201,7 +203,7 @@ Useful options (apply across modes):
 
 - **Directory** → use `bundle.mthds` if present, else the single `*.mthds` in the dir. Multiple `.mthds` and no `bundle.mthds` is ambiguous → ask the user to pass the file directly. The sibling `inputs.json` is auto-detected. Every `*.mthds` in the directory is sent (main one first), so multi-file bundles resolve.
 - **`.mthds` file** → used as-is; inputs only come from `--inputs`.
-- **`pipe_code`** comes from the bundle's `main_pipe` (override with `--pipe`).
+- **`pipe_code`** (run routes) comes from the bundle's `main_pipe` (override with `--pipe`); the build routes send it qualified as `pipe_ref` (`domain.pipe_code`).
 - **`inputs`** is the inputs.json content copied verbatim — exactly what the API receives, same as the CLI.
 
 ## Important: file/document inputs are out of scope
@@ -216,7 +218,7 @@ A related limit: the API receives only the inline bundle text, not the bundle di
 - **No `main_pipe` and no `--pipe`** (execute/start/build routes) → the script exits; ask the user which pipe and pass `--pipe`.
 - **`codegen` without `--target`** → the script exits listing the three targets; ask the user which consumer they're generating for.
 - **`start` selected and no callback URL** → the script exits. Resolve from `--callback-url`, `CALLBACK_URL` in `.env`, or ask the user (e.g. a `https://webhook.site/...` endpoint).
-- **No `main_pipe`, validating/resolving** → fine, not an error: those endpoints need no `pipe_code`; validate just returns `graph_spec: null`.
+- **No `main_pipe`, validating/resolving** → fine, not an error: those endpoints need no pipe; validate just returns `graph_spec: null`. (On the build routes a missing `main_pipe` means `pipe_ref` cannot be defaulted — pass `--pipe`, or the server answers `422`.)
 
 ## Constants
 

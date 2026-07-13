@@ -13,8 +13,9 @@ from pipelex.codegen.lock import CODEGEN_LOCK_FILENAME
 from pipelex.codegen.resolved_concepts import resolve_concepts_from_crate
 from pipelex.core.bundles.pipelex_bundle_blueprint import PipelexBundleBlueprint
 from pipelex.core.pipes.variable_multiplicity import parse_concept_with_multiplicity
-from pipelex.hub import clear_current_library, get_current_library_id_or_none, get_library_manager, get_required_pipe
+from pipelex.hub import get_current_library_id_or_none, get_library_manager
 from pipelex.libraries.crate_normalization import normalize_crate
+from pipelex.libraries.pipe.exceptions import PipeNotFoundError
 from pipelex.pipeline.bundle_validator import DryRunOutput, DryRunStatus
 from pipelex.pipeline.exceptions import ValidateBundleError
 from pipelex.pipeline.validate_bundle import validate_bundle
@@ -23,15 +24,28 @@ from pipelex.tools.typing.pydantic_utils import empty_list_factory_of
 from pydantic import BaseModel, Field
 
 from api.errors import raise_validation_error
-from api.limits import MAX_PIPE_CODE_LEN
-from api.routes.pipelex.crate_ops import CrateInvalidReport, GeneratedArtifact, invalid_crate_report_response
-from api.schemas.models import MthdsContentsRequest
+from api.openapi_responses import PROBLEM_501_METHOD_REF
+from api.routes.pipelex.crate_ops import (
+    CrateInvalidReport,
+    GeneratedArtifact,
+    invalid_crate_report_response,
+    resolve_requested_pipe,
+    selected_files,
+    teardown_current_library,
+)
+from api.schemas.models import ALLOW_SIGNATURES_DESCRIPTION, MthdsPipeRequest
 
 router = APIRouter(tags=["build"])
 
 
-class BuildRunnerRequest(MthdsContentsRequest):
-    pipe_code: str = Field(..., min_length=1, max_length=MAX_PIPE_CODE_LEN, description="Pipe code to generate runner code for.")
+class BuildRunnerRequest(MthdsPipeRequest):
+    """The runner-script request: the shared closure + pipe selectors, plus the sweep's `allow_signatures`.
+
+    Alone among the `/build/*` projections this route keeps `allow_signatures`, because alone among
+    them it still runs the dry-run sweep — the flag only ever parameterized that sweep.
+    """
+
+    allow_signatures: bool = Field(default=False, description=ALLOW_SIGNATURES_DESCRIPTION)
 
 
 class RunnerStructures(BaseModel):
@@ -55,7 +69,11 @@ class BuildRunnerValidReport(BaseModel):
     """The 200 **valid** arm: the runner script plus the structures projection it imports from."""
 
     is_valid: Literal[True] = True
-    pipe_code: str = Field(..., description="The pipe the runner was generated for (echo of the request).")
+    pipe_ref: str = Field(..., description="The qualified pipe the runner was generated for — the resolved selector.")
+    requested_pipe_ref: str | None = Field(
+        default=None,
+        description="The `pipe_ref` as submitted. Absent when it was omitted and defaulted to the closure's `main_pipe`.",
+    )
     python_code: str = Field(..., description="Generated Python script for running the pipeline, imports spelled with the emitted class names.")
     structures: RunnerStructures = Field(..., description="The typed-structures projection the script imports from.")
     message: str = Field(default="Runner code generated successfully", description="Status message")
@@ -66,24 +84,24 @@ class BuildRunnerValidReport(BaseModel):
 BuildRunnerResponse = Annotated[Union[BuildRunnerValidReport, CrateInvalidReport], Field(discriminator="is_valid")]
 
 
-def _reject_if_requested_pipe_skipped(sweep_result: dict[str, DryRunOutput], *, pipe_code: str) -> None:
+def _reject_if_requested_pipe_skipped(sweep_result: dict[str, DryRunOutput], *, pipe_ref: str) -> None:
     """Reject when the *requested* pipe was SKIPPED (its cross-package dependency is unresolved).
 
     `validate_pipes` records a pipe SKIPPED — rather than failing the whole sweep — when a controller
     references a sub-pipe in a package not included in the request (the cross-package tolerance shared
-    with `/validate` and `/build/{inputs,output}`). For a code-generation endpoint that is a footgun:
-    `generate_runner_code` reads only the pipe's own inputs/output and never resolves sub-pipes, so it
-    would happily emit runner code for a pipeline that cannot actually run. A SKIPPED requested pipe is
-    a no-verdict condition (its dependency closure is absent from the request, so nothing could be
-    diagnosed) → request-shape 422; unrelated SKIPPED pipes elsewhere in the bundle stay tolerated.
+    with `/validate`). For a code-generation endpoint that is a footgun: `generate_runner_code` reads
+    only the pipe's own inputs/output and never resolves sub-pipes, so it would happily emit runner
+    code for a pipeline that cannot actually run. A SKIPPED requested pipe is a no-verdict condition
+    (its dependency closure is absent from the request, so nothing could be diagnosed) → request-shape
+    422; unrelated SKIPPED pipes elsewhere in the bundle stay tolerated.
     """
     for output in sweep_result.values():
-        if pipe_code not in (output.pipe_code, output.pipe_ref):
+        if pipe_ref not in (output.pipe_code, output.pipe_ref):
             continue
         match output.status:
             case DryRunStatus.SKIPPED:
                 detail = output.error_message or "its dependencies could not be resolved"
-                raise_validation_error(f"Cannot generate runner code for pipe '{pipe_code}': {detail}")
+                raise_validation_error(f"Cannot generate runner code for pipe '{pipe_ref}': {detail}")
             case DryRunStatus.SUCCESS | DryRunStatus.FAILURE:
                 return
 
@@ -97,41 +115,58 @@ def _output_is_list(blueprints: list[PipelexBundleBlueprint], *, pipe_code: str)
     return False
 
 
-@router.post("/build/runner", response_model=BuildRunnerResponse)
+@router.post(
+    "/build/runner",
+    response_model=BuildRunnerResponse,
+    # On top of the composite router's shared 401/413/422/500: the `method_ref` closure selector the
+    # envelope accepts but no server-side method registry resolves yet (shared with /resolve, /codegen).
+    responses={501: PROBLEM_501_METHOD_REF},
+)
 async def build_runner(request_data: BuildRunnerRequest) -> JSONResponse:
     """Generate a Python runner script for a pipe, riding the codegen types projection.
 
-    `validate_bundle` opens a single library, loads the bundle, runs the sweep scoped to the
-    requested pipe, and on success leaves the library loaded + current; on failure it tears it down
-    itself. On the success path the crate is read from that library (built only from a valid
-    library), the `python-structures` projection is emitted and stamped, and the runner script is
-    generated with the **emitted** class names — the same flow as a local `pipelex build runner`.
+    The one `/build/*` projection that is **not** static: a runner script is a promise the pipe can
+    actually run, so this route keeps the dry-run sweep its siblings dropped (and with it
+    `allow_signatures`, which only ever parameterized that sweep). `validate_bundle` opens a single
+    library, loads the closure, sweeps, and on success leaves the library loaded + current; on failure
+    it tears it down itself. On the success path the crate is read from that library, the
+    `python-structures` projection is emitted and stamped, and the runner script is generated with the
+    **emitted** class names — the same flow as a local `pipelex build runner`.
 
-    Response contract (the `/validate` discipline): an invalid bundle — including a failed dry-run
-    of the requested pipe — is a produced verdict: a **200** `is_valid: false` with the structured
-    `validation_errors[]`. Non-2xx is reserved for no-verdict conditions: a request-shape 422
-    (including a requested pipe whose cross-package dependencies are absent from the request), auth,
-    server fault — RFC 7807 via the global handlers.
+    The sweep is scoped to the requested pipe, so unrelated broken siblings do not block a good pipe.
+    When `pipe_ref` is omitted the scope cannot be known before the closure loads, so the whole closure
+    is swept and the pipe then defaults to its `main_pipe` — a stricter verdict, and the honest one for
+    a caller who did not say which pipe they meant.
+
+    Response contract (the `/validate` discipline): an invalid closure — including a failed dry-run of
+    the requested pipe — is a produced verdict: a **200** `is_valid: false` with the structured
+    `validation_errors[]`. Non-2xx is reserved for no-verdict conditions: a request-shape 422 (an
+    unknown pipe ref, an omitted `pipe_ref` on a closure with no — or several — `main_pipe`, or a
+    requested pipe whose cross-package dependencies are absent from the request), a 501 for
+    `method_ref`, auth, server fault — RFC 7807 via the global handlers.
     """
     library_manager = get_library_manager()
+    files = selected_files(request_data)
 
     try:
         # If this raises, validate_bundle has already torn down its own library — nothing to clean up here.
         validate_result = await validate_bundle(
-            mthds_contents=request_data.mthds_contents,
+            mthds_contents=[item.content for item in files],
+            mthds_sources=[item.source for item in files],
             allow_signatures=request_data.allow_signatures,
-            dry_run_pipe_codes=[request_data.pipe_code],
+            dry_run_pipe_codes=[request_data.pipe_ref] if request_data.pipe_ref else None,
         )
     except ValidateBundleError as validate_error:
         return invalid_crate_report_response(validate_error.to_error_report())
+    except PipeNotFoundError as exc:
+        # The engine deliberately lets this one through untranslated (see `translate_to_validate_bundle_error`)
+        # so the caller can own it: a pipe ref naming nothing in the closure is a request-shape 422, not an
+        # invalid-closure verdict — nothing about the closure is wrong. Matches `resolve_requested_pipe`.
+        raise_validation_error(f"Pipe '{request_data.pipe_ref}' not found in the submitted closure: {exc}")
 
     # Success: validate_bundle left its library loaded + current. Build everything from it, then own its teardown.
     library_id = get_current_library_id_or_none()
     try:
-        # The sweep tolerates a cross-package unresolved dependency by recording the pipe SKIPPED
-        # instead of failing. Don't hand back runner code for the *requested* pipe in that state.
-        _reject_if_requested_pipe_skipped(validate_result.dry_run_result, pipe_code=request_data.pipe_code)
-
         crate = library_manager.get_crate(library_id) if library_id else None
         if crate is None:
             # Unreachable after a successful in-memory validate (the blueprints were accumulated),
@@ -140,6 +175,12 @@ async def build_runner(request_data: BuildRunnerRequest) -> JSONResponse:
             msg = "library crate unavailable after a successful bundle load"
             raise PipelexUnexpectedError(msg)
         normalized_crate = normalize_crate(crate, mthds_version=MTHDS_STANDARD_VERSION)
+        requested_pipe = resolve_requested_pipe(normalized_crate, pipe_ref=request_data.pipe_ref)
+
+        # The sweep tolerates a cross-package unresolved dependency by recording the pipe SKIPPED
+        # instead of failing. Don't hand back runner code for the *requested* pipe in that state.
+        _reject_if_requested_pipe_skipped(validate_result.dry_run_result, pipe_ref=requested_pipe.ref)
+
         emitted = emit_types(normalized_crate, target=CodegenTarget.PYTHON_STRUCTURES)
         projection = build_stamped_projection(
             emitted,
@@ -150,23 +191,22 @@ async def build_runner(request_data: BuildRunnerRequest) -> JSONResponse:
         )
         class_name_overrides = runtime_to_emitted_class_names(resolve_concepts_from_crate(normalized_crate))
 
-        the_pipe = get_required_pipe(pipe_code=request_data.pipe_code)
         python_code = generate_runner_code(
-            pipe=the_pipe,
-            output_multiplicity=_output_is_list(validate_result.blueprints, pipe_code=request_data.pipe_code),
+            pipe=requested_pipe.pipe,
+            # Keyed by the BARE code: blueprint.pipe is a per-bundle map of bare codes, not qualified refs.
+            output_multiplicity=_output_is_list(validate_result.blueprints, pipe_code=requested_pipe.pipe.code),
             class_name_overrides=class_name_overrides,
         )
 
         report = BuildRunnerValidReport(
-            pipe_code=request_data.pipe_code,
+            pipe_ref=requested_pipe.ref,
+            requested_pipe_ref=request_data.pipe_ref,
             python_code=python_code,
             structures=RunnerStructures(
                 artifacts=[GeneratedArtifact(path=stamped.filename, content=stamped.content) for stamped in projection.files],
                 lock=projection.lock_content,
             ),
         )
-        return JSONResponse(content=report.model_dump(mode="json", by_alias=True))
+        return JSONResponse(content=report.model_dump(mode="json", by_alias=True, exclude_none=True))
     finally:
-        clear_current_library()
-        if library_id is not None:
-            library_manager.teardown(library_id=library_id)
+        teardown_current_library()
