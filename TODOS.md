@@ -8,12 +8,20 @@ Status: **Phases 1–4 shipped. CHECKPOINT 3 (end-to-end) is DONE.** Only Phase 
 
 | Repo | Branch | State |
 | --- | --- | --- |
-| `pipelex-api` | **`feat/build-routes-files-envelope`** | Phases 1–5. Open as **PR #39 → `feature/Codegen`** (`5028e00`), pushed, **CI fully green + MERGEABLE**. Phase 1 already merged into `feature/Codegen` as PR #38 (`770956a`). |
-| `mthds-js` | `feature/Codegen` | **Phase 4 done, committed as `9e19d99`** (not pushed, no PR). Re-verified green. |
-| `pipelex-sdk-js` | `feature/Support-new-endpoints` | **Phase 4 done, committed as `7226da2`** (not pushed, no PR). Re-verified green. |
-| `pipelex-app` | `feature/Codegen` | **Phase 4 done, `73d699c` + `f13199c`** (not pushed, no PR). `f13199c` is the prettier fix — **`73d699c` alone fails `format:check`**; see the Phase 5 re-verification note. |
+| `pipelex-api` | **`feat/build-routes-files-envelope`** | Phases 1–5. Open as **PR #39 → `feature/Codegen`** (`1facfc7`), pushed, **CI fully green + MERGEABLE**. Phase 1 already merged into `feature/Codegen` as PR #38 (`770956a`). |
+| `mthds-js` | `feature/Codegen` | **Phase 4 done, pushed** (`9e19d99`). No PR yet. Re-verified green. |
+| `pipelex-sdk-js` | `feature/Support-new-endpoints` | **Phase 4 done, pushed** (`7226da2`). No PR yet. Re-verified green. |
+| `pipelex-app` | `feature/Codegen` | **Phase 4 done, pushed** (`73d699c` + `f13199c`). No PR yet. `f13199c` is the prettier fix — **`73d699c` alone fails `format:check`**; see the Phase 5 re-verification note. |
 
-⚠️ **Nothing in Phase 4 is pushed and no PR is open for the three JS repos.** That is the only work this plan still names. They need pushing + PRs against each repo's own base (see the note below — not `main`).
+✅ **All four branches are pushed.** The remaining step is opening the three JS PRs. **Base them on `dev`, not `main`** — `dev` is the integration branch in all three repos (decisive in `pipelex-app`: the branch is 2 commits ahead of `dev` but 12 ahead of `main`).
+
+| Repo | Open the PR | What it carries beyond `dev` |
+| --- | --- | --- |
+| `mthds-js` | [`dev...feature/Codegen`](https://github.com/mthds-ai/mthds-js/compare/dev...feature/Codegen?expand=1) | ⚠️ 4 commits — the Phase-4 one (`9e19d99`) **plus three pre-existing** agent/codegen commits (`05f9267` merge, `338f3dd`, `9ac093c`) that are not part of this plan. |
+| `pipelex-sdk-js` | [`dev...feature/Support-new-endpoints`](https://github.com/Pipelex/pipelex-sdk-js/compare/dev...feature/Support-new-endpoints?expand=1) | ⚠️ 2 commits — the Phase-4 one (`7226da2`) **plus** the pre-existing E2E-suite commit (`9b0dea3`). |
+| `pipelex-app` | [`dev...feature/Codegen`](https://github.com/Pipelex/pipelex-app/compare/dev...feature/Codegen?expand=1) | Exactly the Phase-4 work (`73d699c` + `f13199c`) — a clean PR. |
+
+⚠️ **CI flakiness, not our code.** GitHub's action registry was 500ing / `Service Unavailable` throughout this session, failing jobs inside `Set up job` before any step ran (`Internal Server Error occurred while resolving "actions/checkout@v4"`). It hit PR #39's Lint, CLAAssistant, and Tests(3.12) on separate runs. If a JS PR's CI comes back red, **read the failing step before believing it** — re-running cleared it every time.
 
 ⚠️ **`pipelex-app` installs with `pnpm`, not `npm`.** `npm install` fails on an unrelated pre-existing peer-dep conflict (`@pipelex/mthds-ui` peer-wants `shiki@^3.22.0`; the root pins `^4.0.2`) and leaves a half-populated `node_modules` that makes `typecheck` report phantom "cannot find module" errors for `next-intl` etc. Use `pnpm install`. If `typecheck` reports errors inside `.next/dev/types/validator.ts`, that is a stale Next cache — `rm -rf .next`.
 
