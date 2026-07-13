@@ -1,10 +1,21 @@
 # Plan: unify the codegen/build underpinnings (without merging the routes)
 
-Status: **Phases 1–3 shipped.** The whole server surface is migrated. Next up: **Phase 4 (consumers)**. This plan spans `pipelex-api/` (main), `pipelex/` (engine — one small typing fix landed in Phase 2; nothing further expected), the workspace spec (`Pipelex/docs/specs/pipelex-codegen.md`), and three JS consumers. No backward compatibility is owed anywhere — breaking wire changes are fine, noted in changelogs.
+Status: **Phases 1–3 shipped (server). Phase 4 (consumers) is IN PROGRESS — `mthds-js` is done; `pipelex-sdk-js` and `pipelex-app` are next.** This plan spans `pipelex-api/` (main), `pipelex/` (engine — one small typing fix landed in Phase 2; nothing further expected), the workspace spec (`Pipelex/docs/specs/pipelex-codegen.md`), and three JS consumers. No backward compatibility is owed anywhere — breaking wire changes are fine, noted in changelogs.
 
 ## Working setup — read this before touching code (cold start)
 
-**Where you are.** `pipelex-api` is on `feature/Codegen` (Phase 1 merged as PR #38, `770956a`; Phases 2–3 on top). Work Phase 4 from there; open PRs **against `feature/Codegen`**, not `main`.
+### Branch state, per repo (verified 2026-07-13)
+
+| Repo | Branch | State |
+| --- | --- | --- |
+| `pipelex-api` | **`feat/build-routes-files-envelope`** | Phases 2–3. Open as **PR #39 → `feature/Codegen`** (`00efee5`). Phase 1 already merged into `feature/Codegen` as PR #38 (`770956a`). |
+| `mthds-js` | `feature/Codegen` | **Phase 4 done, committed as `9e19d99`** (not pushed, no PR). |
+| `pipelex-sdk-js` | `feature/Support-new-endpoints` | **Untouched — next up.** |
+| `pipelex-app` | `feature/Codegen` | **Untouched.** |
+
+⚠️ Note the `pipelex-api` branch is **`feat/build-routes-files-envelope`, not `feature/Codegen`** — an earlier version of this doc said otherwise. `feature/Codegen` is the *integration base* every PR in this plan targets; it is not where the work happens. Open Phase-4 PRs against each repo's own base, not `main`.
+
+**Nothing in Phase 4 requires the server to change.** The wire shapes are already captured verbatim below ("The new wire shapes"), so a cold start does not need to re-read the server or re-run it just to learn the contract. You only need a running server for CHECKPOINT 3's end-to-end pass.
 
 **The engine is pinned by git rev — you do NOT need a local editable `pipelex`.** `pyproject.toml` has:
 
@@ -194,13 +205,82 @@ All decisions are taken (conversation of 2026-07-13). None remain pending.
 
 ## Phase 4 — consumers
 
-- [ ] `mthds-js`: update `BuildInputsRequest` type + `buildInputs()` in `src/runners/api/client.ts` (and the build/output/runner siblings) to the new envelope; update its tests.
-- [ ] `pipelex-sdk-js`: same in `src/client.ts`; remember the one-way dep `@pipelex/sdk → mthds` — if the request types live in `mthds/protocol` types, fix them there first. Check whether these are protocol-typed or SDK-local (build routes are Pipelex extensions, so they should be SDK-local — flag if not).
-- [ ] `pipelex-app`: `src/actions/build-inputs.ts` (new payload; pipe selector per D1 — the deploy dialog currently holds bare pipe codes), `src/components/deploy/deploy-dialog.tsx` + `__tests__`, `src/lib/deploy-snippets.ts` (the snippets it renders for users must show the new wire shape too).
+**Do these in dependency order: `mthds-js` → `pipelex-sdk-js` → `pipelex-app`.** (One-way dep: `@pipelex/sdk → mthds`.)
+
+- [x] **`mthds-js` — DONE.** Committed on `feature/Codegen` as **`9e19d99`** (not pushed, no PR). `npm run check` (lint, format, both typechecks, build, depcruise) + all tests green. Scope was **wider than this box predicted** — see "What Phase 4 found in `mthds-js`" below before starting the next repo; it is the most useful thing in this file right now.
+- [ ] **`pipelex-sdk-js` — NEXT.** Branch `feature/Support-new-endpoints`. Migrate the build types in `src/models.ts` and the three client methods in `src/client.ts` (~line 656). Re-export whatever is new from `src/index.ts` (it currently exports `BuildInputsRequest`/`BuildOutputRequest`/`BuildRunnerRequest`/`BuildRunnerResponse` — the response types are now unions, and the valid/invalid arms want exporting too).
+  - **Two questions this box used to pose are already answered.** (1) The build types are **SDK-local**, not protocol-typed (`pipelex-sdk-js/src/models.ts`; in `mthds-js` they live in `src/runners/types.ts`, not `src/protocol/`) — so **no `mthds/protocol` change is needed**; the protocol/extension boundary was already drawn correctly in both repos. (2) `pipelex-sdk-js` already has an `MthdsFile { content, uri? }` + `validateFiles()` (`src/client.ts:70`) — that is `/validate`'s `mthds_sources` adapter and is **NOT** the build wire shape (`{content, source}`). Do not conflate them; see the wire-DTO note below.
+  - **The `mthds-js` diff is your template.** `git -C ../mthds-js show 9e19d99 -- src/runners/types.ts` is the type set to mirror almost verbatim (`MthdsFileItem`, `BuildRequestBase`, `CrateInvalidReport`, the three valid reports, the three response unions).
+- [ ] **`pipelex-app`.** Branch `feature/Codegen`. Scope is **narrower than this box originally claimed** — `src/lib/deploy-snippets.ts` needs **no change** (see the findings section). What actually moves: `src/actions/build-inputs.ts`, `src/components/deploy/deploy-dialog.tsx` + its `__tests__`, the `SnippetSource` type, and a qualified-pipe-ref sibling for `selectMainPipe()`. **`buildInputsTemplate` has a live bug post-migration** — detailed below.
 - [x] `pipelex-api/.claude/skills/postman-bundle/`: done in Phase 3 (in-repo, so it could not be left broken behind the server change). `build_postman_query.py::build_build_body` now emits the `files[]` envelope + a qualified `pipe_ref` (built from the bundle's `domain` + `main_pipe`), and sends `allow_signatures` **only** for `build-runner`. Smoke-tested against `postman/sample-bundles/fashion_moodboard.mthds`. ⚠️ Still to do: run `/update-postman` if the **live Postman collection** carries the old shapes.
-- [ ] Each repo: its own test suite + changelog.
+- [ ] Each repo: its own test suite + changelog. (`mthds-js`: done, in `9e19d99`.)
+
+### What Phase 4 found in `mthds-js` (read before starting `pipelex-sdk-js` / `pipelex-app`)
+
+**The consumer surface is bigger than "a client method".** `mthds-js` needed all of: the request/response types (`src/runners/types.ts`), the API client (`src/runners/api/client.ts`), **a second `Runner` implementation** (`src/runners/pipelex/runner.ts` — shells out to the local CLI), the **user CLI** (`src/cli/commands/build.ts` + the option declarations in `src/cli.ts`), and the **agent CLI** (`src/agent/commands/api-commands.ts`). Expect the same for `pipelex-app`: the server action is not the only thing that moves.
+
+**Design call — the build request types stay WIRE DTOs.** They are posted verbatim (`postApi(path, request)`), so they keep snake_case and the literal `files: [{content, source?}]` shape rather than being wrapped in an ergonomic client type. This is why they do NOT reuse the existing `MthdsFile { content, uri? }` (whose `uri` maps to `/validate`'s `mthds_sources`): `/validate` and `/build/*` genuinely spell the label differently on the wire today. When `/validate` migrates to `files[]` (the follow-up below), the two collapse into one — until then, keeping them distinct is honest and keeps "the request type IS the body" true. **Mirror this choice in `pipelex-sdk-js`.**
+
+**Three bugs the typed union exposed** (all fixed in `mthds-js`, all worth checking for in the other consumers):
+
+1. **The two runners disagreed about `buildInputs`'s return.** The API runner returned the bare template; the local runner returned the agent CLI's `{success, pipe_code, inputs}` envelope. Both sat behind one interface typed `Promise<unknown>` — which is precisely what let the divergence hide for so long. Typing the union forced it out. Both now return the template under `inputs`.
+2. **The local runner defaulted `buildOutput`'s `format` to `json`; the API defaults to `schema`.** One interface, two meanings. Aligned on `schema`.
+3. **The local runner echoed an unresolved pipe ref** — the same class of bug the PR review caught server-side in Phase 3. It now resolves the qualified ref itself (`src/runners/pipe-ref.ts`, mirroring `inputs_cmd.py::_default_main_pipe_ref`'s zero/ambiguous arms) and passes it to `--pipe` explicitly, so what it echoes is what it asked for.
+
+**The invalid arm is the easy thing to get wrong in a consumer.** A bad closure comes back as a **200** with `is_valid: false`, so any consumer that only catches throws will render a success over an unusable result. `mthds-js`'s CLI needed an explicit `reportIfInvalid` and the agent CLI an explicit verdict branch.
+
+**The TS type set to mirror in `pipelex-sdk-js`** (from `mthds-js/src/runners/types.ts` — copy it, don't re-derive it):
+
+```ts
+interface MthdsFileItem { content: string; source?: string }
+interface BuildRequestBase { files?: MthdsFileItem[]; method_ref?: string; pipe_ref?: string }
+type InputsTemplateFormat = "json" | "toml";
+type ConceptRepresentationFormat = "json" | "python" | "schema";
+
+interface BuildInputsRequest extends BuildRequestBase { format?: InputsTemplateFormat; explicit?: boolean }
+interface BuildOutputRequest extends BuildRequestBase { format?: ConceptRepresentationFormat }
+interface BuildRunnerRequest extends BuildRequestBase { allow_signatures?: boolean }  // only this one keeps the flag
+
+interface CrateInvalidReport { is_valid: false; validation_errors: ValidationErrorItem[]; message: string }
+interface BuildValidReportBase { is_valid: true; pipe_ref: string; requested_pipe_ref?: string; message: string }
+
+// The payload field follows `format`; the unused one is ABSENT from the body, not null.
+interface BuildInputsValidReport extends BuildValidReportBase { format: InputsTemplateFormat; explicit: boolean; inputs?: Record<string, unknown>; inputs_toml?: string }
+interface BuildOutputValidReport extends BuildValidReportBase { format: ConceptRepresentationFormat; output?: Record<string, unknown>; output_python?: string }
+interface BuildRunnerValidReport extends BuildValidReportBase { python_code: string; structures: RunnerStructures }
+interface RunnerStructures { directory: string; artifacts: { path: string; content: string }[]; lock: string; lock_filename: string }
+
+type BuildInputsResponse = BuildInputsValidReport | CrateInvalidReport;   // and the two siblings
+```
+
+### `pipelex-app` — the concrete work (scope is NARROWER than the original box claimed)
+
+**`src/lib/deploy-snippets.ts` needs no change.** It only consumes the resolved inputs *object* and renders `/v1/execute` snippets keyed by `method_id`; it never touches the build wire shape. (It matched the plan's original grep only via a doc comment and its own `buildCurlSnippet`/`buildPythonSnippet`/… function names — a false positive. Its line-5 comment "from `POST /v1/build/inputs`" stays true.)
+
+**`src/actions/build-inputs.ts` has a bug that this migration makes live.** It ends with `const data = (await res.json()) as InputsTemplate; return success(data);` — i.e. it treats the whole response body as the template. Post-migration the body is the *report envelope*, so the deploy dialog would embed `{is_valid, pipe_ref, format, explicit, inputs, message}` into the user-facing snippets instead of the inputs. It must:
+  1. post the new payload (`files: [{content}]` + a qualified `pipe_ref`; no more `mthds_contents`/`pipe_code`),
+  2. branch on `is_valid` — the invalid arm is a **200**, so `res.ok` is true and today's `!res.ok` guard never fires,
+  3. return `data.inputs` (the `format=json` field), not `data`.
+
+**The pipe selector needs qualifying — the app cannot lean on server defaulting.** `selectMainPipe()` (`src/lib/pipe-selection.ts`) returns a **bare** code, and when the blueprint declares no `main_pipe` it falls back to *the first pipe key*. Omitting `pipe_ref` would therefore 422 on exactly the methods that have no `main_pipe` — the case that fallback exists to serve. The blueprint carries `domain` (`src/types/core/pipelex-bundle-blueprint.ts:6`), so qualify with it. **Leave `selectMainPipe` alone** — it also feeds `/execute` (`method-run-workspace.tsx:195`), which still takes a bare `pipe_code` — and add a qualified sibling for the build call.
+
+**`SnippetSource.pipeCode` becomes a qualified ref.** It is defined in `deploy-dialog.tsx` and produced by three call sites: `playground/toolbar.tsx:144` (has the blueprint → can qualify), `method-run/run-header.tsx` (takes it as a prop from its page), and `deploy/deploy-button.stories.tsx`. The dialog consumes it only for the build fetch and its `sourceKey` cache key, so renaming it to `pipeRef` is clean.
+
+### Commands (per repo)
+
+```bash
+# mthds-js / pipelex-sdk-js / pipelex-app
+npm run check     # mthds-js: lint + format:check + typecheck + typecheck:test + build + depcruise
+npm test          # vitest
+npm run format    # prettier --write (run before `check`; it will fail on format drift otherwise)
+
+# pipelex-api (only needed for CHECKPOINT 3)
+make run          # uvicorn on :8081, hot reload
+```
 
 **CHECKPOINT 3** — end-to-end: run the API locally (`make run`), drive the webapp deploy dialog against it, and exercise `buildInputs` from both JS clients (their test suites or a scratch script). Record results here.
+
+> Status: **not started.** `mthds-js` is migrated and green on its own suite, but **has not yet been exercised against a live server** — its tests mock `fetch`, so nothing has confirmed the client's body matches what the server actually parses. The first real end-to-end call is still owed, and it is the thing most likely to surface a field-name typo that every mock in the repo agrees on.
 
 ## Phase 5 — final sweep
 
