@@ -21,12 +21,14 @@ from pipelex.system.configuration.config_loader import config_manager
 from pipelex.system.configuration.configs import PipelexConfig
 from pipelex.system.environment import get_optional_env
 from pipelex.system.runtime import IntegrationMode
+from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from api.api_config import get_api_config, resolve_boot_orchestrator
 from api.disclosure import resolve_disclosure_mode
 from api.exception_handlers import register_exception_handlers
 from api.middleware import RequestIdMiddleware, request_body_size_middleware
+from api.openapi_schema import PipelexFastAPI
 from api.routes import router as api_router
 from api.routes.health import router as health_router
 from api.routes.version import router as version_router
@@ -119,7 +121,7 @@ def _own_version() -> str:
         return "0.0.0"
 
 
-fastapi_app = FastAPI(
+fastapi_app = PipelexFastAPI(
     redirect_slashes=False,
     lifespan=lifespan,
     title="Pipelex API",
@@ -128,12 +130,13 @@ fastapi_app = FastAPI(
     description=(
         f"This server implements the [MTHDS Protocol](https://mthds.ai) v{PROTOCOL_VERSION} "
         "(`POST /execute`, `POST /start`, `POST /validate`, `GET /models`, `GET /version` — "
-        "marked `x-mthds-protocol: true`) plus the Pipelex build tooling extensions (`/build/*`) "
-        "and editor tooling extensions (`/lint`, `/format`). "
+        "marked `x-mthds-protocol: true`) plus the Pipelex API extensions: resolve and codegen "
+        "(`/resolve`, `/codegen`), build tooling (`/build/*`), and editor tooling (`/lint`, `/format`). "
         "Contract layering: MTHDS Protocol ⊂ Pipelex API (this server) ⊂ Pipelex hosted API. "
         "Routes not in the published contract (`/upload`, `/resolve-storage-url`) are documented "
         "as non-contract in their descriptions. All endpoints are served under the `/v1` base path; "
-        "errors are RFC 7807 `application/problem+json`."
+        "every error is an RFC 7807 `application/problem+json` problem document, documented per "
+        "operation as a `ProblemDocument`."
     ),
     license_info={"name": "MIT", "identifier": "MIT"},
 )
@@ -172,9 +175,21 @@ auth_dependency = get_auth_dependency()
 fastapi_app.include_router(api_router, prefix="/v1", dependencies=[Depends(auth_dependency)])
 
 
-@fastapi_app.get("/")
-async def root() -> dict[str, str]:
-    return {"message": "Pipelex API"}
+class ServiceIdentity(BaseModel):
+    """Body of `GET /` — the service identity banner."""
+
+    message: str = Field(..., description="Name of the service answering on this origin.")
+
+
+@fastapi_app.get("/", summary="Service identity banner", tags=["health"])
+async def root() -> ServiceIdentity:
+    """Identify the service answering on this origin. No auth required.
+
+    A human-facing banner for someone who lands on the bare origin — not a
+    liveness probe (that is `GET /health`) and not the protocol handshake
+    (`GET /v1/version`). It reads nothing and can only succeed.
+    """
+    return ServiceIdentity(message="Pipelex API")
 
 
 register_exception_handlers(fastapi_app, disclosure_mode=ERROR_DISCLOSURE_MODE, http_error_mappers=HTTP_ERROR_MAPPERS)

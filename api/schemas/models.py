@@ -9,7 +9,7 @@ one — owns it. `RunRequest` / `StartRequest` are defined here, not imported.
 from __future__ import annotations
 
 from ipaddress import ip_address
-from typing import Annotated, Any
+from typing import Annotated, Any, Self
 from urllib.parse import urlparse
 
 from mthds.protocol.exceptions import PipelineRequestError
@@ -19,7 +19,14 @@ from mthds.protocol.working_memory import WorkingMemoryAbstract
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.functional_validators import SkipValidation
 
-from api.limits import MAX_CALLBACK_URL_LEN, MAX_CALLBACK_URLS, MAX_MTHDS_FILE_BYTES, MAX_MTHDS_FILES_PER_REQUEST
+from api.limits import MAX_CALLBACK_URL_LEN, MAX_CALLBACK_URLS, MAX_MTHDS_FILE_BYTES, MAX_MTHDS_FILES_PER_REQUEST, MAX_PIPE_CODE_LEN
+
+
+def _ensure_mthds_file_within_bytes_limit(content: str) -> None:
+    """Enforce the per-file size bound shared by every route that accepts inline MTHDS content."""
+    if len(content.encode("utf-8")) > MAX_MTHDS_FILE_BYTES:
+        msg = f"MTHDS file exceeds {MAX_MTHDS_FILE_BYTES // 1024} KiB limit"
+        raise ValueError(msg)
 
 
 class RunRequest(BaseModel):
@@ -206,14 +213,104 @@ class PipelexApiExecuteRequest(RunRequest):
     orchestration_mode: str | None = Field(default=None, description=_ORCHESTRATION_MODE_DESCRIPTION)
 
 
-class MthdsContentsRequest(BaseModel):
-    """Shared base for the build/validate routes.
+class MthdsFileItem(BaseModel):
+    """One inline MTHDS bundle: its content plus an optional logical source for diagnostics.
 
-    Carries the bounded `mthds_contents` payload, the `allow_signatures` opt-in, and the single
-    per-file size guard that every validation-performing route needs. `/validate` uses it as-is;
-    the build routes subclass it to add `pipe_code` (and `/build/output` a `format`). Keeping the
-    field, its public OpenAPI description, and the validator in one place stops them drifting across
-    the four endpoints.
+    The `files[]` envelope pairs each content with its source in one entry (the shape the codegen
+    spec pins for the resolve/codegen routes), unlike the legacy parallel
+    `mthds_contents[]`/`mthds_sources[]` lists on `/validate`.
+    """
+
+    content: str = Field(..., description="MTHDS bundle content.")
+    source: str | None = Field(
+        default=None,
+        max_length=1024,
+        description=(
+            "Optional logical source for this bundle (e.g. its path relative to the submitted directory). "
+            "Threaded onto the blueprint so server-side diagnostics carry a `source` pointing at the owning file."
+        ),
+    )
+
+    @field_validator("content")
+    @classmethod
+    def _bound_content(cls, value: str) -> str:
+        _ensure_mthds_file_within_bytes_limit(value)
+        return value
+
+
+class MthdsFilesRequest(BaseModel):
+    """Shared closure selector for the resolve/codegen routes: inline `files[]` XOR a `method_ref`.
+
+    Exactly one of the two must be provided (spec'd envelope) — both or neither is a request-shape
+    422. `method_ref` is accepted by the envelope today but resolves to a 501 until server-side
+    method-registry resolution exists.
+    """
+
+    files: list[MthdsFileItem] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_MTHDS_FILES_PER_REQUEST,
+        description="Inline MTHDS bundles forming the closure to resolve (content-passing — no server-side path reads).",
+    )
+    method_ref: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=512,
+        description=(
+            "Reference to an installed/published method, resolving to a library plus its exported entry pipe. "
+            "Accepted by the envelope; served once server-side method-registry resolution lands (501 until then)."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _exactly_one_selector(self) -> Self:
+        if (self.files is None) == (self.method_ref is None):
+            msg = "provide exactly one of `files` or `method_ref`"
+            raise ValueError(msg)
+        return self
+
+
+class MthdsPipeRequest(MthdsFilesRequest):
+    """Shared base for the per-pipe `/build/*` projections: the closure selector plus a pipe selector.
+
+    The pipe selector is the **qualified** ref `domain.pipe_code`, mirroring `pipelex codegen inputs
+    --pipe`. It is optional: omitted, it resolves to the closure's declared `main_pipe`, which is
+    what a single-bundle caller almost always wants. A closure that declares no `main_pipe` — or
+    several, across domains — cannot be defaulted, so an omitted selector is a request-shape 422
+    there (the same two arms the CLI rejects on).
+    """
+
+    pipe_ref: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_PIPE_CODE_LEN,
+        description=(
+            "Qualified pipe ref (`domain.pipe_code`) to project. Optional — defaults to the closure's declared "
+            "`main_pipe`; a closure declaring none, or several, requires it explicitly."
+        ),
+    )
+
+
+ALLOW_SIGNATURES_DESCRIPTION = (
+    "When true, the validation sweep tolerates unimplemented pipe signatures instead of rejecting the "
+    "bundle (signatures dry-run trivially by minting a mock). Defaults to false (strict)."
+)
+"""Shared by the two routes that still run the dry-run sweep (`/validate`, `/build/runner`) — the flag only
+parameterizes that sweep, so the static `/build/{inputs,output}` projections do not accept it."""
+
+
+class MthdsContentsRequest(BaseModel):
+    """The `POST /validate` request envelope: bare `mthds_contents` strings plus the sweep's `allow_signatures`.
+
+    This is the flat-list envelope. `/validate` uses it through this class (its `ValidateRequest`
+    subclass adds a parallel `mthds_sources` for per-file source labels), and the run routes
+    `/execute` and `/start` carry the same `mthds_contents` field independently on `RunRequest`.
+    The newer Pipelex-API extension routes (`/resolve`, `/codegen`, `/build/*`) use
+    `MthdsFilesRequest` instead (`files[]` pairing each content with its `source`, XOR a
+    `method_ref`), which folds the source label into each entry and adds the method-registry
+    selector. `/validate` stays here deliberately: it is an MTHDS Protocol route, so changing its
+    envelope is a protocol-level decision owned by the `mthds/` spec, not this server's to take
+    (see `TODOS.md` → follow-ups).
     """
 
     mthds_contents: list[str] = Field(
@@ -222,17 +319,11 @@ class MthdsContentsRequest(BaseModel):
         max_length=MAX_MTHDS_FILES_PER_REQUEST,
         description="MTHDS contents to load (always an array, even for a single file).",
     )
-    allow_signatures: bool = Field(
-        default=False,
-        description="When true, the validation sweep tolerates unimplemented pipe signatures instead of rejecting the "
-        "bundle (signatures dry-run trivially by minting a mock). Defaults to false (strict).",
-    )
+    allow_signatures: bool = Field(default=False, description=ALLOW_SIGNATURES_DESCRIPTION)
 
     @field_validator("mthds_contents")
     @classmethod
     def _bound_each_file(cls, value: list[str]) -> list[str]:
         for content in value:
-            if len(content.encode("utf-8")) > MAX_MTHDS_FILE_BYTES:
-                msg = f"MTHDS file exceeds {MAX_MTHDS_FILE_BYTES // 1024} KiB limit"
-                raise ValueError(msg)
+            _ensure_mthds_file_within_bytes_limit(content)
         return value

@@ -8,21 +8,8 @@ from pydantic import BaseModel, Field, field_validator
 
 from api.errors import raise_validation_error
 from api.limits import MAX_MTHDS_FILE_BYTES
-from api.problem_document import PROBLEM_JSON_MEDIA_TYPE
 
 router = APIRouter(tags=["tools"])
-
-PROBLEM_422_RESPONSE: dict[str, Any] = {
-    "description": "Validation Error",
-    "content": {
-        PROBLEM_JSON_MEDIA_TYPE: {
-            "schema": {
-                "additionalProperties": True,
-                "type": "object",
-            }
-        }
-    },
-}
 
 
 class MthdsToolRequest(BaseModel):
@@ -98,7 +85,7 @@ class FormatResponse(BaseModel):
     diagnostics: list[Diagnostic]
 
 
-@router.post("/lint", response_model=LintResponse, responses={422: PROBLEM_422_RESPONSE})
+@router.post("/lint", response_model=LintResponse)
 async def lint_mthds(request_data: LintRequest) -> LintResponse:
     """Lint one .mthds file with the embedded MTHDS schema.
 
@@ -109,7 +96,7 @@ async def lint_mthds(request_data: LintRequest) -> LintResponse:
     return LintResponse.model_validate(result)
 
 
-@router.post("/format", response_model=FormatResponse, responses={422: PROBLEM_422_RESPONSE})
+@router.post("/format", response_model=FormatResponse)
 async def format_mthds(request_data: FormatRequest) -> FormatResponse:
     """Format one .mthds file with the canonical MTHDS formatter.
 

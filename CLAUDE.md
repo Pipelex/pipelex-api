@@ -6,7 +6,9 @@ Pipelex API is the official FastAPI REST server for [Pipelex](https://github.com
 
 ```
 api/
-  main.py              # FastAPI app init, middleware, router registration (mounts at /v1)
+  main.py              # App init (PipelexFastAPI), middleware, router registration (mounts at /v1)
+  openapi_schema.py    # PipelexFastAPI — publishes every 4xx/5xx as application/problem+json
+  openapi_responses.py # ProblemDocument + the shared per-status `responses=` declarations
   security.py          # Authentication (API Key + JWT)
   schemas/models.py    # Pydantic request/response models
   routes/
@@ -17,6 +19,10 @@ api/
     pipelex/
       pipeline.py      # POST /v1/execute, /v1/start (MTHDS Protocol run routes)
       validate.py      # POST /v1/validate
+      resolve.py       # POST /v1/resolve (closure → normalized crate)
+      codegen.py       # POST /v1/codegen (crate → typed artifacts)
+      crate_ops.py     # Closure resolution + the invalid-arm envelope /resolve and /codegen share
+      tools.py         # POST /v1/lint, /v1/format (editor tooling)
       build/           # POST /v1/build/{inputs,output,runner}
       agent/           # POST /v1/build/{concept,pipe-spec}, GET /v1/models
 tests/
@@ -25,6 +31,8 @@ tests/
 ```
 
 This server is the reference implementation of the [MTHDS Protocol](https://mthds.ai): `POST /execute`, `POST /start`, `POST /validate`, `GET /models`, `GET /version` under the `/v1` base path, tagged `x-mthds-protocol: true` in the committed OpenAPI artifact (`docs/openapi/pipelex-api.openapi.yaml`, regenerated via `make openapi-export`, drift-checked via `make openapi-check`). Contract nesting: MTHDS Protocol ⊂ Pipelex API ⊂ Pipelex hosted API.
+
+**Only those five operations carry `x-mthds-protocol`** — the flag is how a conformance suite or a third-party runner extracts the portable subset of the artifact, so tagging a Pipelex route would misrepresent the standard. Everything else this server serves is a Pipelex API extension: `/resolve` + `/codegen`, `/build/*`, `/lint` + `/format`, and the non-contract `/upload` + `/resolve-storage-url`. Watch `/resolve` and `/codegen` in particular: they *look* protocol-shaped (they speak the `/validate` verdict discipline, and the crate `/resolve` emits is genuinely standard-owned — the MTHDS Library Crate Format, so its wire fields stay brand-neutral), but the routes are ours and the standard specifies no type projection at all. `tests/unit/test_openapi_contract.py` pins the tagged set exactly, in both directions.
 
 ## Commands
 
@@ -162,6 +170,7 @@ Every error is rendered as RFC 7807 `application/problem+json` by the global han
 - **API-authored 4xx/5xx** — use the helpers in `api/errors.py`: `raise_validation_error`, `raise_bad_request`, `raise_forbidden`, `raise_unauthenticated`, `raise_payload_too_large`, `raise_internal_server_error`. Each raises an `ApiError` carrying a pre-built problem document; the global handler emits it. **Do not raise `HTTPException` directly** — FastAPI's default handler wraps the body as `{"detail": <whatever>}` and cannot emit a flat RFC 7807 document.
 - **Auth errors** — the helpers set `WWW-Authenticate: Bearer` automatically on 401.
 - **Logging** — the global handlers emit one structured log line per error (`event=api_error`) with `request_id`, `route`, `error_type`, `error_domain`, `retryable`, `status`, and `user_id` when authenticated. Log disposition follows the final HTTP status: 4xx logs at `warning` (caller mistakes, the provider-429 passthrough, and API-level 4xx overrides like the 409 conflict); 5xx logs at `error` with traceback. Routes should not log error tracebacks themselves.
+- **Documenting a failure in OpenAPI** — the shared, typed `responses=` declarations live in `api/openapi_responses.py` (`ProblemDocument` + one constant per status). Every auth-wrapped `/v1` route already documents `401`/`413`/`422`/`500` via the composite router's `responses=` (`api/routes/__init__.py`); a route declares on its own decorator only the statuses **it alone** can produce. Never hand-write an error `content` block: `api/openapi_schema.py` re-keys the generated schema onto `application/problem+json`, because FastAPI renders a response `model` under the route's response-class media type and offers no per-response override. Adding a new status means adding a constant there and referencing it — then `make openapi-export`.
 
 Typical route:
 

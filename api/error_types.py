@@ -46,6 +46,11 @@ class ErrorType(StrEnum):
     UPLOAD_FAILED = "UploadFailed"
     PRESIGN_FAILED = "PresignFailed"
 
+    # A caller selected a closure by `method_ref` on `/resolve` or `/codegen`. The request envelope
+    # accepts the field (it is the registry hinge the spec pins), but no method-registry resolution
+    # exists on this server yet — an honest 501, never a silent empty verdict.
+    METHOD_REF_NOT_SUPPORTED = "MethodRefNotSupported"
+
     # Misc
     PACKAGE_NOT_FOUND = "PackageNotFound"
     # The `error_type` for the catch-all 500 emitted by `handle_unexpected_error`
