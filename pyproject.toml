@@ -16,18 +16,11 @@ classifiers = [
 ]
 
 dependencies = [
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.38.0",
-  "pipelex-tools-py>=0.1.0",
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.39.0",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",
 ]
-
-[tool.uv.sources]
-# Pinned to a git rev, not a local editable path: CI has no sibling checkout, so `../pipelex` fails
-# `uv sync` on a runner. The rev carries the unreleased `codegen` engine this API rides; swap back to
-# a plain `==<version>` PyPI pin once a pipelex release ships it.
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "4519ae3d7ef6bc0ffe1d7d6eeed364171b87e1a3" }
 
 [build-system]
 requires = ["hatchling"]

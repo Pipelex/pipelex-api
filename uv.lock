@@ -2311,8 +2311,8 @@ wheels = [
 
 [[package]]
 name = "pipelex"
-version = "0.38.0"
-source = { git = "https://github.com/Pipelex/pipelex.git?rev=4519ae3d7ef6bc0ffe1d7d6eeed364171b87e1a3#4519ae3d7ef6bc0ffe1d7d6eeed364171b87e1a3" }
+version = "0.39.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
     { name = "datamodel-code-generator" },
@@ -2352,6 +2352,10 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "urllib3" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/2f/b4/77f21fa019459e7fe5aec994d3d3f862453fc49951a5c0e3d7309719afb0/pipelex-0.39.0.tar.gz", hash = "sha256:e6ef93b6c39aa9b76913619e2aeb32a9b03bfa7b87993988be5032c17b83ab35", size = 1138301, upload-time = "2026-07-14T20:46:32.158Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/94/f2/6d51588a30ffe4eace7957b1936d254b80655d889e393a220aeecd7edaa4/pipelex-0.39.0-py3-none-any.whl", hash = "sha256:d8c975cc57d55c4538c270129742a333b2dfac19987c8448f62359cc2f21a3ae", size = 1597845, upload-time = "2026-07-14T20:46:30.056Z" },
+]
 
 [package.optional-dependencies]
 anthropic = [
@@ -2384,7 +2388,6 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "pipelex", extra = ["anthropic", "bedrock", "fal", "google", "google-genai", "mistralai"] },
-    { name = "pipelex-tools-py" },
     { name = "pyjwt" },
     { name = "uvicorn" },
 ]
@@ -2432,8 +2435,7 @@ requires-dist = [
     { name = "mkdocs-meta-manager", marker = "extra == 'docs'", specifier = "==1.1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.2" },
     { name = "pandas-stubs", marker = "extra == 'dev'", specifier = ">=2.2.3.241126" },
-    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal"], git = "https://github.com/Pipelex/pipelex.git?rev=4519ae3d7ef6bc0ffe1d7d6eeed364171b87e1a3" },
-    { name = "pipelex-tools-py", specifier = ">=0.1.0" },
+    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal"], specifier = "==0.39.0" },
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.3.8" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.405" },
