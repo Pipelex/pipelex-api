@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v0.9.0] - 2026-07-14
 
 ### Added
 - **`POST /v1/resolve` (MTHDS Protocol resolution capability):** resolve a library closure into its **normalized library crate** over HTTP. Request selects the closure with inline `files[]` (each `{content, source?}`) XOR a `method_ref`; a produced verdict is a `200` discriminated on `is_valid` — the canonical JSON crate (qualified refs, flattened refinement, materialized natives, fingerprint) on the valid arm, the structured `validation_errors[]` on the invalid arm. `method_ref` is accepted by the envelope but answers `501` (`MethodRefNotSupported`) until server-side method-registry resolution exists.
