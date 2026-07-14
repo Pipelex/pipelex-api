@@ -10,6 +10,7 @@ from pipelex.tools.typing.pydantic_utils import empty_list_factory_of
 from pydantic import BaseModel, Field, model_validator
 
 from api.exception_handlers import problem_response_from_error_report
+from api.openapi_responses import PROBLEM_403_ORCHESTRATION_MODE
 from api.routes.pipelex.pipeline import ApiRunner
 from api.schemas.models import MthdsContentsRequest
 
@@ -100,7 +101,7 @@ class ValidReport(PipelexValidationReport):
     rendered_markdown: str | None = Field(
         default=None,
         description=(
-            "Opt-in Pipelex-API presentation extra (D-D): a server-rendered Markdown view of the valid verdict, "
+            "Opt-in Pipelex-API presentation extra: a server-rendered Markdown view of the valid verdict, "
             "present only when the request's `render` includes `markdown`. Absent by default — the structured fields "
             "remain the contract; this is the view."
         ),
@@ -137,7 +138,7 @@ class InvalidReport(BaseModel):
     rendered_markdown: str | None = Field(
         default=None,
         description=(
-            "Opt-in Pipelex-API presentation extra (D-D): a server-rendered Markdown view of the invalid verdict's "
+            "Opt-in Pipelex-API presentation extra: a server-rendered Markdown view of the invalid verdict's "
             "`validation_errors`, present only when the request's `render` includes `markdown`. Absent by default."
         ),
     )
@@ -148,7 +149,16 @@ class InvalidReport(BaseModel):
 ValidationResponse = Annotated[Union[ValidReport, InvalidReport], Field(discriminator="is_valid")]
 
 
-@router.post("/validate", response_model=ValidationResponse, openapi_extra={"x-mthds-protocol": True})
+@router.post(
+    "/validate",
+    response_model=ValidationResponse,
+    # On top of the composite router's shared 401/413/422/500. Validation runs no inference and
+    # accepts no run id, so its only extra failure is the policy gate on the `orchestration_mode`
+    # override it shares with `/start`. Note what is deliberately NOT here: an *invalid bundle* is
+    # a produced verdict on a 200, never a 4xx.
+    responses={403: PROBLEM_403_ORCHESTRATION_MODE},
+    openapi_extra={"x-mthds-protocol": True},
+)
 async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSONResponse:
     """Validate MTHDS content by parsing, loading, and dry-running pipes (MTHDS Protocol `POST /validate`).
 

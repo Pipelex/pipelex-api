@@ -14,6 +14,7 @@ from pipelex.pipeline.runner import PipelexVersionInfo
 
 from api.error_types import ErrorType
 from api.errors import raise_internal_server_error
+from api.openapi_responses import PROBLEM_500
 
 router = APIRouter(tags=["discovery"])
 
@@ -22,6 +23,11 @@ IMPLEMENTATION_NAME = "pipelex-api"
 
 @router.get(
     "/version",
+    # This router mounts OUTSIDE the composite `/v1` router (public handshake — see the module
+    # docstring), so it inherits none of that router's shared problem responses. It takes no
+    # request body and no parameters, so there is nothing to reject: 500 (absent package
+    # metadata) is the only failure it can produce, and it never answers 401.
+    responses={500: PROBLEM_500},
     openapi_extra={"x-mthds-protocol": True},
 )
 async def get_version() -> PipelexVersionInfo:

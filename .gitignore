@@ -59,3 +59,4 @@ pipelex_override.toml
 telemetry_override.toml
 
 .worktreeinclude
+.gstack/
