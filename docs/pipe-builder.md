@@ -115,6 +115,7 @@ As with `/build/inputs`, the representation rides the field its `format` names, 
 {
   "is_valid": true,
   "pipe_ref": "cv_matching.analyze_cv_job_match",
+  "requested_pipe_ref": "cv_matching.analyze_cv_job_match",
   "format": "schema",
   "output": {
     "concept": "MatchAnalysis",

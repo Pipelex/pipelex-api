@@ -94,6 +94,7 @@ class TestResolveRoute:
         response = client.post("/v1/resolve", json={"files": [{"content": "a" * (2 * 1024 * 1024)}]})
         assert response.status_code == 422
         assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "ValidationError"
 
     def test_resolve_tears_down_its_library(self, mocker: MockerFixture):
         # The engine core leaves the library loaded + current on success (so /codegen can read live

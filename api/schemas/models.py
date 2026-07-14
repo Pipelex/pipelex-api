@@ -302,11 +302,15 @@ parameterizes that sweep, so the static `/build/{inputs,output}` projections do 
 class MthdsContentsRequest(BaseModel):
     """The `POST /validate` request envelope: bare `mthds_contents` strings plus the sweep's `allow_signatures`.
 
-    This is the *older* envelope, now used by `/validate` alone. Every other content-taking route has
-    moved to `MthdsFilesRequest` (`files[]` with per-file `source` labels XOR a `method_ref`), which
-    carries the source labels diagnostics need and the method-registry selector. `/validate` stays
-    here deliberately: it is an MTHDS Protocol route, so changing its envelope is a protocol-level
-    decision owned by the `mthds/` spec, not this server's to take (see `TODOS.md` → follow-ups).
+    This is the flat-list envelope. `/validate` uses it through this class (its `ValidateRequest`
+    subclass adds a parallel `mthds_sources` for per-file source labels), and the run routes
+    `/execute` and `/start` carry the same `mthds_contents` field independently on `RunRequest`.
+    The newer Pipelex-API extension routes (`/resolve`, `/codegen`, `/build/*`) use
+    `MthdsFilesRequest` instead (`files[]` pairing each content with its `source`, XOR a
+    `method_ref`), which folds the source label into each entry and adds the method-registry
+    selector. `/validate` stays here deliberately: it is an MTHDS Protocol route, so changing its
+    envelope is a protocol-level decision owned by the `mthds/` spec, not this server's to take
+    (see `TODOS.md` → follow-ups).
     """
 
     mthds_contents: list[str] = Field(

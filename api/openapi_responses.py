@@ -26,8 +26,9 @@ The response dicts below are attached two ways:
 
 The media type is NOT set here. FastAPI renders a `responses` entry's `model`
 under the route's own response-class media type (`application/json`), with no
-per-response override; `api.main.custom_openapi` re-keys every 4xx/5xx response
-onto `application/problem+json` after the schema is generated.
+per-response override; `PipelexFastAPI.openapi()` in `api.openapi_schema`
+re-keys every 4xx/5xx response onto `application/problem+json` (via
+`use_problem_json_media_type`) after the schema is generated.
 """
 
 from typing import Any
@@ -91,8 +92,8 @@ def _problem(description: str, *, headers: dict[str, Any] | None = None) -> dict
     """Build one `responses=` entry documenting a `ProblemDocument` failure.
 
     `model` registers `ProblemDocument` in the artifact's components and emits a
-    `$ref` to it; `api.main.custom_openapi` then moves the schema onto the
-    `application/problem+json` media type.
+    `$ref` to it; `PipelexFastAPI.openapi()` (`api.openapi_schema`) then moves
+    the schema onto the `application/problem+json` media type.
     """
     response: dict[str, Any] = {"description": description, "model": ProblemDocument}
     if headers is not None:

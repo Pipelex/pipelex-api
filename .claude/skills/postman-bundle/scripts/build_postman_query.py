@@ -59,8 +59,9 @@ TOP_FOLDER_NAME = "Bundles"
 #   "validate"     -> {mthds_contents, allow_signatures [, mthds_sources, render]}
 #   "resolve"      -> {files: [{content, source}]} — the crate envelope
 #   "codegen"      -> the crate envelope plus {kind, target}
-#   "build_inputs" / "build_runner" -> {pipe_code, mthds_contents, allow_signatures}
-#   "build_output" -> the same plus {format}
+#   "build_inputs" -> the crate envelope plus {pipe_ref, format, explicit}
+#   "build_output" -> the crate envelope plus {pipe_ref, format}
+#   "build_runner" -> the crate envelope plus {pipe_ref, allow_signatures}
 # Only "run"/"start" trigger inference; every other kind is a free
 # parse/load/dry-run on the server.
 ENDPOINTS: dict[str, tuple[str, list[str], str]] = {
@@ -79,7 +80,7 @@ ENDPOINTS: dict[str, tuple[str, list[str], str]] = {
 # crate routes (resolve/codegen) derive everything from the bundle text.
 PIPE_CODE_ENDPOINTS = {"execute", "start", "build-inputs", "build-output", "build-runner"}
 INPUTS_ENDPOINTS = {"execute", "start"}
-SIGNATURE_ENDPOINTS = {"validate", "build-inputs", "build-output", "build-runner"}
+SIGNATURE_ENDPOINTS = {"validate", "build-runner"}
 CRATE_ENDPOINTS = {"resolve", "codegen"}
 
 CODEGEN_TARGETS = ["ts-zod", "python-pydantic", "python-structures"]
@@ -834,11 +835,18 @@ def main() -> None:
             "build-output": f"the output representation (format={args.output_format})",
             "build-runner": "a runner script (plus the structures projection it imports)",
         }[key]
+        if key == "build-runner":
+            return (
+                f"Generate {artifact} for pipe `{pipe_code}` of the `{subfolder_name}` bundle. Validates the "
+                "bundle first (dry-run sweep scoped to the pipe, NO inference).\n\n"
+                f"{source_lines}"
+                f"- allow_signatures: {args.allow_signatures}\n\n"
+                f"200 discriminated on `is_valid`. {trailer}"
+            )
         return (
-            f"Generate {artifact} for pipe `{pipe_code}` of the `{subfolder_name}` bundle. Validates the "
-            "bundle first (dry-run sweep scoped to the pipe, NO inference).\n\n"
-            f"{source_lines}"
-            f"- allow_signatures: {args.allow_signatures}\n\n"
+            f"Generate {artifact} for pipe `{pipe_code}` of the `{subfolder_name}` bundle. Static projection: "
+            "resolves the closure and renders the pipe's declared IO — no dry-run sweep, NO inference.\n\n"
+            f"{source_lines}\n"
             f"200 discriminated on `is_valid`. {trailer}"
         )
 
