@@ -12,7 +12,7 @@ info:
   license:
     name: MIT
     identifier: MIT
-  version: 0.8.0
+  version: 0.9.0
 paths:
   /health:
     get:

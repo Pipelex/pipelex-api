@@ -104,7 +104,7 @@ class TestOpenApiErrorContract:
             for status in COMMON_STATUSES:
                 response = operation["responses"].get(str(status))
                 assert response is not None, f"{method.upper()} {path} does not document {status}"
-                content = response["content"]
+                content = response.get("content", {})
                 assert list(content) == [PROBLEM_JSON_MEDIA_TYPE], f"{method.upper()} {path} {status} media type is {list(content)}"
                 assert content[PROBLEM_JSON_MEDIA_TYPE]["schema"]["$ref"] == "#/components/schemas/ProblemDocument"
 
@@ -123,7 +123,7 @@ class TestOpenApiErrorContract:
         for status in extra_statuses:
             response = responses.get(str(status))
             assert response is not None, f"{method.upper()} {path} does not document {status}"
-            assert list(response["content"]) == [PROBLEM_JSON_MEDIA_TYPE]
+            assert list(response.get("content", {})) == [PROBLEM_JSON_MEDIA_TYPE]
 
     def test_x_mthds_protocol_tags_exactly_the_protocol_operations(self, openapi_schema: dict[str, Any]):
         """The flag is how a conformance suite extracts the portable subset of this artifact, so it

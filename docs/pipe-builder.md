@@ -164,6 +164,7 @@ The sweep is scoped to the requested pipe, so unrelated broken siblings do not b
 {
   "is_valid": true,
   "pipe_ref": "cv_matching.analyze_cv_job_match",
+  "requested_pipe_ref": "cv_matching.analyze_cv_job_match",
   "python_code": "import sys\nfrom pathlib import Path\n...",
   "structures": {
     "directory": "structures",
