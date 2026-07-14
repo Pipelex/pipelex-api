@@ -92,7 +92,7 @@ class TestResolveRoute:
     def test_oversized_file_is_422_problem_json(self):
         client = _build_client()
         response = client.post("/v1/resolve", json={"files": [{"content": "a" * (2 * 1024 * 1024)}]})
-        assert response.status_code == 422
+        assert response.status_code == 422, response.text
         assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "ValidationError"
 
