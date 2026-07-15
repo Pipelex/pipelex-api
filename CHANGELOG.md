@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.9.1] - 2026-07-15
+
+### Changed
+- **Dependencies:** Bumped `pipelex` from `0.39.0` to `0.39.1`.
+
 ## [v0.9.0] - 2026-07-14
 
 ### Added
