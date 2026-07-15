@@ -1,0 +1,6 @@
+# LOCAL TEST ONLY (untracked): boot the open-source runner as if it were the hosted runner,
+# so is_pipe_func_sandbox_hosted() is true and /v1/validate accepts custom-PipeFunc bundles
+# (declared function_name verbatim; the sandbox validates for real at execution). Mirrors
+# pipelex-api-hosted/.pipelex/pipelex_dev.toml.
+[pipelex.pipe_func_config]
+execution_mode = "daytona"
