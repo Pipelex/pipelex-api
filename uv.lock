@@ -2328,7 +2328,7 @@ wheels = [
 [[package]]
 name = "pipelex"
 version = "0.39.1"
-source = { git = "https://github.com/Pipelex/pipelex.git?rev=03442bb7a0f2a5a8f604e6d88e939ecb2e11c5a8#03442bb7a0f2a5a8f604e6d88e939ecb2e11c5a8" }
+source = { git = "https://github.com/Pipelex/pipelex.git?rev=e35538717590a35abf0201b53f6353c786f23d4d#e35538717590a35abf0201b53f6353c786f23d4d" }
 dependencies = [
     { name = "aiofiles" },
     { name = "datamodel-code-generator" },
@@ -2448,7 +2448,7 @@ requires-dist = [
     { name = "mkdocs-meta-manager", marker = "extra == 'docs'", specifier = "==1.1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.2" },
     { name = "pandas-stubs", marker = "extra == 'dev'", specifier = ">=2.2.3.241126" },
-    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal"], git = "https://github.com/Pipelex/pipelex.git?rev=03442bb7a0f2a5a8f604e6d88e939ecb2e11c5a8" },
+    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal"], git = "https://github.com/Pipelex/pipelex.git?rev=e35538717590a35abf0201b53f6353c786f23d4d" },
     { name = "pipelex-tools-py", specifier = ">=0.1.0" },
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.3.8" },
