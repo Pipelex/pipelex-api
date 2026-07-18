@@ -16,7 +16,7 @@ classifiers = [
 ]
 
 dependencies = [
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.39.1",
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.39.2",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",

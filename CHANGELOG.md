@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- **Dependencies:** Bumped `pipelex` from `0.39.1` to `0.39.2`. Unblocks the hosted runner (`pipelex-api-hosted`) resolving against pipelex `dev` (`0.39.2`, git-sourced) alongside the Temporal worker — the previous `==0.39.1` pin conflicted with the git-sourced `0.39.2` the hosted image installs.
+
 ## [v0.9.1] - 2026-07-15
 
 ### Changed
