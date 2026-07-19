@@ -10,6 +10,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pipelex.base_exceptions import PipelexConfigError
+from pipelex.cogt.llm.llm_report import LLMTokensUsage
+from pipelex.cogt.usage.cost_category import CostCategory
+from pipelex.cogt.usage.token_category import TokenCategory
+from pipelex.pipeline.job_metadata import JobMetadata
 from pipelex.pipeline.pipeline_response import PipelexRunResultStart, RunState
 from pytest_mock import MockerFixture
 
@@ -65,6 +69,37 @@ class TestPipelineRoutes:
         )
         assert response.status_code == 200
         execute_mock.assert_awaited_once()
+
+    def test_execute_trims_tokens_usages_to_wire_records(self, mocker: MockerFixture):
+        """/execute emits TokensUsageRecord wire records on pipe_output.tokens_usages — never
+        the internal usage models with their job_metadata plumbing and unit_costs rate table.
+        """
+        client, execute_mock, _ = _build_client(mocker)
+        tokens_usage = LLMTokensUsage(
+            job_metadata=JobMetadata(user_id="user-1", pipeline_run_id="plr-1", pipe_code="echo"),
+            inference_model_name="test-model",
+            inference_model_id="test-model-id",
+            nb_tokens_by_category={TokenCategory.INPUT: 10, TokenCategory.OUTPUT: 5},
+            unit_costs={CostCategory.INPUT: 1.0, CostCategory.OUTPUT: 2.0},
+        )
+        fake_response = execute_mock.return_value
+        fake_response.pipe_output.tokens_usages = [tokens_usage]
+        fake_response.model_dump.return_value["pipe_output"]["tokens_usages"] = [tokens_usage.model_dump(mode="json")]
+
+        response = client.post(
+            "/v1/execute",
+            json={"pipe_code": "echo", "mthds_contents": [VALID_MTHDS], "inputs": {"text": "hello"}},
+        )
+        assert response.status_code == 200
+        records = response.json()["pipe_output"]["tokens_usages"]
+        assert len(records) == 1
+        record = records[0]
+        assert record["model_type"] == "llm"
+        assert record["pipe_code"] == "echo"
+        assert record["nb_tokens_by_category"] == {"input": 10, "output": 5}
+        assert record["cost"] == 10 * (1.0 / 1_000_000) + 5 * (2.0 / 1_000_000)
+        assert "job_metadata" not in record
+        assert "unit_costs" not in record
 
     def test_execute_rejects_non_object_body(self, mocker: MockerFixture):
         client, _, _ = _build_client(mocker)

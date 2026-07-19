@@ -18,6 +18,7 @@ from pipelex.pipe_run.pipe_run_protocol import PipeRunProtocol
 from pipelex.pipeline.pipeline_response import PipelexRunResultExecute, PipelexRunResultStart, RunState
 from pipelex.pipeline.pipeline_run_setup import pipeline_run_setup
 from pipelex.pipeline.runner import PipelexMTHDSProtocol
+from pipelex.reporting.usage_records import apply_tokens_usage_wire_shape
 from pipelex.runtime_bridge.exceptions import MissingBundleValidatorError, MissingOrchestratorError
 from pipelex.runtime_bridge.primitives.hydration import hydrate_working_memory
 from pipelex.system.environment import get_required_env
@@ -544,9 +545,12 @@ async def execute(request: Request) -> JSONResponse:
         dynamic_output_concept_ref=run_request.dynamic_output_concept_ref,
         requested_orchestration_mode=extras.orchestration_mode,
     )
-    return JSONResponse(
-        content=response.model_dump(mode="json", serialize_as_any=True, by_alias=True),
-    )
+    # The response dump carries the full internal usage models on
+    # `pipe_output.tokens_usages`; the client boundary gets the trimmed
+    # `TokensUsageRecord` wire shape instead (pipelex owns the shape authority).
+    response_dump = response.model_dump(mode="json", serialize_as_any=True, by_alias=True)
+    apply_tokens_usage_wire_shape(response_dump, pipe_output=response.pipe_output)
+    return JSONResponse(content=response_dump)
 
 
 @router.post(
