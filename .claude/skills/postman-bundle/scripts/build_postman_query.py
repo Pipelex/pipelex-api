@@ -204,6 +204,11 @@ def collect_local_urls(value: Any, acc: list[str] | None = None) -> list[str]:
 
 CALLBACK_URL_ENV_VAR = "CALLBACK_URL"
 
+# In the Postman push, the async-start callback rides a collection/environment
+# variable — switchable alongside {{base_url}} and {{auth_token}} — never a
+# baked-in URL. Only --run/--curl (real HTTP calls) need a resolved URL.
+POSTMAN_CALLBACK_VAR = "{{callback_url}}"
+
 
 def resolve_callback_urls(cli_values: list[str] | None) -> list[str]:
     """Resolve the async-start callback URL(s): --callback-url, then CALLBACK_URL.
@@ -640,18 +645,24 @@ def main() -> None:
             "or pass --pipe <pipe_code>."
         )
 
-    # callback_urls belongs to the async /start endpoint only. Resolve it
-    # from --callback-url, then CALLBACK_URL (environment or .env). If start is in
-    # play and none is found, stop and ask the user for one.
+    # callback_urls belongs to the async /start endpoint only. In the Postman
+    # push it is always the {{callback_url}} collection variable — switchable
+    # alongside base_url/auth_token, never a baked-in URL. For --run/--curl/--dry
+    # (real HTTP calls, or a preview of one) resolve a concrete URL from
+    # --callback-url, then CALLBACK_URL (environment or .env); if none is found,
+    # stop and ask the user for one.
     callback_urls: list[str] = []
     if needs_start:
-        callback_urls = resolve_callback_urls(args.callback_url)
-        if not callback_urls:
-            fail(
-                "the async /start endpoint requires callback_urls, but none was found. "
-                "Pass --callback-url <https-url>, or set CALLBACK_URL in your .env. If you don't "
-                "have one, ask the user for a callback URL (e.g. a https://webhook.site/... endpoint)."
-            )
+        if mode == "postman":
+            callback_urls = [POSTMAN_CALLBACK_VAR]
+        else:
+            callback_urls = resolve_callback_urls(args.callback_url)
+            if not callback_urls:
+                fail(
+                    "the async /start endpoint requires callback_urls, but none was found. "
+                    "Pass --callback-url <https-url>, or set CALLBACK_URL in your .env. If you don't "
+                    "have one, ask the user for a callback URL (e.g. a https://webhook.site/... endpoint)."
+                )
 
     mthds_contents = [path.read_text(encoding="utf-8") for path in all_mthds]
 
@@ -789,7 +800,11 @@ def main() -> None:
     def describe(key: str) -> str:
         """Per-endpoint Postman request description (shown in the collection)."""
         if key in ("execute", "start"):
-            callback_note = f"- callback_urls (Start only): {', '.join(callback_urls)}\n" if needs_start else ""
+            callback_note = (
+                f"- callback_urls (Start only): `{', '.join(callback_urls)}` — set `callback_url` in your Postman environment\n"
+                if needs_start
+                else ""
+            )
             return (
                 f"Run the `{subfolder_name}` bundle (mirrors `pipelex run bundle`). Triggers REAL inference.\n\n"
                 f"{source_lines}"
@@ -866,8 +881,9 @@ def main() -> None:
     action = upsert_bundle_folder(envelope["collection"], subfolder_name, requests)
     postman_request(args.collection_uid, api_key, "PUT", envelope)
 
+    vars_to_set = "base_url + auth_token" + (" + callback_url" if needs_start else "")
     print(f"\n{action.upper()} '{TOP_FOLDER_NAME}/{subfolder_name}' in the Pipelex FastAPI collection.")
-    print("Open Postman (auto-syncs), set base_url + auth_token, and Send.")
+    print(f"Open Postman (auto-syncs), set {vars_to_set}, and Send.")
 
 
 if __name__ == "__main__":
