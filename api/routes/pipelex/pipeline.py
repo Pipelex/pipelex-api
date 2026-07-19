@@ -18,6 +18,7 @@ from pipelex.pipe_run.pipe_run_protocol import PipeRunProtocol
 from pipelex.pipeline.pipeline_response import PipelexRunResultExecute, PipelexRunResultStart, RunState
 from pipelex.pipeline.pipeline_run_setup import pipeline_run_setup
 from pipelex.pipeline.runner import PipelexMTHDSProtocol
+from pipelex.reporting.usage_records import apply_tokens_usage_wire_shape
 from pipelex.runtime_bridge.exceptions import MissingBundleValidatorError, MissingOrchestratorError
 from pipelex.runtime_bridge.primitives.hydration import hydrate_working_memory
 from pipelex.system.environment import get_required_env
@@ -36,7 +37,7 @@ from api.openapi_responses import (
     PROBLEM_501_ASYNC_NOT_ENABLED,
 )
 from api.routes.pipelex.utils import get_current_iso_timestamp
-from api.schemas.models import PipelexApiExecuteRequest, PipelexApiStartRequest, PipelineApiExtras, RunRequest
+from api.schemas.models import PipelexApiExecuteRequest, PipelexApiExecuteResponse, PipelexApiStartRequest, PipelineApiExtras, RunRequest
 
 if TYPE_CHECKING:
     from mthds.protocol.pipe_output import VariableMultiplicity
@@ -500,7 +501,10 @@ async def _parse_request(request: Request) -> tuple[RunRequest, PipelineApiExtra
 
 @router.post(
     "/execute",
-    response_model=PipelexRunResultExecute,
+    # Documented 200 = the run result with the WIRE-shaped `pipe_output`: the handler returns a
+    # `JSONResponse` built from a trimmed dump, so FastAPI never serializes through this model —
+    # it is purely what the artifact publishes, and it must match `apply_tokens_usage_wire_shape`.
+    response_model=PipelexApiExecuteResponse,
     # On top of the composite router's shared 401/413/422/500: a forbidden per-request
     # `orchestration_mode` override (403), and the provider rate-limit passthrough (429) —
     # `/execute` is the only route that runs inference, so it is the only one that can be
@@ -544,9 +548,12 @@ async def execute(request: Request) -> JSONResponse:
         dynamic_output_concept_ref=run_request.dynamic_output_concept_ref,
         requested_orchestration_mode=extras.orchestration_mode,
     )
-    return JSONResponse(
-        content=response.model_dump(mode="json", serialize_as_any=True, by_alias=True),
-    )
+    # The response dump carries the full internal usage models on
+    # `pipe_output.tokens_usages`; the client boundary gets the trimmed
+    # `TokensUsageRecord` wire shape instead (pipelex owns the shape authority).
+    response_dump = response.model_dump(mode="json", serialize_as_any=True, by_alias=True)
+    apply_tokens_usage_wire_shape(response_dump, pipe_output=response.pipe_output)
+    return JSONResponse(content=response_dump)
 
 
 @router.post(

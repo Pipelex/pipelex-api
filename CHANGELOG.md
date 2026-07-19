@@ -1,9 +1,11 @@
 # Changelog
 
-## [Unreleased]
+## [v0.10.0] - 2026-07-19
 
 ### Changed
-- **Dependencies:** Bumped `pipelex` from `0.39.1` to `0.39.2`. Unblocks the hosted runner (`pipelex-api-hosted`) resolving against pipelex `dev` (`0.39.2`, git-sourced) alongside the Temporal worker — the previous `==0.39.1` pin conflicted with the git-sourced `0.39.2` the hosted image installs.
+- **Breaking: `/execute` now returns `pipe_output.tokens_usages` as client wire records (`TokensUsageRecord`), not dumps of pipelex's internal usage models.** The route applies pipelex's `apply_tokens_usage_wire_shape` to the response dump, so each record is flat and closed: `model_type`, model name/id, `pipe_code`, `job_category`, `unit_job_id`, `nb_tokens_by_category`, computed USD `cost` (`null` when the model has no rate table), ISO `started_at`/`completed_at`. Runtime internals (`job_metadata` and its contexts/ids, `unit_costs`) no longer cross the wire. Null semantics unchanged (`null` = usage assembly off, `[]` = no inference). Documented in [Pipe Run](docs/pipe-run.md).
+- **The OpenAPI artifact now publishes the wire shape it actually emits.** `/execute` returns a `JSONResponse` built from the trimmed dump, so FastAPI never serializes through `response_model` — the declared 200 body was still the internal usage union (`LLMTokensUsage | ImgGenTokensUsage | …` with required `job_metadata` and `unit_costs`), and a client generated from the artifact would have rejected every real response carrying usage data. The route now declares `PipelexApiExecuteResponse` (the run result whose `pipe_output.tokens_usages` is `TokensUsageRecord[]`), so the published schema matches the body. The internal usage models leave the artifact entirely; `tests/unit/test_openapi_contract.py` pins the published record alongside the runtime guard, so the two fail together if either drifts again.
+- **Dependencies:** Bumped `pipelex` from `0.39.1` to `0.40.0`. This release carries `apply_tokens_usage_wire_shape` and the `TokensUsageRecord` wire shape the `/execute` change above depends on. (It supersedes the interim `0.39.2` bump — which unblocked the hosted runner resolving against a git-sourced `dev` — with a released PyPI pin.)
 
 ## [v0.9.1] - 2026-07-15
 
