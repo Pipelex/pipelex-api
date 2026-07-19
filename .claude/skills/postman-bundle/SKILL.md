@@ -50,7 +50,7 @@ Bundles/
     Build Inputs               Build Output (<format>)   Build Runner
 ```
 
-Which requests appear depends on `--endpoint`: the default `both` is `execute` + `start`; every other endpoint is pushed alone. Pushes **merge by request name** — pushing `--endpoint codegen` doesn't wipe an Execute/Start pair pushed earlier, and two codegen targets (distinct names) coexist. Requests use the collection variable `{{base_url}}` and inherit the collection's `{{auth_token}}` bearer auth, so the same query works against a local or hosted server by switching the Postman environment.
+Which requests appear depends on `--endpoint`: the default `both` is `execute` + `start`; every other endpoint is pushed alone. Pushes **merge by request name** — pushing `--endpoint codegen` doesn't wipe an Execute/Start pair pushed earlier, and two codegen targets (distinct names) coexist. Requests use the collection variable `{{base_url}}` and inherit the collection's `{{auth_token}}` bearer auth (and the **Start** request's `callback_urls` is the `{{callback_url}}` variable), so the same query works against a local or hosted server by switching the Postman environment.
 
 (The top folder used to be `Run Bundle/` — if a stale folder by that name lingers in the collection, it can be deleted.)
 
@@ -115,11 +115,15 @@ The valid arm carries the **stamped** artifact set plus its `codegen.lock`: a cl
 
 ## Callback URLs (the async `start` endpoint)
 
-`/v1/start` is fire-and-forget: it returns a `run_id` immediately and POSTs the finished result to a webhook later, so a `start` request **must** carry `callback_urls`. Resolution order:
+`/v1/start` is fire-and-forget: it returns a `run_id` immediately and POSTs the finished result to a webhook later, so a `start` request **must** carry `callback_urls`.
+
+**Postman push (default mode) always uses the `{{callback_url}}` collection variable** — never a baked-in URL. The pushed body is `"callback_urls": ["{{callback_url}}"]`, so the callback is switchable in the Postman environment right alongside `base_url` and `auth_token` (local vs hosted). Nothing to resolve — just tell the user to set `callback_url` in their Postman environment (a `https://webhook.site/...` endpoint is the easy way to watch the result land).
+
+**`--run` / `--curl` (a real HTTP call, or a preview of one) need a concrete URL.** Resolution order there:
 
 1. **`--callback-url <url>`** (repeatable — the field is a JSON list; a single URL is the common case).
 2. **`CALLBACK_URL`** in the environment or the repo `.env`. `make` exports `.env`; the script also reads `.env` directly when invoked outside `make`.
-3. **Ask the user.** If neither is set, the script stops with a clear error — ask for a callback URL (a `https://webhook.site/...` endpoint is the easy way to watch the result land) and re-run with `--callback-url`.
+3. **Ask the user.** If neither is set, the script stops with a clear error — ask for a callback URL and re-run with `--callback-url`.
 
 This only affects `start` — no other endpoint takes `callback_urls`. The API's SSRF guard rejects loopback/private/metadata hosts, so a `localhost` callback won't validate — use a public `https://` URL.
 
@@ -217,7 +221,7 @@ A related limit: the API receives only the inline bundle text, not the bundle di
 - **No `POSTMAN_API_KEY`** → the script exits asking you to `source ~/.zshenv`. Do that and retry. If still unset, the user needs to add it (Postman → Settings → API keys → Generate).
 - **No `main_pipe` and no `--pipe`** (execute/start/build routes) → the script exits; ask the user which pipe and pass `--pipe`.
 - **`codegen` without `--target`** → the script exits listing the three targets; ask the user which consumer they're generating for.
-- **`start` selected and no callback URL** → the script exits. Resolve from `--callback-url`, `CALLBACK_URL` in `.env`, or ask the user (e.g. a `https://webhook.site/...` endpoint).
+- **`start` selected via `--run`/`--curl` and no callback URL** → the script exits. Resolve from `--callback-url`, `CALLBACK_URL` in `.env`, or ask the user (e.g. a `https://webhook.site/...` endpoint). (The Postman push never hits this — it uses the `{{callback_url}}` variable and needs no resolution.)
 - **No `main_pipe`, validating/resolving** → fine, not an error: those endpoints need no pipe; validate just returns `graph_spec: null`. (On the build routes a missing `main_pipe` means `pipe_ref` cannot be defaulted — pass `--pipe`, or the server answers `422`.)
 
 ## Constants
