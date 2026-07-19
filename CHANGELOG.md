@@ -1,10 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [v0.10.0] - 2026-07-19
 
 ### Changed
 - **Breaking: `/execute` now returns `pipe_output.tokens_usages` as client wire records (`TokensUsageRecord`), not dumps of pipelex's internal usage models.** The route applies pipelex's `apply_tokens_usage_wire_shape` to the response dump, so each record is flat and closed: `model_type`, model name/id, `pipe_code`, `job_category`, `unit_job_id`, `nb_tokens_by_category`, computed USD `cost` (`null` when the model has no rate table), ISO `started_at`/`completed_at`. Runtime internals (`job_metadata` and its contexts/ids, `unit_costs`) no longer cross the wire. Null semantics unchanged (`null` = usage assembly off, `[]` = no inference). Documented in [Pipe Run](docs/pipe-run.md).
-- **Dependencies:** Bumped `pipelex` from `0.39.1` to `0.39.2`. Unblocks the hosted runner (`pipelex-api-hosted`) resolving against pipelex `dev` (`0.39.2`, git-sourced) alongside the Temporal worker — the previous `==0.39.1` pin conflicted with the git-sourced `0.39.2` the hosted image installs.
+- **Dependencies:** Bumped `pipelex` from `0.39.1` to `0.40.0`. This release carries `apply_tokens_usage_wire_shape` and the `TokensUsageRecord` wire shape the `/execute` change above depends on. (It supersedes the interim `0.39.2` bump — which unblocked the hosted runner resolving against a git-sourced `dev` — with a released PyPI pin.)
 
 ## [v0.9.1] - 2026-07-15
 
