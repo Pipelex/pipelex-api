@@ -16,6 +16,9 @@ from mthds.protocol.exceptions import PipelineRequestError
 from mthds.protocol.pipe_output import VariableMultiplicity
 from mthds.protocol.pipeline_inputs import PipelineInputs
 from mthds.protocol.working_memory import WorkingMemoryAbstract
+from pipelex.core.pipes.pipe_output import PipeOutput
+from pipelex.pipeline.pipeline_response import PipelexRunResultExecute
+from pipelex.reporting.usage_records import TokensUsageRecord
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.functional_validators import SkipValidation
 
@@ -211,6 +214,31 @@ class PipelexApiExecuteRequest(RunRequest):
     """
 
     orchestration_mode: str | None = Field(default=None, description=_ORCHESTRATION_MODE_DESCRIPTION)
+
+
+class PipeOutputWire(PipeOutput):
+    """`PipeOutput` as it crosses the client boundary: usages trimmed to wire records.
+
+    The route applies pipelex's `apply_tokens_usage_wire_shape` to the response dump, so
+    `tokens_usages` carries flat `TokensUsageRecord`s — not the internal usage models with
+    their `job_metadata` plumbing and `unit_costs` rate table.
+    """
+
+    # Narrows the inherited `list[AnyTokensUsage] | None`. `list` is invariant, so neither
+    # type checker accepts the override; this is a schema declaration, not an assignment a
+    # `cast()` could carry.
+    tokens_usages: list[TokensUsageRecord] | None = None  # type: ignore[assignment]
+
+
+class PipelexApiExecuteResponse(PipelexRunResultExecute):
+    """Documented 200 body of `POST /execute` — the run result with the wire-shaped `pipe_output`.
+
+    Used only to publish the OpenAPI response schema. `/execute` returns a `JSONResponse`
+    built from the trimmed dump, so FastAPI never serializes through this model; declaring it
+    is what keeps the published artifact honest about what the route actually emits.
+    """
+
+    pipe_output: PipeOutputWire  # type: ignore[assignment]
 
 
 class MthdsFileItem(BaseModel):

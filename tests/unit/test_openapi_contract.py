@@ -170,3 +170,26 @@ class TestOpenApiErrorContract:
         assert fix_properties["ops"]["items"]["$ref"] == "#/components/schemas/FixOp"
         assert set(schemas["FixOpKind"]["enum"]) == {"set_key", "ensure_table", "delete_key", "delete_table", "rename_table_key"}
         assert set(schemas["FixSafety"]["enum"]) == {"safe", "unsafe"}
+
+    def test_execute_publishes_the_tokens_usage_wire_records(self, openapi_schema: dict[str, Any]):
+        """`/execute` returns a `JSONResponse` built from a trimmed dump, so FastAPI never validates
+        the body against `response_model` — nothing but this test keeps the published 200 schema
+        honest about what `apply_tokens_usage_wire_shape` actually emits. The runtime guard in
+        `test_pipeline_routes.py` pins the body; this pins the artifact, so the two fail together.
+        """
+        schemas = openapi_schema["components"]["schemas"]
+        body_ref = openapi_schema["paths"]["/v1/execute"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+        assert body_ref == "#/components/schemas/PipelexApiExecuteResponse"
+
+        pipe_output_ref = schemas["PipelexApiExecuteResponse"]["properties"]["pipe_output"]["$ref"]
+        tokens_usages = schemas[pipe_output_ref.rsplit("/", 1)[-1]]["properties"]["tokens_usages"]
+        item_refs = [option["items"]["$ref"] for option in tokens_usages["anyOf"] if option.get("type") == "array"]
+        assert item_refs == ["#/components/schemas/TokensUsageRecord"]
+
+        record_properties = set(schemas["TokensUsageRecord"]["properties"])
+        assert {"model_type", "pipe_code", "nb_tokens_by_category", "cost"} <= record_properties
+        # The runtime internals the wire shape drops must not reappear in the published record.
+        assert {"job_metadata", "unit_costs"}.isdisjoint(record_properties)
+
+        # Nothing else references the internal usage models, so they leave the artifact entirely.
+        assert {"LLMTokensUsage", "ImgGenTokensUsage", "JobMetadata"}.isdisjoint(schemas)

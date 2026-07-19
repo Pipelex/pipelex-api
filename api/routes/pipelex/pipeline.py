@@ -37,7 +37,7 @@ from api.openapi_responses import (
     PROBLEM_501_ASYNC_NOT_ENABLED,
 )
 from api.routes.pipelex.utils import get_current_iso_timestamp
-from api.schemas.models import PipelexApiExecuteRequest, PipelexApiStartRequest, PipelineApiExtras, RunRequest
+from api.schemas.models import PipelexApiExecuteRequest, PipelexApiExecuteResponse, PipelexApiStartRequest, PipelineApiExtras, RunRequest
 
 if TYPE_CHECKING:
     from mthds.protocol.pipe_output import VariableMultiplicity
@@ -501,7 +501,10 @@ async def _parse_request(request: Request) -> tuple[RunRequest, PipelineApiExtra
 
 @router.post(
     "/execute",
-    response_model=PipelexRunResultExecute,
+    # Documented 200 = the run result with the WIRE-shaped `pipe_output`: the handler returns a
+    # `JSONResponse` built from a trimmed dump, so FastAPI never serializes through this model —
+    # it is purely what the artifact publishes, and it must match `apply_tokens_usage_wire_shape`.
+    response_model=PipelexApiExecuteResponse,
     # On top of the composite router's shared 401/413/422/500: a forbidden per-request
     # `orchestration_mode` override (403), and the provider rate-limit passthrough (429) —
     # `/execute` is the only route that runs inference, so it is the only one that can be

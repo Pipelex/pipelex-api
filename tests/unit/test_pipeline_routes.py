@@ -82,9 +82,9 @@ class TestPipelineRoutes:
             nb_tokens_by_category={TokenCategory.INPUT: 10, TokenCategory.OUTPUT: 5},
             unit_costs={CostCategory.INPUT: 1.0, CostCategory.OUTPUT: 2.0},
         )
-        fake_response = execute_mock.return_value
-        fake_response.pipe_output.tokens_usages = [tokens_usage]
-        fake_response.model_dump.return_value["pipe_output"]["tokens_usages"] = [tokens_usage.model_dump(mode="json")]
+        # The route reads the usages off the response object and writes the trimmed
+        # records into the dump, so seeding the object alone is what drives the assertions.
+        execute_mock.return_value.pipe_output.tokens_usages = [tokens_usage]
 
         response = client.post(
             "/v1/execute",

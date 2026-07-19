@@ -336,7 +336,14 @@ convention = "google"
 # imports used only in annotations on a BaseModel subclass must stay at module
 # scope — TC001/TC002/TC003 would otherwise push them into a TYPE_CHECKING block
 # and break model construction.
-runtime-evaluated-base-classes = ["pydantic.BaseModel"]
+# The pipelex bases below are themselves BaseModel subclasses, but ruff resolves this
+# list by name and cannot see through the inheritance — so a model that documents the
+# wire shape by subclassing one of them needs its base listed here explicitly too.
+runtime-evaluated-base-classes = [
+  "pydantic.BaseModel",
+  "pipelex.core.pipes.pipe_output.PipeOutput",
+  "pipelex.pipeline.pipeline_response.PipelexRunResultExecute",
+]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = [

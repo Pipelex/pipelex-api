@@ -453,7 +453,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PipelexRunResultExecute'
+                $ref: '#/components/schemas/PipelexApiExecuteResponse'
         '401':
           description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
             or `AUTH_MODE=jwt`).
@@ -2185,20 +2185,6 @@ components:
       - nested
       title: ConstructFieldMethod
       description: Method used to compose a field value.
-    CostCategory:
-      type: string
-      enum:
-      - input
-      - input_cached
-      - input_non_cached
-      - input_joined
-      - input_audio
-      - output
-      - output_audio
-      - output_reasoning
-      - output_accepted_prediction
-      - output_rejected_prediction
-      title: CostCategory
     CrateInvalidReport:
       properties:
         is_valid:
@@ -2229,33 +2215,6 @@ components:
         a 200 discriminated on `is_valid`, carrying the same structured `ValidationErrorItem`s the
 
         local CLI and `/validate` emit for the identical failure.'
-    DataInclusionConfig:
-      properties:
-        stuff_json_content:
-          type: boolean
-          title: Stuff Json Content
-        stuff_text_content:
-          type: boolean
-          title: Stuff Text Content
-        stuff_html_content:
-          type: boolean
-          title: Stuff Html Content
-        error_stack_traces:
-          type: boolean
-          title: Error Stack Traces
-        pipe_and_concept_registry:
-          type: boolean
-          title: Pipe And Concept Registry
-      additionalProperties: false
-      type: object
-      required:
-      - stuff_json_content
-      - stuff_text_content
-      - stuff_html_content
-      - error_stack_traces
-      - pipe_and_concept_registry
-      title: DataInclusionConfig
-      description: Controls which data is included in graph outputs.
     Diagnostic:
       properties:
         kind:
@@ -2416,43 +2375,6 @@ components:
       required:
       - model
       title: ExtractSetting
-    ExtractTokensUsage:
-      properties:
-        model_type:
-          type: string
-          const: extract
-          title: Model Type
-          default: extract
-        job_metadata:
-          $ref: '#/components/schemas/JobMetadata'
-        inference_model_name:
-          type: string
-          title: Inference Model Name
-        unit_costs:
-          additionalProperties:
-            type: number
-          propertyNames:
-            $ref: '#/components/schemas/CostCategory'
-          type: object
-          title: Unit Costs
-        inference_model_id:
-          type: string
-          title: Inference Model Id
-        nb_tokens_by_category:
-          additionalProperties:
-            type: integer
-          propertyNames:
-            $ref: '#/components/schemas/TokenCategory'
-          type: object
-          title: Nb Tokens By Category
-      type: object
-      required:
-      - job_metadata
-      - inference_model_name
-      - unit_costs
-      - inference_model_id
-      - nb_tokens_by_category
-      title: ExtractTokensUsage
     FixOp:
       properties:
         kind:
@@ -2791,43 +2713,6 @@ components:
       required:
       - model
       title: ImgGenSetting
-    ImgGenTokensUsage:
-      properties:
-        model_type:
-          type: string
-          const: img_gen
-          title: Model Type
-          default: img_gen
-        job_metadata:
-          $ref: '#/components/schemas/JobMetadata'
-        inference_model_name:
-          type: string
-          title: Inference Model Name
-        unit_costs:
-          additionalProperties:
-            type: number
-          propertyNames:
-            $ref: '#/components/schemas/CostCategory'
-          type: object
-          title: Unit Costs
-        inference_model_id:
-          type: string
-          title: Inference Model Id
-        nb_tokens_by_category:
-          additionalProperties:
-            type: integer
-          propertyNames:
-            $ref: '#/components/schemas/TokenCategory'
-          type: object
-          title: Nb Tokens By Category
-      type: object
-      required:
-      - job_metadata
-      - inference_model_name
-      - unit_costs
-      - inference_model_id
-      - nb_tokens_by_category
-      title: ImgGenTokensUsage
     InputsTemplateFormat:
       type: string
       enum:
@@ -2889,84 +2774,6 @@ components:
         load/parse/wiring failed, so this arm omits them and carries only the per-error diagnostics
 
         plus the runnability facts.'
-    JobCategory:
-      type: string
-      enum:
-      - mock_job
-      - llm_job
-      - img_gen_job
-      - jinja2_job
-      - extract_job
-      - search_job
-      title: JobCategory
-    JobMetadata:
-      properties:
-        user_id:
-          type: string
-          title: User Id
-        pipeline_run_id:
-          type: string
-          title: Pipeline Run Id
-        pipe_code:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Pipe Code
-        session_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Session Id
-        request_id:
-          anyOf:
-          - type: string
-            maxLength: 128
-            pattern: ^[\x20-\x7E]+$
-          - type: 'null'
-          title: Request Id
-        pipe_run_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Pipe Run Id
-        otel_context:
-          anyOf:
-          - $ref: '#/components/schemas/OtelContext'
-          - type: 'null'
-        trace_context:
-          anyOf:
-          - $ref: '#/components/schemas/TraceContext'
-          - type: 'null'
-        content_generation_job_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Content Generation Job Id
-        unit_job_id:
-          anyOf:
-          - $ref: '#/components/schemas/UnitJobId'
-          - type: 'null'
-        job_category:
-          anyOf:
-          - $ref: '#/components/schemas/JobCategory'
-          - type: 'null'
-        started_at:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: Started At
-        completed_at:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: Completed At
-      type: object
-      required:
-      - user_id
-      - pipeline_run_id
-      title: JobMetadata
     LLMSetting:
       properties:
         model:
@@ -3013,43 +2820,6 @@ components:
       - model
       - temperature
       title: LLMSetting
-    LLMTokensUsage:
-      properties:
-        model_type:
-          type: string
-          const: llm
-          title: Model Type
-          default: llm
-        job_metadata:
-          $ref: '#/components/schemas/JobMetadata'
-        inference_model_name:
-          type: string
-          title: Inference Model Name
-        unit_costs:
-          additionalProperties:
-            type: number
-          propertyNames:
-            $ref: '#/components/schemas/CostCategory'
-          type: object
-          title: Unit Costs
-        inference_model_id:
-          type: string
-          title: Inference Model Id
-        nb_tokens_by_category:
-          additionalProperties:
-            type: integer
-          propertyNames:
-            $ref: '#/components/schemas/TokenCategory'
-          type: object
-          title: Nb Tokens By Category
-      type: object
-      required:
-      - job_metadata
-      - inference_model_name
-      - unit_costs
-      - inference_model_id
-      - nb_tokens_by_category
-      title: LLMTokensUsage
     LiftablePipeEntry:
       properties:
         pipe_ref:
@@ -3303,33 +3073,6 @@ components:
       - canceled
       title: NodeStatus
       description: Execution status of a node.
-    OtelContext:
-      properties:
-        trace_id:
-          type: integer
-          title: Trace Id
-          description: 128-bit, derived from pipeline_run_id
-        trace_name:
-          type: string
-          title: Trace Name
-          description: Trace name with pipe_code (for custom telemetry)
-        trace_name_redacted:
-          type: string
-          title: Trace Name Redacted
-          description: Trace name without pipe_code (for Pipelex telemetry)
-        span_id:
-          type: integer
-          title: Span Id
-          description: 64-bit, derived from pipe_run_id
-      additionalProperties: false
-      type: object
-      required:
-      - trace_id
-      - trace_name
-      - trace_name_redacted
-      - span_id
-      title: OtelContext
-      description: OpenTelemetry context for tracing, derived from business IDs.
     PipeBatchBlueprint:
       properties:
         source:
@@ -3779,7 +3522,24 @@ components:
       - description
       - output
       title: PipeLLMBlueprint
-    PipeOutput:
+    PipeOutputContract:
+      properties:
+        concept_ref:
+          type: string
+          title: Concept Ref
+        multiplicity:
+          $ref: '#/components/schemas/IOMultiplicity'
+        optional:
+          type: boolean
+          title: Optional
+          default: false
+      type: object
+      required:
+      - concept_ref
+      - multiplicity
+      title: PipeOutputContract
+      description: 'The pipe''s output: the concept it produces and whether it is one item or a list.'
+    PipeOutputWire:
       properties:
         working_memory:
           $ref: '#/components/schemas/WorkingMemory'
@@ -3805,18 +3565,7 @@ components:
         tokens_usages:
           anyOf:
           - items:
-              oneOf:
-              - $ref: '#/components/schemas/LLMTokensUsage'
-              - $ref: '#/components/schemas/ImgGenTokensUsage'
-              - $ref: '#/components/schemas/ExtractTokensUsage'
-              - $ref: '#/components/schemas/SearchTokensUsage'
-              discriminator:
-                propertyName: model_type
-                mapping:
-                  extract: '#/components/schemas/ExtractTokensUsage'
-                  img_gen: '#/components/schemas/ImgGenTokensUsage'
-                  llm: '#/components/schemas/LLMTokensUsage'
-                  search: '#/components/schemas/SearchTokensUsage'
+              $ref: '#/components/schemas/TokensUsageRecord'
             type: array
           - type: 'null'
           title: Tokens Usages
@@ -3827,24 +3576,15 @@ components:
           title: Usage Assembly Error
       additionalProperties: false
       type: object
-      title: PipeOutput
-    PipeOutputContract:
-      properties:
-        concept_ref:
-          type: string
-          title: Concept Ref
-        multiplicity:
-          $ref: '#/components/schemas/IOMultiplicity'
-        optional:
-          type: boolean
-          title: Optional
-          default: false
-      type: object
-      required:
-      - concept_ref
-      - multiplicity
-      title: PipeOutputContract
-      description: 'The pipe''s output: the concept it produces and whether it is one item or a list.'
+      title: PipeOutputWire
+      description: '`PipeOutput` as it crosses the client boundary: usages trimmed to wire records.
+
+
+        The route applies pipelex''s `apply_tokens_usage_wire_shape` to the response dump, so
+
+        `tokens_usages` carries flat `TokensUsageRecord`s — not the internal usage models with
+
+        their `job_metadata` plumbing and `unit_costs` rate table.'
     PipeParallelBlueprint:
       properties:
         source:
@@ -4111,6 +3851,43 @@ components:
       - PipeParallel
       - PipeSequence
       title: PipeType
+    PipelexApiExecuteResponse:
+      properties:
+        pipeline_run_id:
+          type: string
+          title: Pipeline Run Id
+        pipe_output:
+          $ref: '#/components/schemas/PipeOutputWire'
+        created_at:
+          type: string
+          title: Created At
+        state:
+          $ref: '#/components/schemas/RunState'
+        finished_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Finished At
+        main_stuff_name:
+          type: string
+          title: Main Stuff Name
+      additionalProperties: true
+      type: object
+      required:
+      - pipeline_run_id
+      - pipe_output
+      - created_at
+      - state
+      - main_stuff_name
+      title: PipelexApiExecuteResponse
+      description: 'Documented 200 body of `POST /execute` — the run result with the wire-shaped `pipe_output`.
+
+
+        Used only to publish the OpenAPI response schema. `/execute` returns a `JSONResponse`
+
+        built from the trimmed dump, so FastAPI never serializes through this model; declaring it
+
+        is what keeps the published artifact honest about what the route actually emits.'
     PipelexBundleBlueprint:
       properties:
         source:
@@ -4220,45 +3997,6 @@ components:
         (e.g. `default-small`) legitimately exists in several categories pointing at
 
         different models, so a flat map would silently lose entries on collision.'
-    PipelexRunResultExecute:
-      properties:
-        pipeline_run_id:
-          type: string
-          title: Pipeline Run Id
-        pipe_output:
-          $ref: '#/components/schemas/PipeOutput'
-        created_at:
-          type: string
-          title: Created At
-        state:
-          $ref: '#/components/schemas/RunState'
-        finished_at:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Finished At
-        main_stuff_name:
-          type: string
-          title: Main Stuff Name
-      additionalProperties: true
-      type: object
-      required:
-      - pipeline_run_id
-      - pipe_output
-      - created_at
-      - state
-      - main_stuff_name
-      title: PipelexRunResultExecute
-      description: 'Pipelex''s `/execute` response — the completed run.
-
-
-        The protocol''s `RunResultExecute` carries `pipeline_run_id` + `pipe_output`
-
-        (both always present); `state`, `created_at`, `finished_at`, and
-
-        `main_stuff_name` are pipelex extension fields, documented by this
-
-        implementation''s own API schema.'
     PipelexRunResultStart:
       properties:
         pipeline_run_id:
@@ -4716,43 +4454,6 @@ components:
       required:
       - model
       title: SearchSetting
-    SearchTokensUsage:
-      properties:
-        model_type:
-          type: string
-          const: search
-          title: Model Type
-          default: search
-        job_metadata:
-          $ref: '#/components/schemas/JobMetadata'
-        inference_model_name:
-          type: string
-          title: Inference Model Name
-        unit_costs:
-          additionalProperties:
-            type: number
-          propertyNames:
-            $ref: '#/components/schemas/CostCategory'
-          type: object
-          title: Unit Costs
-        inference_model_id:
-          type: string
-          title: Inference Model Id
-        nb_tokens_by_category:
-          additionalProperties:
-            type: integer
-          propertyNames:
-            $ref: '#/components/schemas/TokenCategory'
-          type: object
-          title: Nb Tokens By Category
-      type: object
-      required:
-      - job_metadata
-      - inference_model_name
-      - unit_costs
-      - inference_model_id
-      - nb_tokens_by_category
-      title: SearchTokensUsage
     ServiceIdentity:
       properties:
         message:
@@ -4988,83 +4689,72 @@ components:
       - duration
       title: TimingSpec
       description: Timing information for a node execution.
-    TokenCategory:
-      type: string
-      enum:
-      - input
-      - input_cached
-      - input_non_cached
-      - input_joined
-      - input_audio
-      - output
-      - output_audio
-      - output_reasoning
-      - output_accepted_prediction
-      - output_rejected_prediction
-      title: TokenCategory
-    TraceContext:
+    TokensUsageRecord:
       properties:
-        graph_id:
+        model_type:
           type: string
-          title: Graph Id
-          description: Unique identifier for this execution trace (typically the pipeline run id)
-        tracer_key:
+          title: Model Type
+        inference_model_name:
+          type: string
+          title: Inference Model Name
+        inference_model_id:
+          type: string
+          title: Inference Model Id
+        pipe_code:
           anyOf:
           - type: string
           - type: 'null'
-          title: Tracer Key
-          description: Lookup key in GraphTracerManager. Defaults to graph_id when None.
-        parent_node_id:
+          title: Pipe Code
+        job_category:
           anyOf:
           - type: string
           - type: 'null'
-          title: Parent Node Id
-          description: Node ID of the parent pipe, None for root
-        node_sequence:
-          type: integer
-          title: Node Sequence
-          description: Monotonic counter for generating node IDs
-          default: 0
-        data_inclusion:
-          $ref: '#/components/schemas/DataInclusionConfig'
-          description: Controls which data formats to capture
-        emit_graph_events:
-          type: boolean
-          title: Emit Graph Events
-          description: Whether to emit graph (node/edge) trace events
-          default: true
-        emit_usage_events:
-          type: boolean
-          title: Emit Usage Events
-          description: Whether to emit usage (cost) trace events
-          default: true
+          title: Job Category
+        unit_job_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Unit Job Id
+        nb_tokens_by_category:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Nb Tokens By Category
+        cost:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Cost
+        started_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Started At
+        completed_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Completed At
       additionalProperties: false
       type: object
       required:
-      - graph_id
-      - data_inclusion
-      title: TraceContext
-      description: "Serializable per-execution trace context passed through JobMetadata.\n\nTracks parent-child relationships\
-        \ as pipes execute, building the node tree that\nboth the graph stream (edges) and the usage stream (cost attribution)\
-        \ read from.\nDesigned to be serializable for distributed environments where contextvars don't work.\n\nAttributes:\n\
-        \    graph_id: Unique identifier for this execution trace (typically pipeline_run_id).\n    parent_node_id: The node\
-        \ ID of the parent pipe (None for root). The shared anchor —\n        read by the graph stream (edges) and the usage\
-        \ stream (cost attribution).\n    node_sequence: Monotonic counter for generating unique node IDs within this trace.\n\
-        \    data_inclusion: Configuration controlling which data formats to capture in IOSpec fields.\n    emit_graph_events:\
-        \ Whether graph (node/edge) trace events should be emitted for this run\n        (driven by ``is_generate_graph``).\
-        \ The in-memory tracer always accumulates; this only\n        gates event emission onto the shared event-log transport.\n\
-        \    emit_usage_events: Whether usage (cost) trace events should be emitted for this run\n        (driven by ``is_generate_usage``).\
-        \ Independent of ``emit_graph_events`` so cost reporting\n        survives ``--no-graph``."
-    UnitJobId:
-      type: string
-      enum:
-      - llm_gen_text
-      - llm_gen_object
-      - img_gen_text_to_image
-      - extract_pages
-      - search_sourced_answer
-      - search_structured
-      title: UnitJobId
+      - model_type
+      - inference_model_name
+      - inference_model_id
+      - nb_tokens_by_category
+      title: TokensUsageRecord
+      description: 'One client-facing usage record per inference call.
+
+
+        ``extra="forbid"`` is deliberate: server-side emission is the shape authority, so an
+
+        accidental new field fails loudly here instead of silently widening the contract.
+
+        Enum-ish fields (``model_type``, ``job_category``, ``unit_job_id``, and the
+
+        ``nb_tokens_by_category`` keys) are open sets on the wire, typed as plain strings —
+
+        runtime enum churn is non-breaking for clients.'
     UploadRequest:
       properties:
         filename:

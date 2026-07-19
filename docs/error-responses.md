@@ -106,56 +106,6 @@ A validation error item may carry a `suggested_fix`: a deterministic repair the 
 
 **The ops are the machine contract; any rendered diff is presentation.** Apply them with a style-preserving TOML editor rather than reconstructing the file from a diff: that is what keeps the caller's formatting, comments, and key order intact.
 
-## Suggested fixes
-
-A validation error item may carry a `suggested_fix`: a deterministic repair the runtime's fix planner derived from the *typed* error data — never by parsing a message string. It is optional and additive. An item the planner has no rule for simply omits the field, and a client that ignores `suggested_fix` entirely behaves exactly as before.
-
-```json
-{
-  "category": "pipe_validation",
-  "message": "Pipe 'summarize_and_translate' declares output 'Text' but its last step produces 'Translation'",
-  "error_type": "inadequate_output_concept",
-  "pipe_code": "summarize_and_translate",
-  "source": "translate.mthds",
-  "suggested_fix": {
-    "fix_code": "match-sequence-output",
-    "description": "Set output of pipe 'summarize_and_translate' to 'Translation' to match its last step",
-    "safety": "safe",
-    "source": "translate.mthds",
-    "ops": [
-      {
-        "kind": "set_key",
-        "table_path": ["pipe", "summarize_and_translate"],
-        "key": "output",
-        "value": "Translation"
-      }
-    ]
-  }
-}
-```
-
-**Fields:**
-
-- `fix_code` — the kebab-case rule id that produced the fix (`match-sequence-output`, `sync-controller-inputs`, `strip-native-concept-redecl`, `strip-namespace`, …). Stable; use it to allow-list or suppress rules.
-- `description` — human-readable summary of what the fix does.
-- `safety` — `safe` or `unsafe`. Only apply an `unsafe` fix behind an explicit opt-in: it resolves an ambiguity the runtime could not resolve on the caller's behalf.
-- `source` — the file the ops target, when known. **An applier must only apply ops to the file they target** — in a multi-file library the ops are meaningless against any other file.
-- `ops` — the semantic TOML patch operations, in order.
-
-**Ops** are addressed by `table_path` (the containing table, e.g. `["pipe", "my_seq"]` — the same addressing convention as the items' `field_path`). Each op has a `kind`:
-
-| `kind` | Effect | Uses |
-|---|---|---|
-| `set_key` | Set (or add) a key in the table | `key`, `value` |
-| `ensure_table` | Create the table when it is absent | — |
-| `delete_key` | Remove a key from the table | `key` |
-| `delete_table` | Remove the table | — |
-| `rename_table_key` | Rename a key in place | `key`, `new_key` |
-
-`value` is a TOML scalar (string, integer, float, boolean) or a flat scalar mapping, which a fix that must create a whole table at once — a missing `inputs` mapping, say — writes as an inline table.
-
-**The ops are the machine contract; any rendered diff is presentation.** Apply them with a style-preserving TOML editor rather than reconstructing the file from a diff: that is what keeps the caller's formatting, comments, and key order intact.
-
 ## Status codes
 
 The HTTP status follows pipelex's `error_domain_to_http_status`:
