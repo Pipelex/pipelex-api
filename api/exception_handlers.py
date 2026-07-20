@@ -9,7 +9,8 @@ problem document built from its `ErrorReport`; each orchestrator plugin's
 transport-fault mapper (contributed through the plugin SPI's
 `add_http_error_mapper`, discovered at app construction) gets its own handler
 rendering the `ErrorReport` it produces; everything else collapses to a
-sanitized 500. The base names no orchestrator and imports no orchestrator SDK
+catch-all 500 that discloses under VERBOSE and is sanitized under STRICT, like
+every other response here. The base names no orchestrator and imports no orchestrator SDK
 — the Temporal transport classification that used to live here is now owned by
 the `pipelex-temporal` plugin and reaches us only as a mapper. Routes
 therefore no longer need to catch and shape errors themselves.
@@ -428,16 +429,31 @@ async def handle_unexpected_error(request: Request, exc: Exception) -> Response:
     Covers anything that is not an `ApiError`, a `RequestValidationError`, a
     `PipelexError`, or an orchestrator plugin's mapped transport exception — so on
     the orchestrator-agnostic base (which installs no mapper), an *unmapped* bare
-    transport/runtime error collapses here to a sanitized 500.
+    transport/runtime error collapses here to a 500.
 
     One of the two `except Exception`-equivalent sites the project sanctions —
-    the outermost handler of an API. The response body is fully sanitized: no
-    exception class name, no `str(exc)`, no traceback reaches the client. The
-    real class name and a full traceback go to the operator log instead,
-    correlated by request id. This handler also covers a failure *inside*
-    another handler (e.g. a corrupt `to_error_report()`): Starlette's
-    `ServerErrorMiddleware` wraps the others, so such a failure still lands a
-    sanitized 500 rather than a bodyless default.
+    the outermost handler of an API. Disclosure follows the app's
+    `disclosure_mode`, exactly like every other handler in this module: VERBOSE
+    puts `Class: message` in `detail` so a caller can see what actually broke;
+    STRICT keeps the fully sanitized body (no exception class, no `str(exc)`).
+    A traceback reaches the client in neither mode — the class name and full
+    traceback go to the operator log, correlated by request id.
+
+    Honoring the mode here is what stops the catch-all from being a silent hole.
+    An unclassified failure is *precisely* the one a caller cannot diagnose from
+    a request id alone, and it is the only response in the API that used to
+    contradict a deployment's explicit choice to disclose: a VERBOSE deployment
+    got real messages for every classified error and a dead end for the one
+    error nobody classified. STRICT still redacts, so a deployment that wants
+    nothing leaked keeps that.
+
+    The mode is read off `app.state` (like `problem_response_from_error_report`)
+    rather than bound as a parameter, so registering this handler stays
+    signature-free.
+
+    This handler also covers a failure *inside* another handler (e.g. a corrupt
+    `to_error_report()`): Starlette's `ServerErrorMiddleware` wraps the others,
+    so such a failure still lands here rather than a bodyless default.
     """
     request_id = _request_id_of(request)
     emit_error_log(
@@ -453,6 +469,11 @@ async def handle_unexpected_error(request: Request, exc: Exception) -> Response:
         },
         as_error=True,
     )
+    disclosure_mode = getattr(request.app.state, "error_disclosure_mode", DisclosureMode.VERBOSE)
+    if disclosure_mode is DisclosureMode.STRICT:
+        detail = "An unexpected error occurred. The request id is included for support."
+    else:
+        detail = f"{type(exc).__name__}: {exc}"
     # Route through the same builder every other API-authored 500 uses, so the
     # catch-all shape never drifts from `handle_api_error`'s output. The one
     # catch-all-specific addition is `error_category: "unknown"` — by definition
@@ -460,7 +481,7 @@ async def handle_unexpected_error(request: Request, exc: Exception) -> Response:
     # tell a catch-all 500 apart from a classified `CONFIG`-domain one.
     document = build_problem_document_from_api_error(
         ErrorType.INTERNAL_SERVER_ERROR,
-        "An unexpected error occurred. The request id is included for support.",
+        detail,
         500,
         instance=request.url.path,
         request_id=request_id,
@@ -572,7 +593,7 @@ def register_exception_handlers(
     read back via `get_http_error_mappers`). The caller resolves it at app
     construction — `api.main` builds the registrar and passes it; the base resolves
     an empty map (it installs no orchestrator plugin), so no transport handler is
-    registered and the only fallback for an unclassified failure stays the sanitized
+    registered and the only fallback for an unclassified failure stays the catch-all
     500. Each entry registers one handler that runs the mapper and renders the
     resulting `ErrorReport` through the shared RFC 7807 + disclosure path — so core
     and the API name no orchestrator SDK. Keeping the parameter explicit (rather than
@@ -584,8 +605,9 @@ def register_exception_handlers(
     (`handle_pipelex_error` and every mapper handler) via the closures below —
     production passes the startup-resolved value (`api.main.ERROR_DISCLOSURE_MODE`);
     tests pass whatever the test needs and the default (`VERBOSE`) covers the common
-    case. The other three handlers don't render an `ErrorReport`, so they don't need
-    the mode and register directly.
+    case. The other three handlers don't render an `ErrorReport`, so they register
+    directly — `handle_unexpected_error` still honors the mode, reading it back off
+    `app.state` (set below) rather than through a closure.
     """
     app.state.error_disclosure_mode = disclosure_mode
 

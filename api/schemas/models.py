@@ -53,6 +53,12 @@ class RunRequest(BaseModel):
         output_name: Name of the output slot to write to.
         output_multiplicity: Output multiplicity setting.
         dynamic_output_concept_ref: Override for the dynamic output concept ref.
+        bundle_b64: PIPELEX-API EXTENSION — base64-encoded zip of the whole method
+            bundle (`.mthds` + `.py` + `structures/*.py` + `requirements.txt`). Lets a
+            caller ship custom PipeFunc Python alongside the method; materialized into a
+            temporary library directory before the run. Mutually exclusive with `files`.
+        files: PIPELEX-API EXTENSION — the bundle as a `{relative_path: text}` map (the
+            unzipped equivalent of `bundle_b64`). Mutually exclusive with `bundle_b64`.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -63,16 +69,41 @@ class RunRequest(BaseModel):
     output_name: str | None = None
     output_multiplicity: VariableMultiplicity | None = None
     dynamic_output_concept_ref: str | None = None
+    bundle_b64: str | None = Field(
+        default=None,
+        description=(
+            "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — base64-encoded zip of the whole "
+            "method bundle (`.mthds` + `.py` + `structures/*.py` + `requirements.txt`), materialized into a "
+            "temporary library directory before the run so custom PipeFunc Python travels with the method. "
+            "Mutually exclusive with `files`. Custom `.py` is only honored on a sandbox-hosted deployment."
+        ),
+    )
+    files: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the method bundle as a "
+            "`{relative_path: text}` map (the unzipped equivalent of `bundle_b64`). Mutually exclusive with `bundle_b64`."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
     def validate_request(cls, values: dict[str, Any]) -> dict[str, Any]:
-        # The protocol requires at least one of pipe_code / mthds_contents. When the
-        # body carries extension args (keys outside the declared fields), an extension
-        # may be the method selector — the server is the source of truth, so we do not
-        # over-validate.
+        # The protocol requires at least one of pipe_code / mthds_contents. A method bundle
+        # (`bundle_b64` / `files`) carries its own `.mthds` — so it satisfies the precondition
+        # on its own (the pipe to run comes from the bundle's `main_pipe`). When the body carries
+        # extension args (keys outside the declared fields), an extension may be the method
+        # selector — the server is the source of truth, so we do not over-validate.
+        has_bundle = values.get("bundle_b64") is not None or values.get("files") is not None
         has_extensions = any(key not in cls.model_fields for key in values)
-        if values.get("pipe_code") is None and not values.get("mthds_contents") and not has_extensions:
+        # A bundle carries its own `.mthds`; combining it with inline `mthds_contents` would load
+        # both into one library with no dedup, so a shared domain collides deep in the run with an
+        # opaque duplicate-domain error. Refuse the combination up front (a bundle + `pipe_code` — to
+        # pick which pipe in the bundle to run — is still fine).
+        if has_bundle and values.get("mthds_contents"):
+            msg = "A method bundle (bundle_b64 / files) and inline mthds_contents are mutually exclusive; send one or the other."
+            raise PipelineRequestError(msg)
+        if values.get("pipe_code") is None and not values.get("mthds_contents") and not has_bundle and not has_extensions:
             msg = (
                 "pipe_code and mthds_contents cannot both be empty. Either: both are provided, or if there are no mthds_contents, "
                 "then pipe_code must be provided and must reference a pipe already registered in the library. "
@@ -101,6 +132,8 @@ class RunRequest(BaseModel):
             output_name=request_body.get("output_name"),
             output_multiplicity=request_body.get("output_multiplicity"),
             dynamic_output_concept_ref=request_body.get("dynamic_output_concept_ref"),
+            bundle_b64=request_body.get("bundle_b64"),
+            files=request_body.get("files"),
         )
 
 
