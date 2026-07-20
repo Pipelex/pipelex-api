@@ -1,6 +1,6 @@
 [project]
 name = "pipelex-api"
-version = "0.8.0"
+version = "0.10.0"
 description = "Pipelex API"
 authors = [{ name = "Evotis S.A.S.", email = "oss@pipelex.com" }]
 maintainers = [{ name = "Pipelex staff", email = "oss@pipelex.com" }]
@@ -16,8 +16,7 @@ classifiers = [
 ]
 
 dependencies = [
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]",
-  "pipelex-tools-py>=0.1.0",
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.40.0",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",
@@ -77,13 +76,6 @@ packages = ["api"]
 
 [tool.uv]
 required-version = ">=0.7.2"
-
-[tool.uv.sources]
-# No pipelex 0.38.x release yet — the PipeFunc-executor seam (is_pipe_func_sandbox_hosted,
-# the bundle-transport symbols this branch imports) lives on this SHA
-# (feature/remote-pipe-func HEAD). pipelex-worker pins the same line. Repoint to a
-# tag once pipelex 0.38.x is released.
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "e35538717590a35abf0201b53f6353c786f23d4d" }
 
 [tool.mypy]
 check_untyped_defs = true
@@ -344,7 +336,14 @@ convention = "google"
 # imports used only in annotations on a BaseModel subclass must stay at module
 # scope — TC001/TC002/TC003 would otherwise push them into a TYPE_CHECKING block
 # and break model construction.
-runtime-evaluated-base-classes = ["pydantic.BaseModel"]
+# The pipelex bases below are themselves BaseModel subclasses, but ruff resolves this
+# list by name and cannot see through the inheritance — so a model that documents the
+# wire shape by subclassing one of them needs its base listed here explicitly too.
+runtime-evaluated-base-classes = [
+  "pydantic.BaseModel",
+  "pipelex.core.pipes.pipe_output.PipeOutput",
+  "pipelex.pipeline.pipeline_response.PipelexRunResultExecute",
+]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = [

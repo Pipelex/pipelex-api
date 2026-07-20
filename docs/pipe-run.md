@@ -71,6 +71,7 @@ Execute a Pipelex pipeline with flexible inputs and wait for completion.
 - `finished_at` (string | null): ISO timestamp when the pipeline finished, or `null` if still running.
 - `main_stuff_name` (string | null): Key under `pipe_output.working_memory.root` where the main result lives. Use this to extract the typed output: `pipe_output.working_memory.root[main_stuff_name].content`.
 - `pipe_output` (object): Result of the pipeline execution. Contains `working_memory` with `root` (every named stuff produced during the run) and `aliases` (built-in name mappings such as `main_stuff`).
+- `pipe_output.tokens_usages` (array | null): Per-inference-call token usage in the client wire shape (`TokensUsageRecord`): `model_type`, model name/id, `pipe_code`, job-kind fields, `nb_tokens_by_category`, computed USD `cost` (`null` when the model has no rate table), and ISO timestamps. `null` when usage assembly was off for the run, `[]` when no inference happened. `pipe_output.usage_assembly_error` (string | null) is non-null when usage assembly failed. See the pipelex runtime's [TokensUsage Wire Records](https://docs.pipelex.com/under-the-hood/tokens-usage-wire-records/) for the full field reference.
 
 **Errors** are returned as [RFC 7807 `application/problem+json`](error-responses.md) bodies with HTTP 4xx/5xx status codes. The successful response body has no `status`/`error` field — the HTTP status code is the source of truth.
 

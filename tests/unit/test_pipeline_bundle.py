@@ -50,7 +50,15 @@ def _build_client(mocker: MockerFixture) -> tuple[TestClient, dict[str, Any]]:
     snapshot: dict[str, Any] = {}
 
     fake_execute_response = mocker.MagicMock()
-    fake_execute_response.model_dump.return_value = {"pipeline_run_id": "run-1", "state": "COMPLETED"}
+    # `/execute` now applies pipelex's `apply_tokens_usage_wire_shape` to the dump, which
+    # rewrites `pipe_output.tokens_usages` — so the dump needs a `pipe_output` and the
+    # response a `tokens_usages` (None here: these tests assert on the run path, not usage).
+    fake_execute_response.model_dump.return_value = {
+        "pipeline_run_id": "run-1",
+        "state": "COMPLETED",
+        "pipe_output": {"working_memory": {"root": {}, "aliases": {}}},
+    }
+    fake_execute_response.pipe_output.tokens_usages = None
 
     def _record(library_dirs: list[str] | None, run_kwargs: dict[str, Any]) -> None:
         snapshot["library_dirs"] = library_dirs

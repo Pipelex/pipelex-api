@@ -19,6 +19,7 @@ from pipelex.pipe_run.pipe_run_protocol import PipeRunProtocol
 from pipelex.pipeline.pipeline_response import PipelexRunResultExecute, PipelexRunResultStart, RunState
 from pipelex.pipeline.pipeline_run_setup import pipeline_run_setup
 from pipelex.pipeline.runner import PipelexMTHDSProtocol
+from pipelex.reporting.usage_records import apply_tokens_usage_wire_shape
 from pipelex.runtime_bridge.exceptions import MissingBundleValidatorError, MissingOrchestratorError
 from pipelex.runtime_bridge.primitives.hydration import hydrate_working_memory
 from pipelex.system.environment import get_required_env
@@ -30,8 +31,15 @@ from api.bundle import ParsedBundle, materialize_parsed, parse_bundle
 from api.error_types import ErrorType
 from api.errors import raise_bad_request, raise_forbidden, raise_validation_error
 from api.logging_context import get_request_id
+from api.openapi_responses import (
+    PROBLEM_400_START_REQUIRES_ASYNC,
+    PROBLEM_403_ORCHESTRATION_MODE,
+    PROBLEM_409_DUPLICATE_RUN,
+    PROBLEM_429,
+    PROBLEM_501_ASYNC_NOT_ENABLED,
+)
 from api.routes.pipelex.utils import get_current_iso_timestamp
-from api.schemas.models import PipelexApiExecuteRequest, PipelexApiStartRequest, PipelineApiExtras, RunRequest
+from api.schemas.models import PipelexApiExecuteRequest, PipelexApiExecuteResponse, PipelexApiStartRequest, PipelineApiExtras, RunRequest
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -548,13 +556,24 @@ def _bundle_run_source(run_request: RunRequest) -> Generator[tuple[list[str] | N
 
 @router.post(
     "/execute",
-    response_model=PipelexRunResultExecute,
+    # Documented 200 = the run result with the WIRE-shaped `pipe_output`: the handler returns a
+    # `JSONResponse` built from a trimmed dump, so FastAPI never serializes through this model —
+    # it is purely what the artifact publishes, and it must match `apply_tokens_usage_wire_shape`.
+    response_model=PipelexApiExecuteResponse,
+    # On top of the composite router's shared 401/413/422/500: a forbidden per-request
+    # `orchestration_mode` override (403), and the provider rate-limit passthrough (429) —
+    # `/execute` is the only route that runs inference, so it is the only one that can be
+    # rate-limited upstream. NO 409: unlike `/start`, `/execute` takes no client-supplied
+    # `pipeline_run_id` (the base runner generates one per call), so a caller cannot collide
+    # with an in-flight run.
+    responses={403: PROBLEM_403_ORCHESTRATION_MODE, 429: PROBLEM_429},
     # Documented body = the protocol's RunRequest plus THIS server's own
     # `orchestration_mode` extension (the route honors a per-request override). The
     # body is read through the raw Request (kajson decoding — see
     # `_parse_request`), so FastAPI cannot infer a typed body parameter;
     # document it explicitly so the committed OpenAPI artifact (and protocol
-    # conformance tooling) publishes the request schema.
+    # conformance tooling) publishes the request schema. `responses=` and
+    # `openapi_extra` touch different members of the operation object, so both land.
     openapi_extra={
         "x-mthds-protocol": True,
         "requestBody": {
@@ -585,15 +604,32 @@ async def execute(request: Request) -> JSONResponse:
             dynamic_output_concept_ref=run_request.dynamic_output_concept_ref,
             requested_orchestration_mode=extras.orchestration_mode,
         )
-    return JSONResponse(
-        content=response.model_dump(mode="json", serialize_as_any=True, by_alias=True),
-    )
+    # The response dump carries the full internal usage models on
+    # `pipe_output.tokens_usages`; the client boundary gets the trimmed
+    # `TokensUsageRecord` wire shape instead (pipelex owns the shape authority).
+    response_dump = response.model_dump(mode="json", serialize_as_any=True, by_alias=True)
+    apply_tokens_usage_wire_shape(response_dump, pipe_output=response.pipe_output)
+    return JSONResponse(content=response_dump)
 
 
 @router.post(
     "/start",
     response_model=PipelexRunResultStart,
     status_code=202,
+    # On top of the composite router's shared 401/413/422/500. `/start` is fire-and-forget, so
+    # its extra failures are all about the backend's ability to honor that and about the
+    # client-supplied run id it (alone) accepts:
+    #   400 — the resolved orchestrator is blocking-only (the in-process `direct` base): refuse
+    #         honestly rather than block-and-ack. Use `/execute`.
+    #   403 — a per-request `orchestration_mode` override the deployment forbids.
+    #   409 — the submitted `pipeline_run_id` is still registered for an in-flight run.
+    #   501 — an async-capable deployment whose async execution is not enabled.
+    responses={
+        400: PROBLEM_400_START_REQUIRES_ASYNC,
+        403: PROBLEM_403_ORCHESTRATION_MODE,
+        409: PROBLEM_409_DUPLICATE_RUN,
+        501: PROBLEM_501_ASYNC_NOT_ENABLED,
+    },
     # Documented body = the protocol's StartRequest plus THIS server's own
     # extensions (callback_urls) — the protocol model no longer advertises
     # implementation extensions, so the server documents what it implements.
@@ -614,8 +650,8 @@ async def start(
     """Start a method run and return its pipeline_run_id with a 202 ack (MTHDS Protocol `POST /start`).
 
     Answers `202 Accepted` with a `StartAck`. A client-supplied `pipeline_run_id` is
-    honored (protocol D11: this runner accepts it; `StartAck.pipeline_run_id` is always
-    authoritative). Pipelex domain failures propagate untouched: the global
+    honored (the protocol lets an implementation decline it; this runner accepts it, and
+    `StartAck.pipeline_run_id` is always authoritative). Pipelex domain failures propagate untouched: the global
     `PipelexError` handler in `api.exception_handlers` turns them into an
     RFC 7807 problem response.
 

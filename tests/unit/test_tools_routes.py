@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from api.exception_handlers import register_exception_handlers
 from api.limits import MAX_MTHDS_FILE_BYTES
+from api.openapi_schema import PipelexFastAPI
 from api.problem_document import PROBLEM_JSON_MEDIA_TYPE
 from api.routes import router as api_router
 from tests.unit._constants import VALID_MTHDS
@@ -25,7 +26,10 @@ def _build_client() -> TestClient:
 
 
 def _build_app() -> FastAPI:
-    app = FastAPI()
+    # `PipelexFastAPI`, not a bare `FastAPI`: the problem+json media type on error responses is
+    # asserted by the app class's `openapi()` override (see `api.openapi_schema`), so a schema
+    # built off a stock app would not be the one this server publishes.
+    app = PipelexFastAPI()
     app.include_router(api_router, prefix="/v1")
     return app
 

@@ -7,10 +7,10 @@ description = "A short summary of a document"
 refines     = "Text"
 
 [pipe.summarize_then_translate]
-type        = "PipeSequence"
+type = "PipeSequence"
 description = "Summarize a document, then translate the summary to French"
-inputs      = { document = "Text" }
-output      = "Summary"
+inputs = { document = "Text" }
+output = "Summary"
 steps = [
   { pipe = "summarize_document", result = "summary" },
   { pipe = "translate_summary", result = "translated" },
@@ -24,7 +24,6 @@ output      = "Summary"
 prompt      = "Summarize the following document in two sentences:\n\n@document"
 
 [pipe.translate_summary]
-type          = "PipeSignature"
 description   = "Translate the summary to French (contract only — not yet implemented)"
 inputs        = { summary = "Summary" }
 output        = "Summary"

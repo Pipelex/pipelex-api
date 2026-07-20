@@ -79,12 +79,12 @@ class TestBuildAndAgentRoutes:
     # D2) — a bundle without `main_pipe` now answers 200 with `graph_spec=null`. The
     # regression pin for that behavior (both backends) lives in `test_validate_envelope.py`.
 
-    def test_build_inputs_rejects_oversized_pipe_code(self):
+    def test_build_inputs_rejects_oversized_pipe_ref(self):
         client = _build_client()
-        long_code = "x" * 1024
+        long_ref = "x" * 1024
         response = client.post(
             "/v1/build/inputs",
-            json={"mthds_contents": [VALID_MTHDS], "pipe_code": long_code},
+            json={"files": [{"content": VALID_MTHDS}], "pipe_ref": long_ref},
         )
         assert response.status_code == 422
         assert response.headers["content-type"] == "application/problem+json"
@@ -168,37 +168,26 @@ class TestBuildAndAgentRoutes:
         assert {model["type"] for model in body["models"]} == {"llm"}
         assert set(body["aliases"]) <= {"llm"}
 
-    @pytest.mark.parametrize(
-        ("path", "payload"),
-        [
-            ("/v1/validate", {"mthds_contents": []}),
-            ("/v1/build/inputs", {"mthds_contents": [], "pipe_code": "x"}),
-            ("/v1/build/output", {"mthds_contents": [], "pipe_code": "x"}),
-            ("/v1/build/runner", {"mthds_contents": [], "pipe_code": "x"}),
-        ],
-    )
-    def test_empty_mthds_contents_rejected(self, path: str, payload: dict[str, object]):
+    def test_empty_mthds_contents_rejected(self):
+        # `/validate` is the last route on the `mthds_contents` envelope (it is protocol-owned; the
+        # build routes moved to `files[]`, whose empty-selector rejection lives in the envelope suite).
         client = _build_client()
-        response = client.post(path, json=payload)
+        response = client.post("/v1/validate", json={"mthds_contents": []})
         assert response.status_code == 422
         assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "ValidationError"
 
-    def test_build_runner_tears_down_library_when_set_current_library_raises(self, mocker: MockerFixture):
-        # Regression for TODOS.md Q6: a failure between open_library() succeeding
-        # and the try/finally entering must NOT leak the library. Before the
-        # fix, open_library + set_current_library lived OUTSIDE the try, so a
-        # set_current_library exception (theoretically: KeyboardInterrupt,
-        # MemoryError, asyncio cancellation on the contextvar set) would skip
-        # the teardown. After the fix, both calls live inside the try, with
-        # library_id initialized to None so a pre-open failure is a no-op for
-        # teardown rather than a leak.
+    def test_build_runner_tears_down_library_when_success_path_raises(self, mocker: MockerFixture):
+        # The loaded-on-success contract makes the route own teardown of validate_bundle's library.
+        # A failure anywhere in the success window (here: the SKIPPED guard, the first statement
+        # inside the try) must NOT leak that library — the finally tears down the exact id
+        # validate_bundle opened.
         library_manager = get_library_manager()
         open_spy = mocker.spy(library_manager, "open_library")
         teardown_spy = mocker.spy(library_manager, "teardown")
         mocker.patch(
-            "api.routes.pipelex.build.runner.set_current_library",
-            side_effect=RuntimeError("synthetic set_current_library failure"),
+            "api.routes.pipelex.build.runner._reject_if_requested_pipe_skipped",
+            side_effect=RuntimeError("synthetic success-path failure"),
         )
 
         # raise_server_exceptions=False: the synthetic RuntimeError reaches the
@@ -211,33 +200,65 @@ class TestBuildAndAgentRoutes:
         client = TestClient(app, raise_server_exceptions=False)
         response = client.post(
             "/v1/build/runner",
-            json={"mthds_contents": [VALID_MTHDS], "pipe_code": "echo"},
+            json={"files": [{"content": VALID_MTHDS}], "pipe_ref": "smoke.echo"},
         )
 
         # The synthetic RuntimeError propagates to the global Exception handler.
         assert response.status_code == 500
-        # open_library DID run and create a library — capture its id.
+        # validate_bundle DID open a library and leave it current — capture its id.
         assert open_spy.spy_return is not None
         created_library_id, _ = open_spy.spy_return
         # The fix: teardown runs anyway, with the exact id open_library returned.
         teardown_spy.assert_called_once_with(library_id=created_library_id)
 
-    def test_build_runner_succeeds_and_returns_python_code(self):
-        # Phase 3b: /build/runner now validates via BundleValidator.validate_pipes (the public inner
-        # sweep) against the library it just opened. The inner sweep never tears the library down, so
-        # it stays loaded + current for generate_runner_code. A 200 with non-empty python_code proves
-        # both halves: the dry-run sweep passed AND the library survived for code generation.
+    def test_build_runner_none_crate_is_a_server_fault_not_a_verdict(self, mocker: MockerFixture):
+        # The "unreachable" None-crate guard is an internal invariant break — a server fault (5xx),
+        # never a caller-facing verdict. Before the fix it raised ValidateBundleError OUTSIDE the
+        # except that maps it to the 200 invalid arm, so it rendered as a request-shape-style 422,
+        # contradicting the route's own contract. The library must still be torn down (no leak).
+        library_manager = get_library_manager()
+        open_spy = mocker.spy(library_manager, "open_library")
+        teardown_spy = mocker.spy(library_manager, "teardown")
+        mocker.patch.object(library_manager, "get_crate", return_value=None)
+
+        app = FastAPI()
+        app.include_router(api_router, prefix="/v1")
+        register_exception_handlers(app)
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.post(
+            "/v1/build/runner",
+            json={"files": [{"content": VALID_MTHDS}], "pipe_ref": "smoke.echo"},
+        )
+
+        assert response.status_code == 500, response.text
+        assert response.headers["content-type"] == "application/problem+json"
+        assert open_spy.call_count >= 1
+        assert open_spy.call_count == teardown_spy.call_count
+
+    def test_build_runner_succeeds_and_returns_python_code_and_structures(self):
+        # /build/runner rides validate_bundle (loaded-on-success) and the codegen types projection
+        # (D9): a 200 valid arm proves the sweep passed, the library survived for code generation,
+        # and the response carries BOTH the runner script and the stamped structures projection the
+        # script imports from (structures.py + codegen.lock), the retired `success` bool gone.
         client = _build_client()
         response = client.post(
             "/v1/build/runner",
-            json={"mthds_contents": [VALID_MTHDS], "pipe_code": "echo"},
+            json={"files": [{"content": VALID_MTHDS}], "pipe_ref": "smoke.echo"},
         )
         assert response.status_code == 200, response.text
         body = response.json()
-        assert body["success"] is True
-        assert body["pipe_code"] == "echo"
+        assert body["is_valid"] is True
+        assert "success" not in body
+        assert body["pipe_ref"] == "smoke.echo"
         assert body["python_code"]
         assert "echo" in body["python_code"]
+        structures = body["structures"]
+        assert structures["directory"] == "structures"
+        artifact_paths = [artifact["path"] for artifact in structures["artifacts"]]
+        assert artifact_paths == ["structures.py"]
+        assert structures["artifacts"][0]["content"].startswith("# >>> pipelex-codegen-stamp >>>")
+        assert structures["lock_filename"] == "codegen.lock"
+        assert "crate_fingerprint" in structures["lock"]
 
     def test_build_runner_keeps_library_open_for_codegen_then_tears_down_once(self, mocker: MockerFixture):
         # The loaded-on-success contract (D6): the inner sweep must NOT tear the library down — if it
@@ -248,30 +269,13 @@ class TestBuildAndAgentRoutes:
         client = _build_client()
         response = client.post(
             "/v1/build/runner",
-            json={"mthds_contents": [VALID_MTHDS], "pipe_code": "echo"},
+            json={"files": [{"content": VALID_MTHDS}], "pipe_ref": "smoke.echo"},
         )
         assert response.status_code == 200, response.text
         teardown_spy.assert_called_once()
 
-    @pytest.mark.parametrize("path", ["/v1/build/inputs", "/v1/build/output"])
-    def test_build_route_reuses_validate_bundle_library_without_leaking(self, path: str, mocker: MockerFixture):
-        # C-2 / Q-5: /build/inputs and /build/output must NOT open a second library. validate_bundle
-        # opens exactly one library and leaves it loaded + current on success; the route reads the pipe
-        # from that library and tears down the same id. Before the fix the route opened a SECOND library
-        # and tore down only that one, orphaning validate_bundle's library on every successful call.
-        library_manager = get_library_manager()
-        open_spy = mocker.spy(library_manager, "open_library")
-        teardown_spy = mocker.spy(library_manager, "teardown")
-
-        client = _build_client()
-        response = client.post(path, json={"mthds_contents": [VALID_MTHDS], "pipe_code": "echo"})
-
-        assert response.status_code == 200, response.text
-        # Exactly one library opened (inside validate_bundle) — no second open in the route.
-        assert open_spy.call_count == 1
-        created_library_id, _ = open_spy.spy_return
-        # ...and that exact library is the one torn down — no orphan left in LibraryManager._libraries.
-        teardown_spy.assert_called_once_with(library_id=created_library_id)
+    # NOTE: the "opens exactly one library, tears down that same id" property (C-2 / Q-5) is pinned for
+    # all three build routes in `test_build_routes_envelope.py`, which covers both cores they now ride.
 
     def test_build_runner_rejects_when_requested_pipe_is_skipped(self, mocker: MockerFixture):
         # C-3: a cross-package unresolved dependency makes validate_pipes record the requested pipe
@@ -287,8 +291,10 @@ class TestBuildAndAgentRoutes:
                 error_message="Skipped dry run for pipe 'smoke.echo': unresolved dependency: other_pkg.missing",
             )
         }
+        # The sweep now runs inside validate_bundle (the route no longer calls it directly), so the
+        # SKIPPED outcome is planted at its source module.
         mocker.patch(
-            "api.routes.pipelex.build.runner.BundleValidator.validate_pipes",
+            "pipelex.pipeline.validate_bundle.BundleValidator.validate_pipes",
             new=mocker.AsyncMock(return_value=skipped_result),
         )
         generate_spy = mocker.patch("api.routes.pipelex.build.runner.generate_runner_code")
@@ -296,7 +302,7 @@ class TestBuildAndAgentRoutes:
         client = _build_client()
         response = client.post(
             "/v1/build/runner",
-            json={"mthds_contents": [VALID_MTHDS], "pipe_code": "echo"},
+            json={"files": [{"content": VALID_MTHDS}], "pipe_ref": "smoke.echo"},
         )
 
         assert response.status_code == 422, response.text
@@ -308,15 +314,15 @@ class TestBuildAndAgentRoutes:
         # The guard short-circuits before code generation.
         generate_spy.assert_not_called()
 
-    def test_build_runner_translates_dry_run_failure_to_422_not_500(self, mocker: MockerFixture):
-        # /build/runner calls BundleValidator.validate_pipes directly (not through validate_bundle), so a
-        # bare DryRunError — which carries no error_domain — would otherwise render as a 500 server fault.
-        # A failed dry-run of a caller-submitted bundle is a caller-fixable INPUT error: the route
-        # translates it to ValidateBundleError so it renders 422, matching what /validate, /build/inputs
-        # and /build/output return for the identical failure (they go through validate_bundle's
-        # _translate_to_validate_bundle_error). Without the translation this would be a 500.
+    def test_build_runner_dry_run_failure_is_a_200_invalid_verdict(self, mocker: MockerFixture):
+        # The `/validate` discipline on the build routes: a failed dry-run of a caller-submitted
+        # bundle is a *produced negative verdict*, not a transport failure. validate_bundle's shared
+        # cascade translates the DryRunError to ValidateBundleError, which the route renders as the
+        # 200 invalid arm (is_valid: false + structured validation_errors[]) — the same wire shape
+        # /build/inputs and /build/output return for the identical failure. (Breaking change from
+        # the previous 422 problem+json.)
         mocker.patch(
-            "api.routes.pipelex.build.runner.BundleValidator.validate_pipes",
+            "pipelex.pipeline.validate_bundle.BundleValidator.validate_pipes",
             new=mocker.AsyncMock(side_effect=DryRunError("Dry run failed with 1 unexpected pipe failure(s): 'smoke.echo'")),
         )
         generate_spy = mocker.patch("api.routes.pipelex.build.runner.generate_runner_code")
@@ -324,15 +330,14 @@ class TestBuildAndAgentRoutes:
         client = _build_client()
         response = client.post(
             "/v1/build/runner",
-            json={"mthds_contents": [VALID_MTHDS], "pipe_code": "echo"},
+            json={"files": [{"content": VALID_MTHDS}], "pipe_ref": "smoke.echo"},
         )
 
-        assert response.status_code == 422, response.text
-        assert response.headers["content-type"] == "application/problem+json"
+        assert response.status_code == 200, response.text
         body = response.json()
-        # Same wire shape the other three routes return for a dry-run failure: ValidateBundleError, INPUT.
-        assert body["error_type"] == "ValidateBundleError"
-        assert body["error_domain"] == "input"
+        assert body["is_valid"] is False
+        assert body["validation_errors"], "an invalid verdict must carry a non-empty validation_errors[]"
+        assert "python_code" not in body
         # The failure short-circuits before code generation.
         generate_spy.assert_not_called()
 
