@@ -22,6 +22,13 @@ dependencies = [
   "uvicorn>=0.37.0",
 ]
 
+[tool.uv.sources]
+# Ship the sandbox structure-generation fix that is NOT yet on PyPI (the released pipelex 0.40.0
+# predates it). pipelex's version is still 0.40.0, so this git source satisfies the ==0.40.0 pin
+# above — it just points pipelex at the dev commit carrying the fix. Repoint to a PyPI version
+# once released.
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "aa1215619454ead6a8d504f3d2c2a180e9d0a61b" }
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
