@@ -12,7 +12,6 @@ from kajson.exceptions import KajsonDecoderError
 from mthds.protocol.exceptions import PipelineRequestError
 from pipelex.config import get_config
 from pipelex.core.pipes.pipe_output import PipeOutput
-from pipelex.hub import get_bundle_validator_registry, get_orchestrator_registry
 from pipelex.pipe_run.delivery_assignment import DeliveryAssignment, StorageTarget, WebhookTarget
 from pipelex.pipe_run.pipe_run_protocol import PipeRunProtocol
 from pipelex.pipeline.pipeline_response import PipelexRunResultExecute, PipelexRunResultStart, RunState
@@ -21,6 +20,7 @@ from pipelex.pipeline.runner import PipelexMTHDSProtocol
 from pipelex.reporting.usage_records import apply_tokens_usage_wire_shape
 from pipelex.runtime_bridge.exceptions import MissingBundleValidatorError, MissingOrchestratorError
 from pipelex.runtime_bridge.primitives.hydration import hydrate_working_memory
+from pipelex.runtime_hub import get_bundle_validator_registry, get_orchestrator_registry
 from pipelex.system.environment import get_required_env
 from pydantic import ValidationError
 from typing_extensions import override

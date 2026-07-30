@@ -3,7 +3,7 @@
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pipelex.hub import get_library_manager
+from pipelex.interpreter_hub import get_library_manager
 from pipelex.pipe_run.exceptions import DryRunError
 from pipelex.pipeline.bundle_validator import DryRunOutput, DryRunStatus
 from pytest_mock import MockerFixture

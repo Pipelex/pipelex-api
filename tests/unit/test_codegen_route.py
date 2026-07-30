@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pipelex.codegen.check import run_codegen_check
 from pipelex.codegen.stamp import comment_prefix_for, parse_stamped
-from pipelex.hub import get_library_manager
+from pipelex.interpreter_hub import get_library_manager
 from pytest_mock import MockerFixture
 
 from api.exception_handlers import register_exception_handlers

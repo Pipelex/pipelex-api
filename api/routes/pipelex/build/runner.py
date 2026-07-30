@@ -11,11 +11,11 @@ from pipelex.codegen.emitters.target import CodegenKind, CodegenTarget
 from pipelex.codegen.emitters.types_emitter import emit_types
 from pipelex.codegen.lock import CODEGEN_LOCK_FILENAME
 from pipelex.codegen.resolved_concepts import resolve_concepts_from_crate
-from pipelex.core.bundles.pipelex_bundle_blueprint import PipelexBundleBlueprint
 from pipelex.core.pipes.variable_multiplicity import parse_concept_with_multiplicity
-from pipelex.hub import get_current_library_id_or_none, get_library_manager
+from pipelex.interpreter_hub import get_current_library_id_or_none, get_library_manager
 from pipelex.libraries.crate_normalization import normalize_crate
 from pipelex.libraries.pipe.exceptions import PipeNotFoundError
+from pipelex.mthds_parsing.pipelex_bundle_blueprint import PipelexBundleBlueprint
 from pipelex.pipeline.bundle_validator import DryRunOutput, DryRunStatus
 from pipelex.pipeline.exceptions import ValidateBundleError
 from pipelex.pipeline.validate_bundle import validate_bundle

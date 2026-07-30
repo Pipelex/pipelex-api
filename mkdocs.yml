@@ -107,6 +107,7 @@ nav:
     - Pipe Validate: pipe-validate.md
     - Resolve & Codegen: codegen.md
     - MTHDS Tools: mthds-tools.md
+    - Storage Transport: storage-transport.md
     - Error Responses: error-responses.md
     - Contribute:
       - Contributing: contributing.md
