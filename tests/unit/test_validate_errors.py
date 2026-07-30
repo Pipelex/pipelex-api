@@ -22,8 +22,7 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pipelex.base_exceptions import PipelexConfigError, ValidationErrorCategory
-from pipelex.core.bundles.exceptions import PipelexBundleBlueprintValidationErrorData
-from pipelex.core.exceptions import PipeFactoryErrorData, PipesAndConceptValidationErrorData
+from pipelex.core.exceptions import PipeFactoryErrorData, PipelexBundleBlueprintValidationErrorData, PipesAndConceptValidationErrorData
 from pipelex.core.pipes.exceptions import PipeFactoryErrorType, PipeValidationErrorType
 from pipelex.pipeline.exceptions import ValidateBundleError
 from pytest_mock import MockerFixture

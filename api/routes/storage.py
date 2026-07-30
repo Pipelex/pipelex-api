@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, urlparse
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends
 from pipelex import log
-from pipelex.hub import get_storage_provider
+from pipelex.runtime_hub import get_storage_provider
 from pipelex.tools.storage.storage_provider_abstract import PIPELEX_STORAGE_SCHEME
 from pydantic import BaseModel, ConfigDict, Field
 
