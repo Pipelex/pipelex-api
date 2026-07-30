@@ -76,6 +76,22 @@ class TestUploadEndpoint:
         assert response.json()["error_type"] == "ValidationError"
         store_mock.assert_not_awaited()
 
+    def test_decoded_payload_over_cap_returns_413(self, mocker: MockerFixture):
+        """Base64 short enough to clear the Pydantic `max_length` but decoding above the byte
+        cap hits the route's post-decode check — the only path that yields 413. At defaults
+        that window is one base64 quantum wide, so patch the cap instead of allocating ~67 MB.
+        """
+        mocker.patch("api.routes.uploader.MAX_UPLOAD_BYTES", 4)
+        user = RequestUser(user_id=USER_A)
+        client, store_mock = _build_client(user, mocker)
+
+        response = client.post("/upload", json={"filename": "big.bin", "data": VALID_B64})
+
+        assert response.status_code == 413
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "PayloadTooLarge"
+        store_mock.assert_not_awaited()
+
     def test_extra_fields_rejected(self, mocker: MockerFixture):
         user = RequestUser(user_id=USER_A)
         client, _ = _build_client(user, mocker)
