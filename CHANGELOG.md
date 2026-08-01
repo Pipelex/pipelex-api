@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v0.11.0] - 2026-08-01
 
 ### Changed
 
@@ -10,6 +10,7 @@
   - **Address moves:** `PipelexBundleBlueprint` → `pipelex.mthds_parsing.pipelex_bundle_blueprint`; `PipeAbstract` → `pipelex.pipe_machinery.pipe_abstract`; the input/output renderers → `pipelex.pipe_machinery.rendering.*`; `PipelexBundleBlueprintValidationErrorData` → `pipelex.core.exceptions`; `JobMetadata` → `pipelex.system.job_metadata`.
   - **Wire-visible rename:** `PipelexInterpreterError` is now `MthdsParserError`. The class name *is* the `error_type` value on the wire, so this changes what clients see — `docs/error-responses.md` (the caller-facing-`detail` allowlist) and the webhook-recovery test fixture are updated to match.
   - The dotted pipelex class paths in `pyproject.toml`'s `runtime-evaluated-base-classes` (`PipeOutput`, `PipelexRunResultExecute`) were checked against 0.41.0 and did **not** move.
+- **Dependencies:** Bumped `pipelex` from `0.41.0` to `0.42.0`.
 
 ## [v0.10.0] - 2026-07-19
 
