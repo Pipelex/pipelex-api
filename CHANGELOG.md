@@ -2,14 +2,26 @@
 
 ## [Unreleased]
 
+## [v0.11.0] - 2026-08-01
+
+### Added
+
+- **Storage transport documentation (`docs/storage-transport.md`):** documents the `/upload` and `/resolve-storage-url` routes — their non-public contract status, their role as the current transport behind the SDKs' input-preparation surface, the two-layer size-limit enforcement (request-level `422` vs. post-decode `413`), and the planned migration to `pipelex-platform`. Linked from `docs/index.md` and added to the `mkdocs.yml` nav.
+- **Upload size-limit test:** `test_decoded_payload_over_cap_returns_413` covers the narrow window where a base64 payload clears the request's `max_length` validation but decodes over `MAX_UPLOAD_BYTES` — the only path that yields a `413`.
+
 ### Changed
 
-- **Swept onto `pipelex` 0.41.0** (`pipelex[...]==0.40.0` → `==0.41.0`). The release deleted `pipelex.hub`, moved the MTHDS parser and the Pipe machinery out of `core/`, and relocated a set of types to the packages that own them; every import is re-pointed at the address that now defines the symbol.
+- **Breaking — swept onto `pipelex`'s 0.41.0 restructuring.** The release deleted `pipelex.hub`, moved the MTHDS parser and the Pipe machinery out of `core/`, and relocated a set of types to the packages that own them; every import is re-pointed at the address that now defines the symbol.
   - **The hub split.** `pipelex.hub` is gone with no shim, split into `pipelex.runtime_hub` and `pipelex.interpreter_hub` by owning layer. This falls out neatly along the route boundaries: the storage and uploader routes take `get_storage_provider` from the **runtime** hub and the pipeline route takes the orchestrator/bundle-validator registries from it too, while the build-runner and crate-ops routes take the library and pipe accessors from the **interpreter** hub.
   - **`build_registrar` now requires its built-ins to be injected.** It no longer imports them, because the built-in list spans both layers and importing it inside a runtime-layer module would put the method interpreter back into every runtime closure. `_resolve_http_error_mappers` passes `BUILTIN_PLUGINS` / `CORE_UNCONDITIONAL_PLUGIN_NAMES` from `pipelex.interpreter_plugins.builtins` — the composed both-layer lists, matching the `pipelex plugins list` diagnostic this function is modelled on. The discovery function stays pure and repeatable, so resolving the mapper map at import is still safe.
   - **Address moves:** `PipelexBundleBlueprint` → `pipelex.mthds_parsing.pipelex_bundle_blueprint`; `PipeAbstract` → `pipelex.pipe_machinery.pipe_abstract`; the input/output renderers → `pipelex.pipe_machinery.rendering.*`; `PipelexBundleBlueprintValidationErrorData` → `pipelex.core.exceptions`; `JobMetadata` → `pipelex.system.job_metadata`.
-  - **Wire-visible rename:** `PipelexInterpreterError` is now `MthdsParserError`. The class name *is* the `error_type` value on the wire, so this changes what clients see — `docs/error-responses.md` (the caller-facing-`detail` allowlist) and the webhook-recovery test fixture are updated to match.
   - The dotted pipelex class paths in `pyproject.toml`'s `runtime-evaluated-base-classes` (`PipeOutput`, `PipelexRunResultExecute`) were checked against 0.41.0 and did **not** move.
+- **Breaking — wire-visible error rename:** `PipelexInterpreterError` is now `MthdsParserError`. The class name *is* the `error_type` value on the wire, so this changes what clients see — `docs/error-responses.md` (the caller-facing-`detail` allowlist) and the webhook-recovery test fixture are updated to match.
+- **Dependencies:** Bumped `pipelex` from `0.40.0` to `0.42.0`.
+
+### Fixed
+
+- **`docs/error-responses.md` had a duplicated "Suggested fixes" section.** The 0.41.0 sweep accidentally duplicated the section (originally documented in v0.9.0) while moving surrounding content; removed the duplicate, no content change.
 
 ## [v0.10.0] - 2026-07-19
 
