@@ -96,7 +96,7 @@ def _caller_facing_input_report() -> ErrorReport:
     contract holds across both message-disclosure provenances.
     """
     return ErrorReport(
-        error_type="PipelexInterpreterError",
+        error_type="MthdsParserError",
         message="Your .mthds file has a syntax error on line 4",
         title="Pipelex interpreter error",
         type_uri="https://docs.pipelex.com/latest/errors/pipelex-interpreter-error/",

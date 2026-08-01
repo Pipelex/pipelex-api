@@ -13,8 +13,8 @@ from pipelex.base_exceptions import PipelexConfigError
 from pipelex.cogt.llm.llm_report import LLMTokensUsage
 from pipelex.cogt.usage.cost_category import CostCategory
 from pipelex.cogt.usage.token_category import TokenCategory
-from pipelex.pipeline.job_metadata import JobMetadata
 from pipelex.pipeline.pipeline_response import PipelexRunResultStart, RunState
+from pipelex.system.job_metadata import JobMetadata
 from pytest_mock import MockerFixture
 
 from api.exception_handlers import register_exception_handlers

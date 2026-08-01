@@ -137,7 +137,7 @@ The `ERROR_DISCLOSURE` env var controls how much of the originating error makes 
 
 - `verbose` (default) — renders the full `ErrorReport`. Use in dev, staging, and any deployment where the caller is trusted.
 - `strict` — redacts `detail` and provider fields for errors that do not author caller-facing messages. Specifically:
-    - `detail` is preserved only for error classes flagged as authoring caller-facing messages (today: `PipelexInterpreterError`, `ValidateBundleError`). Everything else has `detail` replaced with a generic title-derived string.
+    - `detail` is preserved only for error classes flagged as authoring caller-facing messages (today: `MthdsParserError`, `ValidateBundleError`). Everything else has `detail` replaced with a generic title-derived string.
     - `model`, `provider`, `provider_metadata` are always stripped — they have no business on a caller-facing surface.
     - The redaction is keyed on the **provenance of the message** (`_authors_caller_facing_message` ClassVar), not on `error_domain`. A `RuntimeError` raised `from` an `INPUT`-domain cause does not leak the wrapper's internal message.
 
