@@ -193,6 +193,10 @@ The `ERROR_DISCLOSURE` env var controls how much of the originating error makes 
 
 Server logs are always verbose regardless of `ERROR_DISCLOSURE` — the operator sees the full picture, the caller sees what the error chose to disclose.
 
+The mode governs **every** response, including the catch-all 500 (`error_category: "unknown"` — a failure that matched no more specific handler). Under `verbose` its `detail` is `"<ExceptionClass>: <message>"`; under `strict` it is the fixed `"An unexpected error occurred. The request id is included for support."`. A traceback never reaches the caller in either mode.
+
+An unclassified failure is the one error a caller cannot diagnose from a request id alone, so it is exactly the one a `verbose` deployment must not turn into a dead end. If you want unclassified failures opaque, that is what `strict` is for — and note it redacts by message provenance, so a deployment wanting *nothing* leaked should set `strict` rather than rely on the catch-all to be silent.
+
 ## The `type` URI
 
 `type` is a stable URI pointing at the per-class documentation page upstream:

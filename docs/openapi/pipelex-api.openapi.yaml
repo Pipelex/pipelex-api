@@ -423,6 +423,24 @@ paths:
                   - type: string
                   - type: 'null'
                   title: Dynamic Output Concept Ref
+                bundle_b64:
+                  anyOf:
+                  - type: string
+                  - type: 'null'
+                  title: Bundle B64
+                  description: PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — base64-encoded zip of the whole method
+                    bundle (`.mthds` + `.py` + `structures/*.py` + `requirements.txt`), materialized into a temporary library
+                    directory before the run so custom PipeFunc Python travels with the method. Mutually exclusive with `files`.
+                    Custom `.py` is only honored on a sandbox-hosted deployment.
+                files:
+                  anyOf:
+                  - additionalProperties:
+                      type: string
+                    type: object
+                  - type: 'null'
+                  title: Files
+                  description: 'PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the method bundle as a `{relative_path:
+                    text}` map (the unzipped equivalent of `bundle_b64`). Mutually exclusive with `bundle_b64`.'
                 orchestration_mode:
                   anyOf:
                   - type: string
@@ -612,6 +630,24 @@ paths:
                   - type: string
                   - type: 'null'
                   title: Dynamic Output Concept Ref
+                bundle_b64:
+                  anyOf:
+                  - type: string
+                  - type: 'null'
+                  title: Bundle B64
+                  description: PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — base64-encoded zip of the whole method
+                    bundle (`.mthds` + `.py` + `structures/*.py` + `requirements.txt`), materialized into a temporary library
+                    directory before the run so custom PipeFunc Python travels with the method. Mutually exclusive with `files`.
+                    Custom `.py` is only honored on a sandbox-hosted deployment.
+                files:
+                  anyOf:
+                  - additionalProperties:
+                      type: string
+                    type: object
+                  - type: 'null'
+                  title: Files
+                  description: 'PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the method bundle as a `{relative_path:
+                    text}` map (the unzipped equivalent of `bundle_b64`). Mutually exclusive with `bundle_b64`.'
                 pipeline_run_id:
                   anyOf:
                   - type: string

@@ -516,7 +516,12 @@ class TestExceptionHandlers:
         else:
             assert response.headers["Retry-After"] == expected_retry_after
 
-    def test_unexpected_error_falls_back_to_sanitized_500(self):
+    def test_unexpected_error_discloses_class_and_message_under_verbose(self):
+        # The catch-all honors the disclosure mode like every other handler.
+        # Under VERBOSE an unclassified failure is the one error a caller cannot
+        # diagnose from a request id alone, so `detail` names it outright —
+        # otherwise a deployment that opted into disclosure would still hit a
+        # dead end here.
         response = _build_client(raise_server_exceptions=False).get("/unexpected-error")
         assert response.status_code == 500
         assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
@@ -527,9 +532,28 @@ class TestExceptionHandlers:
         assert body["type"].endswith("/internal-server-error/")
         assert body["instance"] == "/unexpected-error"
         assert body["error_category"] == "unknown"
-        # The real exception class and message never reach the client.
+        assert body["detail"] == "RuntimeError: something nobody anticipated"
+
+    def test_unexpected_error_is_sanitized_under_strict(self):
+        # STRICT still redacts: a deployment that wants nothing leaked keeps
+        # exactly the old sanitized body — no class name, no `str(exc)`.
+        client = _build_client(disclosure_mode=DisclosureMode.STRICT, raise_server_exceptions=False)
+        response = client.get("/unexpected-error")
+        assert response.status_code == 500
+        body = response.json()
+        assert body["error_type"] == "InternalServerError"
+        assert body["error_category"] == "unknown"
+        assert body["detail"] == "An unexpected error occurred. The request id is included for support."
         assert "RuntimeError" not in response.text
         assert "something nobody anticipated" not in response.text
+
+    def test_unexpected_error_never_leaks_a_traceback(self):
+        # Disclosure is the message, never the stack: a traceback stays an
+        # operator-log artifact in BOTH modes.
+        for mode in (DisclosureMode.VERBOSE, DisclosureMode.STRICT):
+            response = _build_client(disclosure_mode=mode, raise_server_exceptions=False).get("/unexpected-error")
+            assert "Traceback" not in response.text
+            assert "unexpected_error_route" not in response.text
 
     def test_orchestrator_error_dispatch(self):
         # The F3 seam: a synthetic plugin contributes a transport mapper through the registrar SPI,
@@ -552,27 +576,26 @@ class TestExceptionHandlers:
         assert transport_body["error_category"] == "transient"
         assert transport_body["retryable"] is True
 
-    def test_unmapped_transport_error_falls_back_to_sanitized_500(self):
+    def test_unmapped_transport_error_falls_back_to_catch_all_500(self):
         # Without the orchestrator plugin's mapper (the agnostic base), the same bare transport error
-        # has no dedicated handler and collapses to the sanitized catch-all 500 — never leaking its
-        # class name or message.
+        # has no dedicated handler and collapses to the catch-all 500 — which under VERBOSE still
+        # tells the caller which transport class failed and why.
         response = _build_client(raise_server_exceptions=False).get("/synthetic-transport-error")
         assert response.status_code == 500
         body = response.json()
         assert body["error_type"] == "InternalServerError"
-        assert "_SyntheticTransportError" not in response.text
-        assert "orchestrator cluster unreachable" not in response.text
+        assert body["detail"] == "_SyntheticTransportError: orchestrator cluster unreachable"
 
     def test_handler_of_handlers_catches_corrupt_report(self):
         # When to_error_report() itself raises, the failure escapes the
         # PipelexError handler; ServerErrorMiddleware funnels it into the
-        # catch-all — a sanitized 500, never a bodyless default.
+        # catch-all — a real 500 body, never a bodyless default. The disclosed
+        # class is the one raised *by the broken handler*, not the original.
         response = _build_client(raise_server_exceptions=False).get("/corrupt-error")
         assert response.status_code == 500
         body = response.json()
         assert body["error_type"] == "InternalServerError"
-        assert "_CorruptReportError" not in response.text
-        assert "to_error_report is deliberately broken" not in response.text
+        assert body["error_category"] == "unknown"
 
     @pytest.mark.parametrize(
         ("method", "path", "json_body", "expected_status"),
