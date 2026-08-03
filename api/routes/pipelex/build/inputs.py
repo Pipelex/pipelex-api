@@ -4,7 +4,7 @@ from typing import Annotated, Any, Literal, Self, Union
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pipelex.core.pipes.inputs.exceptions import NoInputsRequiredError
-from pipelex.core.pipes.inputs.input_renderer import InputsTemplateFormat, render_inputs, render_inputs_toml
+from pipelex.pipe_machinery.rendering.input_renderer import InputsTemplateFormat, render_inputs, render_inputs_toml
 from pipelex.pipeline.exceptions import ValidateBundleError
 from pydantic import BaseModel, Field, model_validator
 

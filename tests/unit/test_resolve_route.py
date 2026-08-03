@@ -9,7 +9,7 @@ until the method registry exists.
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from mthds.package.manifest.schema import MTHDS_STANDARD_VERSION
-from pipelex.hub import get_library_manager
+from pipelex.interpreter_hub import get_library_manager
 from pytest_mock import MockerFixture
 
 from api.exception_handlers import register_exception_handlers

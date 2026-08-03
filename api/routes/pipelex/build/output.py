@@ -4,7 +4,7 @@ from typing import Annotated, Any, Literal, Self, Union
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pipelex.core.concepts.concept_representation_generator import ConceptRepresentationFormat
-from pipelex.core.pipes.output.output_renderer import render_output
+from pipelex.pipe_machinery.rendering.output_renderer import render_output
 from pipelex.pipeline.exceptions import ValidateBundleError
 from pydantic import BaseModel, Field, model_validator
 

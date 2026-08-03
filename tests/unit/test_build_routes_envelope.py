@@ -10,7 +10,7 @@ discipline — 200 discriminated on `is_valid`, non-2xx only for no-verdict cond
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pipelex.hub import get_library_manager
+from pipelex.interpreter_hub import get_library_manager
 from pytest_mock import MockerFixture
 
 from api.exception_handlers import register_exception_handlers

@@ -7,7 +7,7 @@ from typing import Annotated
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends
 from pipelex import log
-from pipelex.hub import get_storage_provider
+from pipelex.runtime_hub import get_storage_provider
 from pipelex.system.environment import get_optional_env
 from pydantic import BaseModel, ConfigDict, Field
 

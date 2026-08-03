@@ -18,10 +18,10 @@ from typing import Literal, NamedTuple
 
 from fastapi.responses import JSONResponse
 from pipelex.base_exceptions import ErrorReport, ValidationErrorItem
-from pipelex.core.pipes.pipe_abstract import PipeAbstract
-from pipelex.hub import clear_current_library, get_current_library_id_or_none, get_library_manager, get_required_pipe
+from pipelex.interpreter_hub import clear_current_library, get_current_library_id_or_none, get_library_manager, get_required_pipe
 from pipelex.libraries.library_crate import LibraryCrate
 from pipelex.libraries.pipe.exceptions import PipeLibraryError
+from pipelex.pipe_machinery.pipe_abstract import PipeAbstract
 from pipelex.pipeline.resolve_bundle import resolve_crate_from_contents
 from pipelex.tools.typing.pydantic_utils import empty_list_factory_of
 from pydantic import BaseModel, Field
