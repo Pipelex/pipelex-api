@@ -14,7 +14,7 @@ from importlib.metadata import version as package_version
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from mthds.protocol.protocol import PROTOCOL_VERSION
-from pipelex.interpreter_plugins.builtins import BUILTIN_PLUGINS, CORE_UNCONDITIONAL_PLUGIN_NAMES
+from pipelex.interpreter_plugins.builtins import BUILTIN_PLUGINS, CORE_UNCONDITIONAL_PLUGIN_NAMES, ENTRY_POINT_GROUPS
 from pipelex.pipelex import Pipelex
 from pipelex.plugins.discovery import build_registrar
 from pipelex.plugins.registrar import HttpErrorMapperFn
@@ -112,6 +112,7 @@ def _resolve_http_error_mappers() -> dict[type[Exception], HttpErrorMapperFn]:
         config=config,
         builtin_plugins=BUILTIN_PLUGINS,
         core_unconditional_plugin_names=CORE_UNCONDITIONAL_PLUGIN_NAMES,
+        entry_point_groups=ENTRY_POINT_GROUPS,
     ).get_http_error_mappers()
 
 
