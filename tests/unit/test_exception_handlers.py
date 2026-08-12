@@ -179,7 +179,9 @@ def _synthetic_http_error_mappers() -> dict[type[Exception], HttpErrorMapperFn]:
     plugin or importing an orchestrator SDK.
     """
     registrar = PluginRegistrar(config=get_config())
-    registrar.begin_plugin(name="synthetic-transport-plugin", origin=PluginOrigin.BUILTIN, targets_api=PLUGIN_API_VERSION)
+    # `group=None` is what a built-in carries: the entry-point group is how an *external* plugin
+    # declares its layer, and a built-in arrives under none — it is filed by layer in-tree instead.
+    registrar.begin_plugin(name="synthetic-transport-plugin", origin=PluginOrigin.BUILTIN, targets_api=PLUGIN_API_VERSION, group=None)
     registrar.add_http_error_mapper(exc_type_provider=lambda: _SyntheticTransportError, to_error_report=_synthetic_transport_to_report)
     return registrar.get_http_error_mappers()
 
