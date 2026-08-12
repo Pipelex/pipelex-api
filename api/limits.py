@@ -15,6 +15,8 @@ DEFAULT_MAX_PIPE_CODE_LEN = 256
 DEFAULT_MAX_CALLBACK_URLS = 5
 DEFAULT_MAX_CALLBACK_URL_LEN = 2048
 DEFAULT_MAX_AGENT_SPEC_KIB = 256  # 256 KiB for JSON concept/pipe specs
+DEFAULT_MAX_BUNDLE_FILES = 128  # entries in a materialized method bundle (.mthds + .py + requirements.txt)
+DEFAULT_MAX_BUNDLE_TOTAL_KIB = 8 * 1024  # 8 MiB decompressed across the whole bundle (zip-bomb guard)
 
 
 def _read_positive_int(env_var: str, default: int) -> int:
@@ -43,3 +45,6 @@ MAX_CALLBACK_URLS = _read_positive_int("MAX_CALLBACK_URLS", DEFAULT_MAX_CALLBACK
 MAX_CALLBACK_URL_LEN = _read_positive_int("MAX_CALLBACK_URL_LEN", DEFAULT_MAX_CALLBACK_URL_LEN)
 
 MAX_AGENT_SPEC_BYTES = _read_positive_int("MAX_AGENT_SPEC_KIB", DEFAULT_MAX_AGENT_SPEC_KIB) * 1024
+
+MAX_BUNDLE_FILES = _read_positive_int("MAX_BUNDLE_FILES", DEFAULT_MAX_BUNDLE_FILES)
+MAX_BUNDLE_TOTAL_BYTES = _read_positive_int("MAX_BUNDLE_TOTAL_KIB", DEFAULT_MAX_BUNDLE_TOTAL_KIB) * 1024

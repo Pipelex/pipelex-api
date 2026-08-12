@@ -6,6 +6,14 @@
 
 - **Swept onto the plugin entry-point group split.** `pipelex` replaced its single `pipelex.plugins` entry-point group with `pipelex.plugins.kernel` and `pipelex.plugins.interpreter`, and `build_registrar` gained a required `entry_point_groups` parameter naming which of them to read. `_resolve_http_error_mappers` passes `ENTRY_POINT_GROUPS` from `pipelex.interpreter_plugins.builtins` — the composed both-group list, matching the `BUILTIN_PLUGINS` / `CORE_UNCONDITIONAL_PLUGIN_NAMES` it already injects and the `pipelex plugins list` diagnostic this function is modelled on. The runner boots the full interpreter, so it must read both groups: reading the kernel group alone would silently drop an installed orchestrator plugin's HTTP-error mapper and leave transport faults unmapped. The parameter is required rather than defaulted, so this omission would have surfaced as an import-time `TypeError` — the call site resolves at module scope, taking the whole app down on the next `pipelex` bump rather than degrading one feature.
 
+## [v0.11.1] - 2026-08-03
+
+### Fixed
+
+- **The catch-all 500 now honors `ERROR_DISCLOSURE` like every other response.** `handle_unexpected_error` hard-coded `"An unexpected error occurred. The request id is included for support."` and never read the disclosure mode, so a `verbose` deployment — the default, and what every deployment runs, since the var is unset everywhere — got real messages for every *classified* error and a dead end for the one error nobody classified. That is backwards: an unclassified failure is precisely the one a caller cannot diagnose from a request id alone. A raw `pydantic.ValidationError` escaping input building (it is not a `PipelexError`, so no handler claimed it) landed here, and its reason was reachable only in CloudWatch.
+
+  Under `verbose`, `detail` is now `"<ExceptionClass>: <message>"`. Under `strict` the body is byte-identical to before — a deployment that wants nothing leaked keeps that, and provenance-gated redaction (`_authors_caller_facing_message`) is unchanged. A traceback still reaches the client in neither mode; the class name and full traceback continue to go to the operator log, correlated by request id. Docs: `docs/error-responses.md` → "Disclosure modes".
+
 ## [v0.11.0] - 2026-08-01
 
 ### Added

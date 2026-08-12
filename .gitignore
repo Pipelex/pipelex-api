@@ -57,6 +57,8 @@ gcp_credentials.json
 pipelex_super.toml
 pipelex_override.toml
 telemetry_override.toml
+# local-only env override (boots the runner as the hosted runner; needs a plugin CI lacks)
+.pipelex/pipelex_dev.toml
 
 .worktreeinclude
 .gstack/
