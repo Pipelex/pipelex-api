@@ -16,7 +16,13 @@ classifiers = [
 ]
 
 dependencies = [
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.43.1",
+  # TEMPORARY — unreleased pipelex (Pipelex/pipelex#1100: per-node usage attribution
+  # on the run GraphSpec). A PEP 508 direct reference, NOT a [tool.uv.sources] entry:
+  # uv applies sources only to the project being locked, never to a dependency, so a
+  # source here would be silently ignored by pipelex-api-hosted. The commit carries
+  # version 0.43.1, so the pipelex-server workspace constraint still resolves.
+  # Restore `pipelex[...]==0.43.1` before releasing pipelex-api.
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal] @ git+https://github.com/Pipelex/pipelex.git@399951997c87588cf900c329b3e6a02b9bc1519a",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",
