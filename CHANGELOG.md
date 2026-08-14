@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Pinned `pipelex` 0.45.0** (up from `==0.43.1`, exactly). The release adds per-node token usage, cost and model attribution to the run GraphSpec: `NodeSpec` gains a `usage` object and `GraphSpec` gains a run-level `usage` rollup. Both models are `extra="forbid"`, which is what makes the bump breaking in the other direction — an older `pipelex` rejects the new JSON — so this repo and `pipelex` 0.45.0 must move together.
+
+  `graph_spec` is on this API's wire (`POST /v1/execute` carries `graph_spec`, and `POST /v1/validate` carries a best-effort one), and it is validated back from `model_dump(mode="json")` against `strict=True` models. The new fields therefore reach the committed OpenAPI artifact, so `docs/openapi/pipelex-api.openapi.yaml` must be regenerated and `uv.lock` refreshed **once 0.45.0 is on PyPI** — neither could be done while preparing this branch, because `uv lock` cannot resolve a version that does not exist yet. See "Before merging" in the PR description.
+
+  The release's other two changes do not reach this repo: a `PipeCondition` dry run is now reproducible (it sorts its branch walk instead of iterating a hash-ordered set), and a `{concept, content}` envelope carrying an empty list is now a value rather than an error — the latter only widens what an input may be, so no caller that worked before stops working.
+
 ## [v0.12.0] - 2026-08-12
 
 ### Changed

@@ -2554,6 +2554,10 @@ components:
             $ref: '#/components/schemas/EdgeSpec'
           type: array
           title: Edges
+        usage:
+          anyOf:
+          - $ref: '#/components/schemas/GraphUsageSpec'
+          - type: 'null'
         meta:
           additionalProperties: true
           type: object
@@ -2582,6 +2586,35 @@ components:
         This is the top-level model representing a complete run graph.
 
         It is versioned and designed for JSON serialization.'
+    GraphUsageSpec:
+      properties:
+        total:
+          $ref: '#/components/schemas/NodeUsageSpec'
+        unattributed:
+          $ref: '#/components/schemas/NodeUsageSpec'
+      additionalProperties: false
+      type: object
+      required:
+      - total
+      - unattributed
+      title: GraphUsageSpec
+      description: 'Run-level inference usage for a whole GraphSpec.
+
+
+        ``total`` covers every usage the run reported, attributed or not — it is the graph''s
+
+        comparand for the cost report''s own total. ``unattributed`` is the part that named no
+
+        live node (the ``UNATTRIBUTED_NODE_ID`` fallback, or a node that never emitted a
+
+        start event): surfaced as its own bucket rather than dropped, so the graph''s total
+
+        can never silently disagree with the cost report''s.
+
+
+        Both reuse ``NodeUsageSpec`` — one usage shape in the contract, not two. Neither has
+
+        a subtree distinct from itself, so their ``subtree_*`` fields repeat their own.'
     HealthResponse:
       properties:
         status:
@@ -2944,6 +2977,67 @@ components:
       - handle
       title: ModelReferenceKind
       description: The kind of model reference.
+    ModelUsageSpec:
+      properties:
+        inference_model_name:
+          type: string
+          title: Inference Model Name
+        inference_model_id:
+          type: string
+          title: Inference Model Id
+        model_type:
+          type: string
+          title: Model Type
+        inference_calls:
+          type: integer
+          title: Inference Calls
+          default: 0
+        rated_inference_calls:
+          type: integer
+          title: Rated Inference Calls
+          default: 0
+        cost:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Cost
+      additionalProperties: false
+      type: object
+      required:
+      - inference_model_name
+      - inference_model_id
+      - model_type
+      title: ModelUsageSpec
+      description: 'What one inference model actually did for a node.
+
+
+        This is the only place the graph records the model that **ran**. Everything else
+
+        in a GraphSpec that names a model records what was *asked for*:
+
+        ``execution_data.resolved_model`` holds the handle the pipe resolved to — which may
+
+        still be an alias (``@default-premium``) — and the pipe blueprint holds the authored
+
+        choice (``$writing-factual``). Those are three rungs of one ladder, and only this
+
+        rung is the outcome: it survives alias resolution, deck defaults, and any fallback
+
+        or retry that landed somewhere other than what was requested.
+
+
+        A node genuinely uses more than one model in ordinary cases — a ``PipeLLM``''s text
+
+        pass and its object-structuring pass resolve separately — so a node''s models are a
+
+        LIST. Collapsing them to "the model" would be wrong in exactly the way a single
+
+        ``cost`` for mixed rated/unrated calls is wrong.
+
+
+        ``cost`` follows ``NodeUsageSpec`` invariant 2: ``None`` iff no call to this model
+
+        carried a rate table.'
     MthdsFileItem:
       properties:
         content:
@@ -3083,6 +3177,10 @@ components:
             type: number
           type: object
           title: Metrics
+        usage:
+          anyOf:
+          - $ref: '#/components/schemas/NodeUsageSpec'
+          - type: 'null'
         execution_data:
           additionalProperties: true
           type: object
@@ -3109,6 +3207,106 @@ components:
       - canceled
       title: NodeStatus
       description: Execution status of a node.
+    NodeUsageSpec:
+      properties:
+        inference_calls:
+          type: integer
+          title: Inference Calls
+          default: 0
+        rated_inference_calls:
+          type: integer
+          title: Rated Inference Calls
+          default: 0
+        nb_tokens_by_category:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Nb Tokens By Category
+        total_tokens:
+          type: integer
+          title: Total Tokens
+          default: 0
+        cost:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Cost
+        cost_input:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Cost Input
+        cost_output:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Cost Output
+        by_model:
+          items:
+            $ref: '#/components/schemas/ModelUsageSpec'
+          type: array
+          title: By Model
+        subtree_inference_calls:
+          type: integer
+          title: Subtree Inference Calls
+          default: 0
+        subtree_rated_inference_calls:
+          type: integer
+          title: Subtree Rated Inference Calls
+          default: 0
+        subtree_nb_tokens_by_category:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Subtree Nb Tokens By Category
+        subtree_total_tokens:
+          type: integer
+          title: Subtree Total Tokens
+          default: 0
+        subtree_cost:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Subtree Cost
+        subtree_cost_input:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Subtree Cost Input
+        subtree_cost_output:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Subtree Cost Output
+        subtree_by_model:
+          items:
+            $ref: '#/components/schemas/ModelUsageSpec'
+          type: array
+          title: Subtree By Model
+      additionalProperties: false
+      type: object
+      title: NodeUsageSpec
+      description: "Inference usage attributed to one graph node.\n\nField names mirror the already-shipped client-facing\
+        \ ``TokensUsageRecord``\n(``reporting/usage_records.py``) so the graph does not introduce a fifth vocabulary\nfor\
+        \ numbers this codebase already names four ways (``TokenCategory``,\n``LLMTokenCostReportField``, ``GenAISpanAttr``,\
+        \ ``PostHogAttr``).\n\nINVARIANTS — the UI and every other consumer branch on these, not on guesses about\nwhy a number\
+        \ is missing:\n\n  1. ``NodeSpec.usage is None`` <=> no usage was reported anywhere in the run —\n     either usage\
+        \ collection was off, or the run made zero inference calls. As soon\n     as ONE usage event was seen, EVERY node\
+        \ carries a spec, zeroed where nothing\n     ran. A controller, a lifted pipe, and a PipeFunc all get ``inference_calls=0``,\n\
+        \     never ``usage=None``. So the field is all-or-nothing across a graph: it never\n     distinguishes \"this node\
+        \ was not measured\" from \"that node was\".\n\n  2. ``cost is None`` <=> ``rated_inference_calls == 0``. Nothing\
+        \ else. \"Made no\n     call\" and \"made only unrated calls\" both land here and are told apart by\n     ``inference_calls``.\n\
+        \n  3. ``inference_calls > rated_inference_calls > 0`` => ``cost`` is a LOWER BOUND,\n     not a total: some of this\
+        \ node's calls carried no rate table. The UI must mark\n     it (a leading \"≥\").\n\n  4. ``total_tokens`` is input_joined\
+        \ + output — the same definition as\n     ``AggregatedCosts.total_nb_tokens``. It is NOT the sum of\n     ``nb_tokens_by_category``:\
+        \ ``input_cached`` is a SUBSET of ``input``, not\n     additive (see ``usage_records.py``), so summing double-counts.\
+        \ Never sum the\n     dict; read this field.\n\n  5. ``cost_input`` + ``cost_output`` == ``cost`` (to float precision).\
+        \ They are\n     the same number split by direction, not extra charges, and they are None on\n     exactly the same\
+        \ condition.\n\n  6. ``by_model`` names the models that actually RAN, and its ``inference_calls``\n     sum to this\
+        \ spec's own. It is a list because one node routinely uses more\n     than one model (a PipeLLM's text pass and its\
+        \ object pass resolve\n     separately). Ordered by descending calls, then by name, so a consumer can\n     take the\
+        \ first entry as the dominant model without sorting.\n\nThe same invariants hold for the ``subtree_*`` half, which\
+        \ covers this node plus\nevery descendant (rolled up in the assembler, once, so no consumer re-derives it\nand disagrees)."
     PipeBatchBlueprint:
       properties:
         source:
