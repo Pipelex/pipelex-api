@@ -294,7 +294,6 @@ class ApiRunner(PipelexMTHDSProtocol):
             output_multiplicity=output_multiplicity,
             dynamic_output_concept_ref=dynamic_output_concept_ref,
             pipe_run_mode=self.pipe_run_mode,
-            search_domain_codes=self.search_domain_codes,
             user_id=self.user_id,
             pipeline_run_id=pipeline_run_id,
             request_id=request_id,
