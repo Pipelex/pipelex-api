@@ -1,14 +1,22 @@
 # Changelog
 
-## [Unreleased]
+## [v0.13.0] - 2026-08-14
 
 ### Changed
 
-- **Pinned `pipelex` 0.45.0** (up from `==0.43.1`, exactly). The release adds per-node token usage, cost and model attribution to the run GraphSpec: `NodeSpec` gains a `usage` object and `GraphSpec` gains a run-level `usage` rollup. Both models are `extra="forbid"`, which is what makes the bump breaking in the other direction — an older `pipelex` rejects the new JSON — so this repo and `pipelex` 0.45.0 must move together.
+- **Pinned `pipelex` 0.45.0 (Breaking, and a hard pairing).** Up from `==0.43.1`, exactly. The pin crosses two releases, and the code changes below come from the first of them, not the one the pin is named after.
 
-  `graph_spec` is on this API's wire (`POST /v1/execute` carries `graph_spec`, and `POST /v1/validate` carries a best-effort one), and it is validated back from `model_dump(mode="json")` against `strict=True` models. The new fields therefore reach the committed OpenAPI artifact, so `docs/openapi/pipelex-api.openapi.yaml` must be regenerated and `uv.lock` refreshed **once 0.45.0 is on PyPI** — neither could be done while preparing this branch, because `uv lock` cannot resolve a version that does not exist yet. See "Before merging" in the PR description.
+  0.45.0 adds per-node token usage, cost and model attribution to the run GraphSpec: `NodeSpec` gains a `usage` object, `GraphSpec` gains a run-level `usage` rollup, and each node's usage carries `by_model` — the model that *actually* ran, read off the usage records rather than off the authored choice or an unresolved alias. Both models are `extra="forbid"`, which is what makes the pairing hard in the other direction — an older `pipelex` rejects the new JSON — so this repo and `pipelex` 0.45.0 must move together. `graph_spec` is on this API's wire (`POST /v1/execute` carries one, `POST /v1/validate` a best-effort one) and is validated back from `model_dump(mode="json")` against `strict=True` models, so the new fields reach `docs/openapi/pipelex-api.openapi.yaml`, regenerated here.
 
-  The release's other two changes do not reach this repo: a `PipeCondition` dry run is now reproducible (it sorts its branch walk instead of iterating a hash-ordered set), and a `{concept, content}` envelope carrying an empty list is now a value rather than an error — the latter only widens what an input may be, so no caller that worked before stops working.
+  0.45.0's other two changes do not reach this repo: a `PipeCondition` dry run is now reproducible (it sorts its branch walk instead of iterating a hash-ordered set), and a `{concept, content}` envelope carrying an empty list is now a value rather than an error — the latter only widens what an input may be, so no caller that worked before stops working.
+
+- **Swept onto automatic search scope (Breaking).** 0.44.0 replaced the `search_domain_codes` list across the public API (`PipelexMTHDSProtocol`, `pipeline_run_setup`, `InputShaper`, `WorkingMemoryFactory`) with a single `search_scope` string that `pipeline_run_setup` derives from the entry pipe itself, so `ApiRunner.start` no longer passes one. Caller-visible in how a request's inputs resolve their concepts: the scope is now the entry pipe's own domain — `alias->domain` when the entry pipe comes from a dependency package — rather than whatever the runner supplied, and every entry-lookup refusal (invalid string, miss, ambiguity) now arrives as `ConceptLibraryConceptNotFoundError`.
+
+### Fixed
+
+- **A bare `pipe_ref` resolves again on the build routes.** 0.44.0 made in-body pipe references strict: the resolver behind `get_required_pipe` is a key lookup with deliberately no bare-code search, because a reference that can find a pipe in a domain its author never named is one `[exports]` cannot constrain. `resolve_requested_pipe` was still on it, so `POST /v1/build/inputs`, `/v1/build/output` and `/v1/build/runner` answered `422 Pipe '<code>' not found in the submitted closure` for *every* bare `pipe_ref` — a closure declaring `smoke.echo` refused `"echo"`, the spelling the route's own contract promises to accept and echo back qualified.
+
+  A code a human typed at an entry point is a different question from a reference one pipe makes to another, and 0.44.0 gave it its own answer: `get_required_entry_pipe` matches a bare code across every domain the library holds, ignores `[exports]` (package visibility governs in-body references, not hand-typed entry points), and excludes aliased dependency entries so installing a package cannot make a host pipe's code ambiguous. The route now uses it. An ambiguous bare code raises rather than picking a winner, and still surfaces as a `422` naming the candidates.
 
 ## [v0.12.0] - 2026-08-12
 
