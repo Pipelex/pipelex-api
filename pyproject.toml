@@ -22,7 +22,7 @@ dependencies = [
   # source here would be silently ignored by pipelex-api-hosted. The commit carries
   # version 0.43.1, so the pipelex-server workspace constraint still resolves.
   # Restore `pipelex[...]==0.43.1` before releasing pipelex-api.
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal] @ git+https://github.com/Pipelex/pipelex.git@399951997c87588cf900c329b3e6a02b9bc1519a",
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal] @ git+https://github.com/Pipelex/pipelex.git@2407a682ada594fec05be85dd6d3401c63dd4b92",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",
