@@ -104,7 +104,7 @@ A validation error item may carry a `suggested_fix`: a deterministic repair the 
 | `move_key` | Relocate a key to another table, creating missing destination parents | `key`, `new_table_path`, `new_key` |
 | `remap_value` | Rewrite a key's string value through an explicit old-to-new `mapping`, doing nothing when the current value is not a mapped one | `key`, `mapping` |
 
-For `ensure_table`, `delete_table` and `move_key`'s destination, `table_path` addresses the table itself rather than its parent, so it is never empty — the document root always exists and is never a target. `move_key` moves a table-valued key with its whole subtree.
+For `ensure_table` and `delete_table`, `table_path` addresses the table itself rather than its parent, so it is never empty — the document root always exists and is never a target. `move_key` is addressed at both ends and the two ends follow different rules: `table_path` is the table the key currently sits in, per the general convention above, while `new_table_path` addresses the destination table itself. Neither is constrained to be non-empty: an empty `table_path` reads a key off the document root, and an empty `new_table_path` moves it there. `move_key` moves a table-valued key with its whole subtree.
 
 `value` is a TOML scalar (string, integer, float, boolean) or a flat scalar mapping, which a fix that must create a whole table at once — a missing `inputs` mapping, say — writes as an inline table.
 
