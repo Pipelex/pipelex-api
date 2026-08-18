@@ -1,7 +1,7 @@
 """Pipelex-API deployment config: the top-level orchestration mode + override policy.
 
 The runner is orchestrator-agnostic. WHICH orchestrator a top-level run dispatches
-to — ``direct`` in-process (the base default), ``temporal``, ``mistralai-workflows``,
+to — ``direct`` in-process (the base default), ``temporal``, ``mistral-workflows``,
 … — is a *deployment* choice, never a property of this open-source base.
 ``orchestration_mode`` is an open string token (core owns ``"direct"``; each plugin
 owns its own); the *delivery* axis (blocking vs fire-and-forget) is endpoint-set, not

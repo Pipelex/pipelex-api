@@ -1,5 +1,23 @@
 # Changelog
 
+## [v0.14.0] - 2026-08-18
+
+### Changed
+
+- **Pinned `pipelex` 0.46.4 (Breaking, and it moves this deployment's own config files).** Up from `==0.45.0`, exactly. 0.46.0 reshapes the `pipelex.toml` root to mirror the runtime layers and drops the redundant `_config` suffix from keys — `[pipelex]` splits into `[runtime]` / `[interpreter]`, `[cogt]` becomes `[inference]` — so the tracked `.pipelex/` files in this repo were migrated in place with `pipelex migrate`, which kept every value this deployment had chosen and carried each section banner along with the table it introduces. **Anyone running this server against their own `.pipelex/` must run `pipelex migrate` after upgrading**, including on the inference backend files: 0.46.0 removes `prompting_target`, and a surviving per-model one fails the strict boot by name. Migrate with **0.46.1 or later**: 0.46.0's migrator left a moved table's banner behind, so a file it rewrote needs its comments tidied by hand — or its `.bak` restored and the migration re-run. The pin names 0.46.4 rather than 0.46.0 for a run of fixes that ride along and change nothing on this API's wire: 0.46.1 restores the migrator's comment fidelity, 0.46.2 keeps a `.gitignore` inside `.pipelex/` so the timestamped backups a migration leaves behind stop showing up as untracked files, 0.46.3 makes that `.gitignore` reach a machine that had nothing to migrate (0.46.2 wrote it only on a run that actually carried a file forward, which is the minority case), and 0.46.4 is pipelex's own dogfooding of the convention plus a fix to its config-sync gate — developer tooling in that repo, invisible here. This repo's root `.gitignore` already ignored `*.bak.*`, so the tracked `.pipelex/` here is unaffected either way.
+
+- **The runner tolerates a stale-but-migratable config the way pipelex's own boot does.** `_resolve_http_error_mappers` loaded the raw config dict and validated it itself, which bypassed the boot tolerance 0.46.0 added — a config whose drift the migration ledger can fully explain. Because that call resolves at module import, the app would have died on the import line over a file `Pipelex.make` accepts moments later in `lifespan`, with the app-construction traceback instead of the "run `pipelex migrate`" warning. It now goes through `config_manager.load_config_validated`, the same tolerant entry point the boot uses. A config the ledger *cannot* explain still fails the app fast, as before.
+
+- **Swept onto `build_registrar`'s new `boot_orchestrator` parameter.** 0.46.0 removed the `plugins.boot_orchestrator` config key: the boot orchestrator is a boot argument now, and an orchestrator plugin gates its hub-slot claims on the value the registrar was built with. `_resolve_http_error_mappers` passes `None`, which is correct rather than merely convenient — the gate governs only the slot claims, which this throwaway registrar never applies, while a plugin contributes its HTTP-error mapper unconditionally. So the resolved map is what it always was, and the import-time resolution stays honest.
+
+- **Config access moved with the keys.** `get_config().pipelex.pipeline_execution_config` is `get_config().interpreter.pipeline_execution` — the only reader of the config tree in this repo.
+
+- **OpenAPI artifact refreshed, and the suggested-fix op vocabulary changed shape (Breaking on the wire).** A `suggested_fix`'s `ops[]` were a single open `FixOp` carrying a `FixOpKind` enum beside optional fields; 0.46.0 makes them a **union discriminated on `kind`**, one member schema per kind (`SetKeyOp`, `EnsureTableOp`, `DeleteKeyOp`, `DeleteTableOp`, `RenameTableKeyOp`, and the two new `MoveKeyOp` / `RemapValueOp`). A client reading `kind` and branching is unaffected in substance; one that validates against the published `FixOp` schema must move to the union. Also in the artifact: `PromptingTarget` and every `prompting_target` field are gone, and `PipeLLM` gains `templating_style` — 0.46.0 makes prompt templating an authoring decision on the pipe rather than something inferred from the model, with the runtime default now XML tags.
+
+### Fixed
+
+- **`docs/error-responses.md` no longer carries the "Suggested fixes" section twice.** The whole section — prose, example, field list and op table — was duplicated verbatim; a reader hitting the second copy had no way to tell which was current. One copy remains, and it documents the discriminated-union op shape and the full seven-kind vocabulary.
+
 ## [v0.13.0] - 2026-08-14
 
 ### Changed
