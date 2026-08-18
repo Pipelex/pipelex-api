@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Removed
+
+- **`POST /v1/upload` and `POST /v1/resolve-storage-url` are gone (Breaking).** Both were explicitly non-contract — neither the MTHDS Protocol nor the Pipelex API extensions ever included them, and both carried a "slated for replacement by the storage redesign, do not build new integrations on it" notice in their descriptions. That redesign has landed, and the routes moved to the hosted platform.
+
+  They could not stay. Both keyed S3 objects by the caller's `user_id` (`{user_id}/assets/{uuid}.{ext}`) and authorized a read by comparing that first path segment against the requester — an ownership model with no notion of a team. This server has no organization concept to fix it with, which is precisely why the routes belong on the hosted side, where membership is already resolved before the request arrives.
+
+  A self-hoster who was using them needs their own upload path. The storage *provider* is untouched: `get_storage_provider()`, `pipelex-storage://` URIs and everything the runtime does with them work exactly as before — only the two HTTP routes are removed. `ErrorType.INVALID_URI`, `UPLOAD_FAILED` and `PRESIGN_FAILED` are removed with them, and `api.security.is_safe_user_id` stays (the pipeline routes use it).
+
 ## [v0.13.0] - 2026-08-14
 
 ### Changed

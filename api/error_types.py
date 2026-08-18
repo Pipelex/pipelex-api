@@ -39,7 +39,6 @@ class ErrorType(StrEnum):
     INVALID_CALLBACK_URLS = "InvalidCallbackUrls"
     INVALID_MODEL_CATEGORY = "InvalidModelCategory"
     INVALID_BASE64 = "InvalidBase64"
-    INVALID_URI = "InvalidUri"
     PAYLOAD_TOO_LARGE = "PayloadTooLarge"
     # A run request carried a malformed method bundle (`bundle_b64` / `files`): a corrupt zip, an
     # unsafe entry name (absolute path or `..` traversal), or both transport forms supplied at once.
@@ -48,10 +47,6 @@ class ErrorType(StrEnum):
     # sandbox-hosted. Running customer code in-process is refused (403): the bundle-with-code
     # transport is a sandbox-hosted capability only. Use a sandbox-hosted deployment.
     CUSTOM_CODE_REQUIRES_SANDBOX = "CustomCodeRequiresSandbox"
-
-    # Storage / upload
-    UPLOAD_FAILED = "UploadFailed"
-    PRESIGN_FAILED = "PresignFailed"
 
     # A caller selected a closure by `method_ref` on `/resolve` or `/codegen`. The request envelope
     # accepts the field (it is the registry hinge the spec pins), but no method-registry resolution

@@ -139,8 +139,7 @@ fastapi_app = PipelexFastAPI(
         "marked `x-mthds-protocol: true`) plus the Pipelex API extensions: resolve and codegen "
         "(`/resolve`, `/codegen`), build tooling (`/build/*`), and editor tooling (`/lint`, `/format`). "
         "Contract layering: MTHDS Protocol ⊂ Pipelex API (this server) ⊂ Pipelex hosted API. "
-        "Routes not in the published contract (`/upload`, `/resolve-storage-url`) are documented "
-        "as non-contract in their descriptions. All endpoints are served under the `/v1` base path; "
+        "All endpoints are served under the `/v1` base path; "
         "every error is an RFC 7807 `application/problem+json` problem document, documented per "
         "operation as a `ProblemDocument`."
     ),

@@ -44,8 +44,7 @@ def is_safe_user_id(value: str) -> bool:
 
 
 # Reserved owner segment for unauthenticated pipeline runs (see
-# `routes.pipelex.pipeline._get_user_id`); storage/upload routes treat this exact
-# value as "not authenticated". It is therefore NOT a valid authenticated identity:
+# `routes.pipelex.pipeline._get_user_id`). It is NOT a valid authenticated identity:
 # an authenticated caller — a JWT `user_id` claim or a trusted-proxy `X-User-Id`
 # header — must never be allowed to bind it, or their runs would silently collide
 # with the shared anonymous namespace.
