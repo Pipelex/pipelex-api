@@ -279,7 +279,7 @@ class ApiRunner(PipelexMTHDSProtocol):
         created_at = get_current_iso_timestamp()
         pipelex_inputs: PipelineInputs | WorkingMemory | None = cast("PipelineInputs | WorkingMemory | None", inputs)
 
-        execution_config = self.execution_config or get_config().pipelex.pipeline_execution_config
+        execution_config = self.execution_config or get_config().interpreter.pipeline_execution
         # Wire and runtime share the `pipeline_run_id` name (master D1 as
         # revised — the id rename was reversed).
         pipe_job, resolved_pipeline_run_id, _ = await pipeline_run_setup(

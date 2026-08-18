@@ -10,8 +10,8 @@
 
 # Which orchestrator a top-level run dispatches to, through the orchestrator registry.
 # `orchestration_mode` is an OPEN string token: core owns "direct" (in-process); each orchestrator
-# plugin owns its own ("temporal" from pipelex-temporal, "mistralai-workflows" from
-# pipelex-mistralai-workflows). A token whose plugin is not installed fails loud at dispatch with the
+# plugin owns its own ("temporal" from pipelex-temporal, "mistral-workflows" from
+# pipelex-mistral-workflows). A token whose plugin is not installed fails loud at dispatch with the
 # plugin's install hint. The delivery axis (blocking vs fire-and-forget) is NOT configured here — it
 # is set by the endpoint (`/execute` and `/validate` block; `/start` is fire-and-forget).
 orchestration_mode = "direct"
