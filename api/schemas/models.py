@@ -153,7 +153,8 @@ class StartRequest(RunRequest):
 _STORAGE_SCOPE_DESCRIPTION = (
     "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the host-supplied prefix every object "
     "this run writes lands under. One to three path-safe segments (e.g. `tenant/run` or "
-    "`org/method/run`); the runtime composes its own leaves (`assets/`, `results/`, `payloads/`) onto "
+    "`org/method/run`); the runtime composes its own leaves (`assets/`, `generated/`, `results/`, "
+    "`payloads/`) onto "
     "it and never interprets the value. Omit it and the run is scoped to the caller's own id, which "
     "is correct for a single-tenant deployment and wrong for a multi-tenant one — a host serving many "
     "tenants MUST send this."

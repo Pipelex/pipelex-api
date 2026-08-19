@@ -451,6 +451,16 @@ paths:
                     axis (blocking vs fire-and-forget) is endpoint-set, never requestable. Honored ONLY when the deployment
                     sets `allow_request_orchestration_mode_override = true` in its `api.toml`; otherwise a token that differs
                     from the deployment default is refused with a 403. Omit it to use the deployment default.'
+                storage_scope:
+                  anyOf:
+                  - type: string
+                  - type: 'null'
+                  title: Storage Scope
+                  description: PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the host-supplied prefix every object
+                    this run writes lands under. One to three path-safe segments (e.g. `tenant/run` or `org/method/run`);
+                    the runtime composes its own leaves (`assets/`, `generated/`, `results/`, `payloads/`) onto it and never
+                    interprets the value. Omit it and the run is scoped to the caller's own id, which is correct for a single-tenant
+                    deployment and wrong for a multi-tenant one — a host serving many tenants MUST send this.
               additionalProperties: true
               type: object
               title: PipelexApiExecuteRequest
@@ -674,6 +684,16 @@ paths:
                     axis (blocking vs fire-and-forget) is endpoint-set, never requestable. Honored ONLY when the deployment
                     sets `allow_request_orchestration_mode_override = true` in its `api.toml`; otherwise a token that differs
                     from the deployment default is refused with a 403. Omit it to use the deployment default.'
+                storage_scope:
+                  anyOf:
+                  - type: string
+                  - type: 'null'
+                  title: Storage Scope
+                  description: PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the host-supplied prefix every object
+                    this run writes lands under. One to three path-safe segments (e.g. `tenant/run` or `org/method/run`);
+                    the runtime composes its own leaves (`assets/`, `generated/`, `results/`, `payloads/`) onto it and never
+                    interprets the value. Omit it and the run is scoped to the caller's own id, which is correct for a single-tenant
+                    deployment and wrong for a multi-tenant one — a host serving many tenants MUST send this.
               additionalProperties: true
               type: object
               title: PipelexApiStartRequest
