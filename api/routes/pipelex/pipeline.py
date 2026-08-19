@@ -341,7 +341,18 @@ class ApiRunner(PipelexMTHDSProtocol):
         )
 
         delivery_assignment = DeliveryAssignment(
-            storage=StorageTarget(key_prefix="results"),
+            # NO `key_prefix` — the runtime owns the `results/` leaf.
+            #
+            # This used to say `key_prefix="results"`, from the layout where the
+            # executor built `{user_id}/{key_prefix}{pipeline_run_id}` and the
+            # caller supplied the leaf. It now builds
+            # `{storage_scope}/{key_prefix}results`, so passing it here wrote
+            # every run's output to `<scope>/results/results/` — valid, stable,
+            # and wrong, with nothing failing to say so.
+            #
+            # `key_prefix` remains the caller's slot for an EXTRA level between
+            # the scope and the leaf; it is not where the leaf itself comes from.
+            storage=StorageTarget(),
             # The completion payload's wire fields (`pipeline_run_id`/`state`,
             # plus the transitional `status` alias) are written per delivery by
             # pipelex's DeliveryExecutor — they are reserved keys on
