@@ -28,7 +28,7 @@ from api.middleware import REQUEST_ID_HEADER, RequestIdMiddleware, request_body_
 from api.problem_document import PROBLEM_JSON_MEDIA_TYPE
 from api.routes import router as api_router
 from api.routes.version import router as version_router
-from api.security import RequestUser, get_auth_dependency, get_request_user
+from api.security import RequestUser, get_request_user, verify_api_key
 
 USER_A = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"
 USER_B = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"
@@ -52,7 +52,7 @@ def _build_client(*, user: RequestUser | None = None, with_auth: bool = False) -
     app.add_middleware(BaseHTTPMiddleware, dispatch=request_body_size_middleware)
     app.include_router(version_router, prefix="/v1")
     if with_auth:
-        app.include_router(api_router, prefix="/v1", dependencies=[Depends(get_auth_dependency())])
+        app.include_router(api_router, prefix="/v1", dependencies=[Depends(verify_api_key)])
     else:
         app.include_router(api_router, prefix="/v1")
     register_exception_handlers(app)
