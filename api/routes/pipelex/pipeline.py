@@ -40,6 +40,7 @@ from api.openapi_responses import (
 )
 from api.routes.pipelex.utils import get_current_iso_timestamp
 from api.schemas.models import PipelexApiExecuteRequest, PipelexApiExecuteResponse, PipelexApiStartRequest, PipelineApiExtras, RunRequest
+from api.security import SINGLE_TENANT_USER_ID
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -61,9 +62,48 @@ router = APIRouter(tags=["run"])
 
 
 def _get_user_id(request: Request) -> str:
-    """Extract the user UUID from request state (set during auth)."""
+    """The caller this run is attributed to, and the owner its storage is keyed by.
+
+    **There is no `anonymous` fallback any more, and its removal is the point.**
+    This used to return the literal `"anonymous"` whenever `request.state.user`
+    was unset, which is reached on every auth path that establishes no
+    per-caller identity. That string then became the first segment of every
+    storage key the run wrote, so a deployment serving many callers put all of
+    them in one namespace where each could read the others' outputs — and it
+    looked like a working request the whole way through.
+
+    An identity-bearing deployment cannot get here without a user: `verify_jwt`
+    and `verify_api_key` raise on a bad token, and `no_auth` now raises when
+    `TRUST_FORWARDED_IDENTITY_HEADERS` is on and no id was forwarded. So a
+    missing user means the deployment declared it has no user model
+    (`AUTH_MODE=none` with no trusted proxy, or the shared static key), which is
+    a single tenant by configuration rather than an unknown caller.
+    """
     user: RequestUser | None = getattr(request.state, "user", None)
-    return user.user_id if user else "anonymous"
+    return user.user_id if user else SINGLE_TENANT_USER_ID
+
+
+def _resolve_storage_scope(request: Request, *, requested: str | None) -> str:
+    """Where this run's bytes go — the host's value, or the caller's own id.
+
+    **Scope is data, not identity**, which is why it arrives in the BODY while
+    `user_id` arrives on a trusted header. The runtime needs to know where to
+    write, not who to trust, so a multi-tenant host computes this where it knows
+    its own tenancy (`<org>/<method>/<run>` on hosted Pipelex) and sends it.
+
+    The fallback is the CALLER'S OWN ID, deliberately, and not a shared constant.
+    This runner used to derive the prefix from `user_id` internally; removing
+    that coupling is the point of the change, but the safe default when a
+    deployment says nothing is still one namespace per caller. A shared literal
+    here would recreate the `anonymous/` bug in a new spelling — every caller of
+    an identity-bearing deployment writing into one namespace, each able to read
+    the others' outputs, and looking like a working request throughout.
+
+    A single-tenant deployment therefore gets `single-tenant/…` by configuration
+    rather than by accident, and a multi-tenant one that forgets to send a scope
+    still isolates its callers.
+    """
+    return requested or _get_user_id(request)
 
 
 def _completion_signature(pipeline_run_id: str) -> str:
@@ -295,12 +335,24 @@ class ApiRunner(PipelexMTHDSProtocol):
             dynamic_output_concept_ref=dynamic_output_concept_ref,
             pipe_run_mode=self.pipe_run_mode,
             user_id=self.user_id,
+            storage_scope=self.storage_scope,
             pipeline_run_id=pipeline_run_id,
             request_id=request_id,
         )
 
         delivery_assignment = DeliveryAssignment(
-            storage=StorageTarget(key_prefix="results"),
+            # NO `key_prefix` — the runtime owns the `results/` leaf.
+            #
+            # This used to say `key_prefix="results"`, from the layout where the
+            # executor built `{user_id}/{key_prefix}{pipeline_run_id}` and the
+            # caller supplied the leaf. It now builds
+            # `{storage_scope}/{key_prefix}results`, so passing it here wrote
+            # every run's output to `<scope>/results/results/` — valid, stable,
+            # and wrong, with nothing failing to say so.
+            #
+            # `key_prefix` remains the caller's slot for an EXTRA level between
+            # the scope and the leaf; it is not where the leaf itself comes from.
+            storage=StorageTarget(),
             # The completion payload's wire fields (`pipeline_run_id`/`state`,
             # plus the transitional `status` alias) are written per delivery by
             # pipelex's DeliveryExecutor — they are reserved keys on
@@ -424,13 +476,18 @@ def _decode_body(body: bytes) -> dict[str, Any]:
 
 
 def _validate_extras(request_data: dict[str, Any]) -> PipelineApiExtras:
-    """Validate API-server-only fields (pipeline_run_id, callback_urls, orchestration_mode)."""
+    """Validate API-server-only fields (pipeline_run_id, callback_urls, orchestration_mode, storage_scope)."""
     try:
         return PipelineApiExtras.model_validate(
             {
                 "pipeline_run_id": request_data.get("pipeline_run_id"),
                 "callback_urls": request_data.get("callback_urls"),
                 "orchestration_mode": request_data.get("orchestration_mode"),
+                # This is an ALLOWLIST, not a passthrough — a key missing here is
+                # dropped SILENTLY, and for `storage_scope` that is worse than an
+                # error: the run falls back to the caller's own id and writes to
+                # the wrong prefix while reporting success.
+                "storage_scope": request_data.get("storage_scope"),
             }
         )
     except ValidationError as exc:
@@ -593,7 +650,11 @@ async def execute(request: Request) -> JSONResponse:
     """
     run_request, extras = await _parse_request(request)
     with _bundle_run_source(run_request) as (mthds_contents, library_dirs):
-        runner = ApiRunner(user_id=_get_user_id(request), library_dirs=library_dirs)
+        runner = ApiRunner(
+            user_id=_get_user_id(request),
+            storage_scope=_resolve_storage_scope(request, requested=extras.storage_scope),
+            library_dirs=library_dirs,
+        )
         response = await runner.execute(
             pipe_code=run_request.pipe_code,
             mthds_contents=mthds_contents,
@@ -668,7 +729,11 @@ async def start(
     # (crate carrying the captured `python_sources`) before it enqueues, so the temp dir is no
     # longer needed once `start` returns — cleanup on context exit is safe for the async path.
     with _bundle_run_source(run_request) as (mthds_contents, library_dirs):
-        runner = ApiRunner(user_id=_get_user_id(request), library_dirs=library_dirs)
+        runner = ApiRunner(
+            user_id=_get_user_id(request),
+            storage_scope=_resolve_storage_scope(request, requested=extras.storage_scope),
+            library_dirs=library_dirs,
+        )
         return await runner.start(
             pipe_code=run_request.pipe_code,
             mthds_contents=mthds_contents,

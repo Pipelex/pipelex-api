@@ -3,8 +3,6 @@ from fastapi import APIRouter
 from api.openapi_responses import COMMON_PROBLEM_RESPONSES
 
 from .pipelex import router as pipelex_router
-from .storage import router as storage_router
-from .uploader import router as uploader_router
 
 # NOTE: the version router is NOT composed here — `GET /version` is always
 # public (protocol handshake), so `api.main` mounts it under `/v1` directly,
@@ -23,5 +21,3 @@ from .uploader import router as uploader_router
 router = APIRouter(responses=COMMON_PROBLEM_RESPONSES)
 
 router.include_router(pipelex_router)
-router.include_router(uploader_router)
-router.include_router(storage_router)

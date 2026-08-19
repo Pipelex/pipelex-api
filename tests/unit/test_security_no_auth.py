@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 
 from api.exception_handlers import register_exception_handlers
-from api.security import ForwardedIdentityHeader, RequestUser, get_request_user, no_auth
+from api.security import SINGLE_TENANT_USER_ID, ForwardedIdentityHeader, RequestUser, get_request_user, no_auth
 from tests.unit._constants import RoutePath
 
 USER_ID = "11111111-1111-4111-1111-111111111111"
@@ -58,15 +58,42 @@ class TestNoAuthForwardedHeaders:
         assert response.status_code == 200
         assert response.json() == {"user_id": USER_ID}
 
-    @pytest.mark.parametrize("user_id", ["", "anonymous"])
-    def test_missing_or_anonymous_user_id_stays_anonymous(self, mocker: MockerFixture, user_id: str):
-        """No `X-User-Id`, or the literal "anonymous" sentinel, means no user."""
+    @pytest.mark.parametrize("user_id", ["", None])
+    def test_a_missing_forwarded_user_id_is_rejected(self, mocker: MockerFixture, user_id: str | None):
+        """**This used to stay anonymous, and that was the bug.**
+
+        Turning `TRUST_FORWARDED_IDENTITY_HEADERS` on is a deployment asserting
+        "a proxy in front of me authenticates every caller". A request arriving
+        without the header therefore means that proxy is absent, misconfigured
+        or bypassed — and the old behaviour was to continue under a shared
+        owner, which put every caller of a multi-tenant server into one storage
+        namespace where each could read the others' outputs. It looked like a
+        working request the whole way through.
+
+        There is no `anonymous` sentinel any more: an empty header and an absent
+        one are the same failure, and both are 401.
+        """
         mocker.patch("api.security.get_optional_env", return_value="true")
         client = _build_client()
-        headers: dict[str, str] = {ForwardedIdentityHeader.USER_ID: user_id} if user_id else {}
+        headers: dict[str, str] = {} if user_id is None else {ForwardedIdentityHeader.USER_ID: user_id}
+        response = client.get(RoutePath.WHOAMI, headers=headers)
+        assert response.status_code == 401
+        assert response.headers["content-type"] == "application/problem+json"
+
+    def test_the_reserved_single_tenant_id_is_not_special_on_the_wire(self, mocker: MockerFixture):
+        """`single-tenant` forwarded by a proxy is an ordinary path-safe id here.
+
+        The reservation is enforced where it matters — `verify_jwt` refuses a
+        token claiming it — not by giving the string a second meaning on the
+        forwarded path. A proxy that genuinely wants to forward it is asserting
+        an identity, which is what this flag means.
+        """
+        mocker.patch("api.security.get_optional_env", return_value="true")
+        client = _build_client()
+        headers: dict[str, str] = {ForwardedIdentityHeader.USER_ID: SINGLE_TENANT_USER_ID}
         response = client.get(RoutePath.WHOAMI, headers=headers)
         assert response.status_code == 200
-        assert response.json() == {"user_id": None}
+        assert response.json() == {"user_id": SINGLE_TENANT_USER_ID}
 
     @pytest.mark.parametrize(
         "unsafe_user_id",
@@ -89,8 +116,8 @@ class TestNoAuthForwardedHeaders:
         containing `/`, `\`, control chars, or being `.`/`..` could enable
         traversal. The proxy intended to authenticate someone but forwarded a
         malformed value — we reject the request (400) rather than silently
-        downgrade to anonymous and scope the caller's outputs into the shared
-        anonymous namespace.
+        downgrade to a shared owner and scope the caller's outputs into someone
+        else's namespace.
         """
         mocker.patch("api.security.get_optional_env", return_value="true")
         client = _build_client()

@@ -527,7 +527,7 @@ The system will:
 
 ### 2.7: File / Document Input
 
-For pipes whose inputs declare `Document`, `Image`, or `PDF` (any URL-bearing native concept), provide a `url` inside `content`. The URL can be public HTTP(S), a `pipelex-storage://` URI (returned by `/v1/upload`), or a base64 data URL.
+For pipes whose inputs declare `Document`, `Image`, or `PDF` (any URL-bearing native concept), provide a `url` inside `content`. The URL can be public HTTP(S), a `pipelex-storage://` URI, or a base64 data URL.
 
 ```json
 {

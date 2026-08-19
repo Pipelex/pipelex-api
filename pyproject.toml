@@ -16,7 +16,7 @@ classifiers = [
 ]
 
 dependencies = [
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.46.4",
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.47.0",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",
@@ -76,6 +76,7 @@ packages = ["api"]
 
 [tool.uv]
 required-version = ">=0.7.2"
+
 
 [tool.mypy]
 check_untyped_defs = true

@@ -6,9 +6,8 @@ info:
   description: 'This server implements the [MTHDS Protocol](https://mthds.ai) v0.6.0 (`POST /execute`, `POST /start`, `POST
     /validate`, `GET /models`, `GET /version` — marked `x-mthds-protocol: true`) plus the Pipelex API extensions: resolve
     and codegen (`/resolve`, `/codegen`), build tooling (`/build/*`), and editor tooling (`/lint`, `/format`). Contract layering:
-    MTHDS Protocol ⊂ Pipelex API (this server) ⊂ Pipelex hosted API. Routes not in the published contract (`/upload`, `/resolve-storage-url`)
-    are documented as non-contract in their descriptions. All endpoints are served under the `/v1` base path; every error
-    is an RFC 7807 `application/problem+json` problem document, documented per operation as a `ProblemDocument`.'
+    MTHDS Protocol ⊂ Pipelex API (this server) ⊂ Pipelex hosted API. All endpoints are served under the `/v1` base path; every
+    error is an RFC 7807 `application/problem+json` problem document, documented per operation as a `ProblemDocument`.'
   license:
     name: MIT
     identifier: MIT
@@ -452,6 +451,16 @@ paths:
                     axis (blocking vs fire-and-forget) is endpoint-set, never requestable. Honored ONLY when the deployment
                     sets `allow_request_orchestration_mode_override = true` in its `api.toml`; otherwise a token that differs
                     from the deployment default is refused with a 403. Omit it to use the deployment default.'
+                storage_scope:
+                  anyOf:
+                  - type: string
+                  - type: 'null'
+                  title: Storage Scope
+                  description: PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the host-supplied prefix every object
+                    this run writes lands under. One to three path-safe segments (e.g. `tenant/run` or `org/method/run`);
+                    the runtime composes its own leaves (`assets/`, `generated/`, `results/`, `payloads/`) onto it and never
+                    interprets the value. Omit it and the run is scoped to the caller's own id, which is correct for a single-tenant
+                    deployment and wrong for a multi-tenant one — a host serving many tenants MUST send this.
               additionalProperties: true
               type: object
               title: PipelexApiExecuteRequest
@@ -675,6 +684,16 @@ paths:
                     axis (blocking vs fire-and-forget) is endpoint-set, never requestable. Honored ONLY when the deployment
                     sets `allow_request_orchestration_mode_override = true` in its `api.toml`; otherwise a token that differs
                     from the deployment default is refused with a 403. Omit it to use the deployment default.'
+                storage_scope:
+                  anyOf:
+                  - type: string
+                  - type: 'null'
+                  title: Storage Scope
+                  description: PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the host-supplied prefix every object
+                    this run writes lands under. One to three path-safe segments (e.g. `tenant/run` or `org/method/run`);
+                    the runtime composes its own leaves (`assets/`, `generated/`, `results/`, `payloads/`) onto it and never
+                    interprets the value. Omit it and the run is scoped to the caller's own id, which is correct for a single-tenant
+                    deployment and wrong for a multi-tenant one — a host serving many tenants MUST send this.
               additionalProperties: true
               type: object
               title: PipelexApiStartRequest
@@ -1294,131 +1313,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BuildPipeSpecResponse'
-        '401':
-          description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
-            or `AUTH_MODE=jwt`).
-          headers:
-            WWW-Authenticate:
-              description: Authentication challenge — always `Bearer`.
-              schema:
-                type: string
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDocument'
-        '413':
-          description: Request body exceeds the deployment's size limit (`MAX_REQUEST_BODY_MIB`, 100 MiB by default).
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDocument'
-        '422':
-          description: 'The request could not be processed: a malformed body, a field failing validation, or an `input`-domain
-            pipelex error (a `.mthds` bundle the caller must fix). Note that on the diagnostic routes an *invalid bundle*
-            is a **200** verdict, not a 422 — see each route''s response contract.'
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDocument'
-        '500':
-          description: A `config`-domain or `runtime`-domain failure the caller cannot fix (a missing env var, a bad TOML
-            override, a backend fault), or an unclassified error sanitized by the catch-all handler. Report the `request_id`.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDocument'
-  /v1/upload:
-    post:
-      tags:
-      - uploader
-      summary: Upload File
-      description: 'Upload a file to pipelex storage, scoped by user.
-
-
-        NON-CONTRACT: this route is NOT part of the published Pipelex API contract
-
-        (neither the MTHDS Protocol nor the build extensions). It is a deployment
-
-        convenience slated for replacement by the storage redesign — do not build
-
-        new integrations on it.
-
-
-        Accepts base64-encoded file data, stores it via the configured storage provider,
-
-        and returns the pipelex-storage:// URI that pipelex resolves at runtime.'
-      operationId: upload_file_v1_upload_post
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UploadRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UploadResponse'
-        '401':
-          description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
-            or `AUTH_MODE=jwt`).
-          headers:
-            WWW-Authenticate:
-              description: Authentication challenge — always `Bearer`.
-              schema:
-                type: string
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDocument'
-        '413':
-          description: Request body exceeds the deployment's size limit (`MAX_REQUEST_BODY_MIB`, 100 MiB by default).
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDocument'
-        '422':
-          description: 'The request could not be processed: a malformed body, a field failing validation, or an `input`-domain
-            pipelex error (a `.mthds` bundle the caller must fix). Note that on the diagnostic routes an *invalid bundle*
-            is a **200** verdict, not a 422 — see each route''s response contract.'
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDocument'
-        '500':
-          description: A `config`-domain or `runtime`-domain failure the caller cannot fix (a missing env var, a bad TOML
-            override, a backend fault), or an unclassified error sanitized by the catch-all handler. Report the `request_id`.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDocument'
-  /v1/resolve-storage-url:
-    post:
-      tags:
-      - storage
-      summary: Resolve Storage Url
-      description: "Resolve a pipelex-storage:// URI to a short-lived presigned URL.\n\nNON-CONTRACT: this route is NOT part\
-        \ of the published Pipelex API contract\n(neither the MTHDS Protocol nor the build extensions). It is a deployment\n\
-        convenience slated for replacement by the storage redesign — do not build\nnew integrations on it.\n\nSecurity:\n\
-        \  1. Requires authenticated user (user_id != \"anonymous\").\n  2. URI format is validated to block path traversal\
-        \ and malformed segments.\n  3. The URI's first path segment must equal the requester's user_id (ownership check).\n\
-        \  4. Fails loud if the storage provider falls back to a non-presigned URL."
-      operationId: resolve_storage_url_v1_resolve_storage_url_post
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ResolveStorageUrlRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ResolveStorageUrlResponse'
         '401':
           description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
             or `AUTH_MODE=jwt`).
@@ -4664,40 +4558,6 @@ components:
       - new_key
       title: RenameTableKeyOp
       description: Rename ``key`` to ``new_key`` in place within the addressed table, keeping its position.
-    ResolveStorageUrlRequest:
-      properties:
-        uri:
-          type: string
-          maxLength: 512
-          title: Uri
-          description: pipelex-storage:// URI to resolve
-      additionalProperties: false
-      type: object
-      required:
-      - uri
-      title: ResolveStorageUrlRequest
-    ResolveStorageUrlResponse:
-      properties:
-        url:
-          type: string
-          title: Url
-          description: Short-lived presigned URL, fetchable directly by the browser
-        expires_at:
-          type: string
-          format: date-time
-          title: Expires At
-          description: UTC expiry timestamp of the presigned URL
-        content_type:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Content Type
-          description: Content type guessed from the URI extension
-      type: object
-      required:
-      - url
-      - expires_at
-      title: ResolveStorageUrlResponse
     ResolveValidReport:
       properties:
         is_valid:
@@ -5164,46 +5024,6 @@ components:
         ``nb_tokens_by_category`` keys) are open sets on the wire, typed as plain strings —
 
         runtime enum churn is non-breaking for clients.'
-    UploadRequest:
-      properties:
-        filename:
-          type: string
-          maxLength: 512
-          title: Filename
-          description: Original filename with extension (e.g. 'resume.pdf')
-        data:
-          type: string
-          maxLength: 69905071
-          title: Data
-          description: File content as base64-encoded string (max 50 MiB decoded)
-        content_type:
-          anyOf:
-          - type: string
-            maxLength: 255
-          - type: 'null'
-          title: Content Type
-          description: MIME type (e.g. 'application/pdf')
-      additionalProperties: false
-      type: object
-      required:
-      - filename
-      - data
-      title: UploadRequest
-    UploadResponse:
-      properties:
-        uri:
-          type: string
-          title: Uri
-          description: pipelex-storage:// URI for the uploaded file
-        filename:
-          type: string
-          title: Filename
-          description: Original filename
-      type: object
-      required:
-      - uri
-      - filename
-      title: UploadResponse
     UserAction:
       properties:
         kind:
