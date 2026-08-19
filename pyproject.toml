@@ -77,6 +77,15 @@ packages = ["api"]
 [tool.uv]
 required-version = ">=0.7.2"
 
+# ⚠ LOCAL-ONLY PIN — STRIP BEFORE RELEASING.
+# `storage_scope`, the `generated/` leaf and the filename-only `uri_format` are
+# not on PyPI yet, so 0.46.4 from the index does not have them and this server
+# cannot build against it. Points at the exact commit on pipelex's
+# `feature/storage-scope` until that work is released; the version specifier
+# above still reads `==0.46.4` and agrees with the commit's own version.
+[tool.uv.sources]
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "454f2e877469462b6a1c29b7797c671af5cc4c02" }
+
 [tool.mypy]
 check_untyped_defs = true
 exclude = "^.*\\.venv/.*$"

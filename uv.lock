@@ -2312,7 +2312,7 @@ wheels = [
 [[package]]
 name = "pipelex"
 version = "0.46.4"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/Pipelex/pipelex.git?rev=454f2e877469462b6a1c29b7797c671af5cc4c02#454f2e877469462b6a1c29b7797c671af5cc4c02" }
 dependencies = [
     { name = "aiofiles" },
     { name = "annotated-types" },
@@ -2352,10 +2352,6 @@ dependencies = [
     { name = "typer" },
     { name = "typing-extensions" },
     { name = "urllib3" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/b2/5f/3747963f8e1c5a2c2f0c4b452962df1ef5da3e2e4feee32bf3f7e6916637/pipelex-0.46.4.tar.gz", hash = "sha256:6ed3e41c41335757ecd55980473ba83c5c807405b29ee5e43fe8d3ebadf5611e", size = 1415544, upload-time = "2026-08-18T18:35:54.415Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/29/21/48790f2874a8155e9b4e3fc60d8f7daa05c088f4d21872f8a6e4368c781a/pipelex-0.46.4-py3-none-any.whl", hash = "sha256:b5d9914938cff19d8d0a5bb958537bc7f103cf965afc5897adc13b93b41fab3f", size = 1950918, upload-time = "2026-08-18T18:35:52.717Z" },
 ]
 
 [package.optional-dependencies]
@@ -2436,7 +2432,7 @@ requires-dist = [
     { name = "mkdocs-meta-manager", marker = "extra == 'docs'", specifier = "==1.1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.2" },
     { name = "pandas-stubs", marker = "extra == 'dev'", specifier = ">=2.2.3.241126" },
-    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal"], specifier = "==0.46.4" },
+    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal"], git = "https://github.com/Pipelex/pipelex.git?rev=454f2e877469462b6a1c29b7797c671af5cc4c02" },
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.3.8" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.405" },

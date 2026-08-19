@@ -14,6 +14,8 @@
 
 ### Fixed
 
+- **`uri_format` in the shipped `.pipelex/pipelex.toml` renders the filename only.** The placeholder set narrowed again: the storage prefix (`{storage_scope}` plus the `generated/` leaf) is composed in code so a config cannot omit it, leaving `{hash}` and `{extension}`. A config still naming `{storage_scope}` is refused at boot.
+
 - **Every run's output was written to `<scope>/results/results/`.** The delivery target was built as `StorageTarget(key_prefix="results")`, from the layout where the executor composed `{user_id}/{key_prefix}{pipeline_run_id}` and the caller supplied the leaf. It now composes `{storage_scope}/{key_prefix}results` — the runtime owns the `results/` leaf — so passing it here applied it twice. Nothing failed: the write succeeded, the run reported COMPLETED, and only a later reader of `<scope>/results/` found an empty prefix, which is exactly where the hosted platform's run reconciler looks. `key_prefix` remains the caller's slot for an extra level between the scope and the leaf; it is not where the leaf comes from.
 
 - **`uri_format` in the shipped `.pipelex/pipelex.toml` still used the removed `{primary_id}` / `{secondary_id}` placeholders.** The supported set is now `{extension}`, `{hash}`, `{storage_scope}`, so config validation raised `StorageConfigError` at fixture setup and **every** test in the suite errored — a total red that looked like a code failure and was purely stale config. Migrated to `{storage_scope}/{hash}.{extension}`, matching the kit default in `pipelex`.
