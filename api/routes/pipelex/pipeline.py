@@ -465,13 +465,18 @@ def _decode_body(body: bytes) -> dict[str, Any]:
 
 
 def _validate_extras(request_data: dict[str, Any]) -> PipelineApiExtras:
-    """Validate API-server-only fields (pipeline_run_id, callback_urls, orchestration_mode)."""
+    """Validate API-server-only fields (pipeline_run_id, callback_urls, orchestration_mode, storage_scope)."""
     try:
         return PipelineApiExtras.model_validate(
             {
                 "pipeline_run_id": request_data.get("pipeline_run_id"),
                 "callback_urls": request_data.get("callback_urls"),
                 "orchestration_mode": request_data.get("orchestration_mode"),
+                # This is an ALLOWLIST, not a passthrough — a key missing here is
+                # dropped SILENTLY, and for `storage_scope` that is worse than an
+                # error: the run falls back to the caller's own id and writes to
+                # the wrong prefix while reporting success.
+                "storage_scope": request_data.get("storage_scope"),
             }
         )
     except ValidationError as exc:

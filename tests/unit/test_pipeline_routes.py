@@ -4,7 +4,7 @@ The actual pipeline runner is mocked: we only assert that the API layer
 parses, validates, dispatches, and shapes responses correctly.
 """
 
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi import FastAPI
@@ -17,9 +17,11 @@ from pipelex.pipeline.pipeline_response import PipelexRunResultStart, RunState
 from pipelex.system.job_metadata import JobMetadata
 from pytest_mock import MockerFixture
 
+import api.routes.pipelex.pipeline as pipeline_module
 from api.exception_handlers import register_exception_handlers
 from api.middleware import REQUEST_ID_HEADER, RequestIdMiddleware
 from api.routes.pipelex.pipeline import router as pipeline_router
+from api.security import SINGLE_TENANT_USER_ID
 from tests.unit._constants import VALID_MTHDS
 
 
@@ -393,4 +395,52 @@ class TestPipelineRoutes:
         assert response.status_code == 422
         assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "InvalidCallbackUrls"
+        start_mock.assert_not_awaited()
+
+
+class TestStorageScopeReachesTheRun:
+    """`storage_scope` must survive the wire -> extras -> runner hop.
+
+    Every failure on this path is SILENT by construction, which is why the
+    constructor kwarg is asserted rather than just the status code.
+    `_validate_extras` is a key ALLOWLIST, so a field missing from it is dropped
+    with no error; the run then falls back to the caller's own id, writes under
+    the wrong prefix, and still answers 202. On the hosted platform that is
+    exactly the org-scoped storage bug — one tenant's output under another
+    tenant's key — reported as success.
+    """
+
+    def test_body_storage_scope_reaches_the_runner(self, mocker: MockerFixture):
+        client, _, start_mock = _build_client(mocker)
+        response = client.post(
+            "/v1/start",
+            json={"pipe_code": "echo", "storage_scope": "org_a/mt_b/run_c"},
+        )
+        assert response.status_code == 202
+        start_mock.assert_awaited_once()
+        runner_cls = cast("Any", pipeline_module.ApiRunner)
+        assert runner_cls.call_args.kwargs["storage_scope"] == "org_a/mt_b/run_c"
+
+    def test_absent_scope_falls_back_to_the_caller_not_a_shared_literal(self, mocker: MockerFixture):
+        # The fallback must be per-caller. A shared constant would pool every
+        # caller of an identity-bearing deployment into one namespace — the
+        # `anonymous/` collision in a new spelling.
+        client, _, _ = _build_client(mocker)
+        response = client.post("/v1/start", json={"pipe_code": "echo"})
+        assert response.status_code == 202
+        runner_cls = cast("Any", pipeline_module.ApiRunner)
+        kwargs = runner_cls.call_args.kwargs
+        assert kwargs["storage_scope"] == kwargs["user_id"] == SINGLE_TENANT_USER_ID
+
+    @pytest.mark.parametrize(
+        "bad_scope",
+        ["../etc/passwd", "/absolute", "org//empty", "org/../escape", "", "a/b/c/d"],
+    )
+    def test_traversal_and_overlong_scopes_are_refused_at_the_wire(self, mocker: MockerFixture, bad_scope: str):
+        # A 422 naming the field, not a 500 from deep inside the run: the value
+        # becomes a storage key prefix, so a traversal in it escapes the tenant.
+        client, _, start_mock = _build_client(mocker)
+        response = client.post("/v1/start", json={"pipe_code": "echo", "storage_scope": bad_scope})
+        assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
         start_mock.assert_not_awaited()

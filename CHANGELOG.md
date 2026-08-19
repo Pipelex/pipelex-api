@@ -8,6 +8,8 @@
 
   It arrives in the **body**, not a header, because it is data rather than identity: the runner needs to know where to write, not who to trust. A multi-tenant host computes it where it knows its own tenancy (hosted Pipelex sends `<org_id>/<method_id>/<run_id>`) and this server treats it as an opaque prefix, composing its own leaves (`assets/`, `results/`, `payloads/`) onto it. Validated at the wire by `validate_storage_scope`, so a traversal is a `422` naming the field rather than a `500` from deep inside the run — the runtime seam validates too, so this is a second gate, not the only one.
 
+  `_validate_extras` is a key ALLOWLIST rather than a passthrough, so the field had to be added there too — a key missing from it is dropped with no error, and the run would have written under the fallback prefix while answering `202`. Covered by tests that assert the constructor kwarg, not just the status code.
+
   **Omitted, a run is scoped to the caller's own id** — never a shared constant. That is the safe default for a single-tenant deployment, and it keeps a multi-tenant deployment that forgets to send a scope isolating its callers instead of pooling them. A shared literal here would be the `anonymous/` bug in a new spelling.
 
 ### Fixed
