@@ -114,7 +114,7 @@ class TestErrorResponses:
         client = _build_client(user=RequestUser(user_id=USER_A))
         response = client.post(
             "/v1/execute",
-            json={"mthds_contents": ["domain = \"smoke\""], "pipe_code": "smoke", "orchestration_mode": "definitely-not-the-default"},
+            json={"mthds_contents": ['domain = "smoke"'], "pipe_code": "smoke", "orchestration_mode": "definitely-not-the-default"},
         )
         assert response.status_code == 403
         assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
@@ -195,7 +195,7 @@ class TestErrorResponses:
 
     def test_unauthenticated_carries_www_authenticate_challenge(self):
         # No Authorization header on an auth-wrapped route → 401 + challenge.
-        response = _build_client(user=None, with_auth=True).post("/v1/validate", json={"mthds_contents": ["domain = \"smoke\""]})
+        response = _build_client(user=None, with_auth=True).post("/v1/validate", json={"mthds_contents": ['domain = "smoke"']})
         assert response.status_code == 401
         assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
         assert response.headers["WWW-Authenticate"] == "Bearer"
