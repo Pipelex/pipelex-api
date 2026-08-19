@@ -40,6 +40,7 @@ from api.openapi_responses import (
 )
 from api.routes.pipelex.utils import get_current_iso_timestamp
 from api.schemas.models import PipelexApiExecuteRequest, PipelexApiExecuteResponse, PipelexApiStartRequest, PipelineApiExtras, RunRequest
+from api.security import SINGLE_TENANT_USER_ID
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -61,9 +62,25 @@ router = APIRouter(tags=["run"])
 
 
 def _get_user_id(request: Request) -> str:
-    """Extract the user UUID from request state (set during auth)."""
+    """The caller this run is attributed to, and the owner its storage is keyed by.
+
+    **There is no `anonymous` fallback any more, and its removal is the point.**
+    This used to return the literal `"anonymous"` whenever `request.state.user`
+    was unset, which is reached on every auth path that establishes no
+    per-caller identity. That string then became the first segment of every
+    storage key the run wrote, so a deployment serving many callers put all of
+    them in one namespace where each could read the others' outputs — and it
+    looked like a working request the whole way through.
+
+    An identity-bearing deployment cannot get here without a user: `verify_jwt`
+    and `verify_api_key` raise on a bad token, and `no_auth` now raises when
+    `TRUST_FORWARDED_IDENTITY_HEADERS` is on and no id was forwarded. So a
+    missing user means the deployment declared it has no user model
+    (`AUTH_MODE=none` with no trusted proxy, or the shared static key), which is
+    a single tenant by configuration rather than an unknown caller.
+    """
     user: RequestUser | None = getattr(request.state, "user", None)
-    return user.user_id if user else "anonymous"
+    return user.user_id if user else SINGLE_TENANT_USER_ID
 
 
 def _completion_signature(pipeline_run_id: str) -> str:

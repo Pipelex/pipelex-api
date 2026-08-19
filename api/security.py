@@ -43,12 +43,23 @@ def is_safe_user_id(value: str) -> bool:
     return bool(value) and value not in (".", "..") and _PATH_UNSAFE_CHARS.search(value) is None
 
 
-# Reserved owner segment for unauthenticated pipeline runs (see
-# `routes.pipelex.pipeline._get_user_id`). It is NOT a valid authenticated identity:
-# an authenticated caller — a JWT `user_id` claim or a trusted-proxy `X-User-Id`
-# header — must never be allowed to bind it, or their runs would silently collide
-# with the shared anonymous namespace.
-ANONYMOUS_USER_ID = "anonymous"
+# The caller id for a deployment that has declared it has NO user model:
+# `AUTH_MODE=none` with `TRUST_FORWARDED_IDENTITY_HEADERS` off. Such a server has
+# exactly one tenant by configuration, so one namespace is correct rather than
+# accidental.
+#
+# **This is not the `anonymous` sentinel under another name, and the difference
+# is the whole point.** `anonymous` was reached by FALLBACK — a deployment that
+# expected an identity, did not get one, and silently continued under a shared
+# owner. Every tenant of such a server wrote into the same prefix and could read
+# each other's outputs, and it looked exactly like a working request. There is
+# no fallback to this value: it is used only where the deployment has said, in
+# its own configuration, that it has no users. A deployment that expects
+# identity and lacks one now fails with 401.
+#
+# A token may never bind it (`verify_jwt` below), or an authenticated caller
+# could land in the single-tenant namespace on a server that does have users.
+SINGLE_TENANT_USER_ID = "single-tenant"
 
 
 # `auto_error=False` so a missing/empty/non-Bearer `Authorization` header
@@ -149,13 +160,17 @@ async def verify_jwt(
         if not isinstance(user_id, str) or not is_safe_user_id(user_id):
             log.warning(f"JWT user_id claim is not a path-safe segment: {user_id!r}")
             raise_unauthenticated("Invalid token: user_id claim must be a single path-safe segment", error_type=ErrorType.INVALID_TOKEN)
-        if user_id == ANONYMOUS_USER_ID:
-            # `anonymous` is path-safe but is the reserved sentinel for unauthenticated
-            # runs. An authenticated token must not claim it — that would land the
-            # caller's runs in the shared anonymous namespace while storage routes
-            # still treat them as unauthenticated. Reject rather than silently downgrade.
-            log.warning("JWT user_id claim is the reserved 'anonymous' sentinel")
-            raise_unauthenticated("Invalid token: user_id claim must not be the reserved 'anonymous' value", error_type=ErrorType.INVALID_TOKEN)
+        if user_id == SINGLE_TENANT_USER_ID:
+            # Path-safe, but reserved for the no-user-model deployment. An
+            # authenticated token must not claim it, or that caller's runs would
+            # land in the single-tenant namespace of a server that DOES have
+            # users — beside whatever a no-auth deployment of the same image
+            # wrote there.
+            log.warning("JWT user_id claim is the reserved single-tenant id")
+            raise_unauthenticated(
+                f"Invalid token: user_id claim must not be the reserved {SINGLE_TENANT_USER_ID!r} value",
+                error_type=ErrorType.INVALID_TOKEN,
+            )
         _set_request_user(request, user_id=user_id)
 
         return payload
@@ -196,7 +211,8 @@ async def verify_api_key(credentials: Annotated[HTTPAuthorizationCredentials | N
 async def no_auth(request: Request) -> None:
     """No-op auth dependency for AUTH_MODE=none.
 
-    By default, requests stay anonymous. If the API sits behind a trusted
+    With no trusted proxy configured this binds no identity, and the deployment
+    is treated as single-tenant (see `SINGLE_TENANT_USER_ID`). If the API sits behind a trusted
     reverse proxy / API gateway that authenticates callers and forwards the
     caller identifier via the `X-User-Id` header, set
     TRUST_FORWARDED_IDENTITY_HEADERS=true to read it. That single header is
@@ -212,15 +228,18 @@ async def no_auth(request: Request) -> None:
         return
 
     user_id = request.headers.get(ForwardedIdentityHeader.USER_ID)
-    if not user_id or user_id == ANONYMOUS_USER_ID:
-        # Absent header or the explicit `anonymous` sentinel both mean "the proxy
-        # is telling us this request is anonymous" — stay anonymous, don't bind.
-        return
+    if not user_id:
+        # **This used to stay anonymous, and that was the bug.** Turning this flag
+        # on is a deployment stating "a proxy in front of me authenticates every
+        # caller". A request arriving without the header therefore means the proxy
+        # is missing, misconfigured, or bypassed — and continuing under a shared
+        # owner is how a multi-tenant server silently becomes a single namespace
+        # where every tenant reads the others' outputs. It is now a hard failure.
+        log.warning("TRUST_FORWARDED_IDENTITY_HEADERS is on but no X-User-Id was forwarded")
+        raise_unauthenticated("Identity required: no X-User-Id was forwarded", error_type=ErrorType.INVALID_TOKEN)
     if not is_safe_user_id(user_id):
-        # The proxy forwarded a non-empty id that is NOT path-safe: it intended to
-        # authenticate someone but sent a malformed value. Fail closed rather than
-        # silently downgrade to anonymous (which would scope the caller's outputs
-        # into the shared anonymous namespace under a forwarded-but-broken identity).
+        # A non-empty but path-unsafe id: the proxy intended to authenticate
+        # someone and sent a malformed value. Fail closed.
         log.warning(f"Forwarded X-User-Id is not a path-safe segment, rejecting: {user_id!r}")
         raise_bad_request("Forwarded X-User-Id must be a single path-safe segment", error_type=ErrorType.BAD_REQUEST)
 

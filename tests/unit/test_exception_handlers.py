@@ -720,7 +720,7 @@ class TestExceptionHandlers:
         assert "error_type=RuntimeError" in rendered
 
     def test_user_id_absent_from_unauthenticated_error_log(self, mocker: MockerFixture):
-        # Pre-auth or anonymous-AUTH_MODE paths have no `request.state.user`;
+        # Pre-auth paths, and a deployment with no user model, have no `request.state.user`;
         # `_user_id_of` returns `None` and `emit_error_log` drops `None`-
         # valued fields, so the rendered line carries no `user_id=` token —
         # never `user_id=None`, which would be misleading noise.

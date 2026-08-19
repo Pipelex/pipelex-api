@@ -91,7 +91,7 @@ The API supports three authentication modes via the `AUTH_MODE` environment vari
 
 By default (`AUTH_MODE=none`), the API requires no authentication. This is the default for open-source deployments and for running behind an API Gateway that handles auth.
 
-If you sit this API behind a trusted reverse proxy that authenticates users and forwards the caller identity via the `X-User-Id` header, set `TRUST_FORWARDED_IDENTITY_HEADERS=true` to honor it. The runner is a generic execution engine — it does not own user metadata (email, OAuth subject, auth method), so a single opaque caller id is the entire trusted surface. The value must be a single path-safe segment (`is_safe_user_id`). **Default is off** — without this flag, the API ignores `X-User-Id` entirely and requests stay anonymous. Only enable it when your proxy strips any inbound copy of the header before adding its own; otherwise, any external client can spoof user identity by sending it directly.
+If you sit this API behind a trusted reverse proxy that authenticates users and forwards the caller identity via the `X-User-Id` header, set `TRUST_FORWARDED_IDENTITY_HEADERS=true` to honor it. The runner is a generic execution engine — it does not own user metadata (email, OAuth subject, auth method), so a single opaque caller id is the entire trusted surface. The value must be a single path-safe segment (`is_safe_user_id`). **Default is off** — without this flag the API ignores `X-User-Id` entirely and the deployment is treated as single-tenant. With it on, a request arriving *without* the header is rejected with `401`: turning the flag on asserts that a proxy authenticates every caller, so a missing id means that proxy is absent, misconfigured or bypassed. Only enable it when your proxy strips any inbound copy of the header before adding its own; otherwise, any external client can spoof user identity by sending it directly.
 
 ### API Key Authentication
 
@@ -184,7 +184,7 @@ Tools for AI agents building pipelines programmatically.
 
 ### Uploader (auth-gated, NON-CONTRACT)
 
-These endpoints exist in the server but are NOT part of the published Pipelex API contract — they are deployment conveniences slated for replacement by the storage redesign. They require an authenticated **user identity** and reject anonymous requests with 401; `AUTH_MODE=api_key` does not establish one (the key is shared, not per-caller), so use `AUTH_MODE=jwt`, or a trusted proxy forwarding `X-User-Id` with `TRUST_FORWARDED_IDENTITY_HEADERS=true`.
+These endpoints exist in the server but are NOT part of the published Pipelex API contract — they are deployment conveniences slated for replacement by the storage redesign. They require an authenticated **user identity** and reject unidentified requests with 401; `AUTH_MODE=api_key` does not establish one (the key is shared, not per-caller), so use `AUTH_MODE=jwt`, or a trusted proxy forwarding `X-User-Id` with `TRUST_FORWARDED_IDENTITY_HEADERS=true`.
 
 `POST /v1/upload` and `POST /v1/resolve-storage-url` have been **removed** ([Storage Transport](storage-transport.md)). The storage provider itself is untouched — only the two HTTP routes are gone.
 

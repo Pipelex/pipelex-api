@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking: the `anonymous` caller no longer exists.** `ANONYMOUS_USER_ID` is gone, along with every branch that produced or tolerated it. It was reached by *fallback*: `_get_user_id` returned the literal `"anonymous"` whenever no identity had been established, and that string became the first path segment of every storage key the run wrote. A deployment serving many callers therefore put all of them in one namespace where each could read the others' outputs — and it looked like a working request the whole way through. A silent multi-tenant collision is the worst possible failure for a fallback to produce.
+
+  Two changes replace it.
+
+  **`TRUST_FORWARDED_IDENTITY_HEADERS=true` now rejects a request with no forwarded id (`401`).** Turning that flag on is a deployment asserting *"a proxy in front of me authenticates every caller"*. A request arriving without the header means that proxy is absent, misconfigured or bypassed, and continuing under a shared owner is exactly the degradation this removes. Previously both an absent header and the literal `anonymous` were read as "the proxy says this one is anonymous" and let through. **This is the hosted configuration**, so on a hosted deployment an unidentified request is now impossible rather than merely unlikely.
+
+  **A deployment that declares no user model gets a named single tenant, not an unknown caller.** `AUTH_MODE=none` without a trusted proxy, or the shared static `api_key`, establishes no per-caller identity *by configuration* — that is one tenant, and `SINGLE_TENANT_USER_ID` names it. This is not the old sentinel renamed: nothing falls back to it, it is used only where the deployment has said it has no users, and `verify_jwt` refuses a token claiming it (so an authenticated caller on a server that *does* have users cannot land in that namespace).
+
 ### Removed
 
 - **`POST /v1/upload` and `POST /v1/resolve-storage-url` are gone (Breaking).** Both were explicitly non-contract — neither the MTHDS Protocol nor the Pipelex API extensions ever included them, and both carried a "slated for replacement by the storage redesign, do not build new integrations on it" notice in their descriptions. That redesign has landed, and the routes moved to the hosted platform.
