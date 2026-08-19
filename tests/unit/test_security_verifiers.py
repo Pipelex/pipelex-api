@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 
 from api.exception_handlers import register_exception_handlers
-from api.security import RequestUser, get_request_user, verify_api_key, verify_jwt
+from api.security import SINGLE_TENANT_USER_ID, RequestUser, get_request_user, verify_api_key, verify_jwt
 from tests.unit._constants import RoutePath
 
 JWT_SECRET = "test-jwt-secret-do-not-use-in-prod"
@@ -132,17 +132,21 @@ class TestSecurityVerifiers:
         assert response.status_code == 200
         assert response.json() == {"user_id": opaque_user_id}
 
-    def test_jwt_anonymous_user_id_rejected(self, mocker: MockerFixture):
-        """A JWT claiming the reserved `anonymous` sentinel is rejected.
+    def test_jwt_claiming_the_reserved_single_tenant_id_is_rejected(self, mocker: MockerFixture):
+        """A JWT claiming the reserved single-tenant id is rejected.
 
-        `anonymous` is path-safe, so it passes the segment check, but it is the
-        reserved owner id for unauthenticated runs. An authenticated token must
-        not bind it — that would land the caller's runs in the shared anonymous
-        namespace while storage routes still treat them as unauthenticated.
+        The value is path-safe, so it passes the segment check — but it is the
+        owner id a deployment with NO user model runs under. An authenticated
+        token binding it would land that caller's runs in the single-tenant
+        namespace, beside whatever a no-auth deployment of the same image wrote
+        there.
+
+        (This case previously guarded the `anonymous` sentinel, which no longer
+        exists: identity is required wherever a deployment claims to have one.)
         """
         mocker.patch("api.security.get_optional_env", return_value=JWT_SECRET)
         client = _build_jwt_client()
-        token = jwt.encode({"user_id": "anonymous"}, JWT_SECRET, algorithm="HS256")
+        token = jwt.encode({"user_id": SINGLE_TENANT_USER_ID}, JWT_SECRET, algorithm="HS256")
         response = client.get(RoutePath.WHOAMI, headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 401
         assert response.headers["content-type"] == "application/problem+json"

@@ -6,13 +6,18 @@ handlers, `RequestIdMiddleware`, the body-size middleware) and asserts that
 RFC 7807 fields and an `X-Request-ID` header — never the old
 `{"detail": {...}}` envelope, and never FastAPI's default `{"detail": [...]}`
 for automatic request validation. Covers regression checks T1 (413), T2
-(storage 403) and T5 (`X-Request-ID` on every error response).
+(a route-level 403) and T5 (`X-Request-ID` on every error response).
+
+The 400/403/401 vehicles used to be the storage and upload routes. Those moved
+to the hosted platform, so each assertion now rides a different route that
+raises through the same helper — the envelope is what is under test, never the
+route that produced it.
 """
 
 from collections.abc import Iterator
 from importlib.metadata import PackageNotFoundError
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
@@ -23,25 +28,33 @@ from api.middleware import REQUEST_ID_HEADER, RequestIdMiddleware, request_body_
 from api.problem_document import PROBLEM_JSON_MEDIA_TYPE
 from api.routes import router as api_router
 from api.routes.version import router as version_router
-from api.security import RequestUser, get_request_user
+from api.security import RequestUser, get_request_user, verify_api_key
 
 USER_A = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"
 USER_B = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"
 FILE_HASH = "cccccccc-cccc-4ccc-cccc-cccccccccccc"
 
 
-def _build_client(*, user: RequestUser | None = None) -> TestClient:
+def _build_client(*, user: RequestUser | None = None, with_auth: bool = False) -> TestClient:
     """Wire a production-faithful app: real routers, handlers, both middlewares.
 
     `RequestIdMiddleware` wraps the whole app exactly as in `api.main`, so the
     request-id contextvars are bound and `X-Request-ID` is stamped on every
-    response. `get_request_user` is overridden so storage routes see the
-    caller identity the test wants.
+    response. `get_request_user` is overridden so routes see the caller
+    identity the test wants.
+
+    `with_auth` mounts the composite router behind the SAME `auth_dependency`
+    `api.main` uses, which is the only way to reach a real 401 — every
+    `raise_unauthenticated` lives in the verifiers that dependency runs, not in
+    a route body.
     """
     app = FastAPI(redirect_slashes=False)
     app.add_middleware(BaseHTTPMiddleware, dispatch=request_body_size_middleware)
     app.include_router(version_router, prefix="/v1")
-    app.include_router(api_router, prefix="/v1")
+    if with_auth:
+        app.include_router(api_router, prefix="/v1", dependencies=[Depends(verify_api_key)])
+    else:
+        app.include_router(api_router, prefix="/v1")
     register_exception_handlers(app)
 
     async def _override_user() -> RequestUser | None:
@@ -84,26 +97,29 @@ class TestErrorResponses:
         assert body["retryable"] is False
 
     def test_bad_request_is_rfc7807(self):
-        # A malformed storage URI → raise_bad_request → 400.
+        # A `bundle_b64` that is not valid base64 → raise_bad_request → 400.
         client = _build_client(user=RequestUser(user_id=USER_A))
-        response = client.post("/v1/resolve-storage-url", json={"uri": f"pipelex-storage://{USER_A}/../secret.pdf"})
+        response = client.post("/v1/execute", json={"bundle_b64": "not!base64", "pipe_code": "smoke"})
         assert response.status_code == 400
         assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
         body = response.json()
-        assert body["error_type"] == "InvalidUri"
+        assert body["error_type"] == "InvalidBase64"
         assert body["error_domain"] == "input"
         assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
         assert body["retryable"] is False
 
-    def test_storage_ownership_mismatch_is_rfc7807(self):
-        # REGRESSION T2: a cross-user storage URI → raise_forbidden → 403.
+    def test_forbidden_is_rfc7807(self):
+        # REGRESSION T2: a per-request orchestration-mode override the
+        # deployment forbids → raise_forbidden → 403.
         client = _build_client(user=RequestUser(user_id=USER_A))
-        stranger_uri = f"pipelex-storage://{USER_B}/assets/{FILE_HASH}.pdf"
-        response = client.post("/v1/resolve-storage-url", json={"uri": stranger_uri})
+        response = client.post(
+            "/v1/execute",
+            json={"mthds_contents": ['domain = "smoke"'], "pipe_code": "smoke", "orchestration_mode": "definitely-not-the-default"},
+        )
         assert response.status_code == 403
         assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
         body = response.json()
-        assert body["error_type"] == "Forbidden"
+        assert body["error_type"] == "OrchestrationModeOverrideForbidden"
         assert body["status"] == 403
         assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
         assert body["retryable"] is False
@@ -178,8 +194,8 @@ class TestErrorResponses:
         assert body["retryable"] is False
 
     def test_unauthenticated_carries_www_authenticate_challenge(self):
-        # An unauthenticated upload → raise_unauthenticated → 401 + challenge.
-        response = _build_client(user=None).post("/v1/upload", json={"filename": "a.txt", "data": "aGk="})
+        # No Authorization header on an auth-wrapped route → 401 + challenge.
+        response = _build_client(user=None, with_auth=True).post("/v1/validate", json={"mthds_contents": ['domain = "smoke"']})
         assert response.status_code == 401
         assert response.headers["content-type"] == PROBLEM_JSON_MEDIA_TYPE
         assert response.headers["WWW-Authenticate"] == "Bearer"

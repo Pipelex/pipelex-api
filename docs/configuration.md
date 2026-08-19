@@ -33,10 +33,10 @@ PIPELEX_ENV=dev
 # the moment a callback signature is computed.
 # COMPLETION_CALLBACK_SECRET=<shared-with-your-callback-receiver>
 
-# Maximum decoded size, in MiB, accepted by POST /v1/upload. Defaults to
-# 50 MiB. Raise it for larger documents, lower it to harden the server.
-# Read at startup — change requires a restart.
-# MAX_UPLOAD_MIB=50
+# Maximum request body size, in MiB, before the body-size middleware
+# rejects with 413. Defaults to 100 MiB. Raise it for larger documents,
+# lower it to harden the server. Read at startup — change requires a restart.
+# MAX_REQUEST_BODY_MIB=100
 ```
 
 Pipelex config TOML files can reference env vars via `${VAR}` substitution — that's how secrets like provider API keys flow from the container's environment into Pipelex's runtime config without hard-coding them. Set whichever vars your mounted `.pipelex/` files reference.
@@ -50,7 +50,7 @@ You have three idiomatic options. Pick whichever fits your workflow — they all
 ```bash
 # .env
 PIPELEX_GATEWAY_API_KEY=your-pipelex-gateway-key
-MAX_UPLOAD_MIB=200
+MAX_REQUEST_BODY_MIB=200
 AUTH_MODE=api_key
 API_KEY=your-strong-secret
 ```
@@ -64,7 +64,7 @@ docker run --name pipelex-api -p 8081:8081 --env-file .env pipelex/pipelex-api:l
 ```bash
 docker run --name pipelex-api -p 8081:8081 \
   -e PIPELEX_GATEWAY_API_KEY=your-pipelex-gateway-key \
-  -e MAX_UPLOAD_MIB=200 \
+  -e MAX_REQUEST_BODY_MIB=200 \
   pipelex/pipelex-api:latest
 ```
 
@@ -77,7 +77,7 @@ services:
     ports: ["8081:8081"]
     env_file: .env                # for shared values + secrets
     environment:                  # for explicit per-service overrides
-      MAX_UPLOAD_MIB: "200"
+      MAX_REQUEST_BODY_MIB: "200"
 ```
 
 You can mix `env_file:` and `environment:` — values in `environment:` win.
