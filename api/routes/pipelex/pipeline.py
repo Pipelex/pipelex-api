@@ -83,6 +83,29 @@ def _get_user_id(request: Request) -> str:
     return user.user_id if user else SINGLE_TENANT_USER_ID
 
 
+def _resolve_storage_scope(request: Request, *, requested: str | None) -> str:
+    """Where this run's bytes go — the host's value, or the caller's own id.
+
+    **Scope is data, not identity**, which is why it arrives in the BODY while
+    `user_id` arrives on a trusted header. The runtime needs to know where to
+    write, not who to trust, so a multi-tenant host computes this where it knows
+    its own tenancy (`<org>/<method>/<run>` on hosted Pipelex) and sends it.
+
+    The fallback is the CALLER'S OWN ID, deliberately, and not a shared constant.
+    This runner used to derive the prefix from `user_id` internally; removing
+    that coupling is the point of the change, but the safe default when a
+    deployment says nothing is still one namespace per caller. A shared literal
+    here would recreate the `anonymous/` bug in a new spelling — every caller of
+    an identity-bearing deployment writing into one namespace, each able to read
+    the others' outputs, and looking like a working request throughout.
+
+    A single-tenant deployment therefore gets `single-tenant/…` by configuration
+    rather than by accident, and a multi-tenant one that forgets to send a scope
+    still isolates its callers.
+    """
+    return requested or _get_user_id(request)
+
+
 def _completion_signature(pipeline_run_id: str) -> str:
     """Compute the HMAC-SHA256 signature for an async completion callback.
 
@@ -312,6 +335,7 @@ class ApiRunner(PipelexMTHDSProtocol):
             dynamic_output_concept_ref=dynamic_output_concept_ref,
             pipe_run_mode=self.pipe_run_mode,
             user_id=self.user_id,
+            storage_scope=self.storage_scope,
             pipeline_run_id=pipeline_run_id,
             request_id=request_id,
         )
@@ -610,7 +634,11 @@ async def execute(request: Request) -> JSONResponse:
     """
     run_request, extras = await _parse_request(request)
     with _bundle_run_source(run_request) as (mthds_contents, library_dirs):
-        runner = ApiRunner(user_id=_get_user_id(request), library_dirs=library_dirs)
+        runner = ApiRunner(
+            user_id=_get_user_id(request),
+            storage_scope=_resolve_storage_scope(request, requested=extras.storage_scope),
+            library_dirs=library_dirs,
+        )
         response = await runner.execute(
             pipe_code=run_request.pipe_code,
             mthds_contents=mthds_contents,
@@ -685,7 +713,11 @@ async def start(
     # (crate carrying the captured `python_sources`) before it enqueues, so the temp dir is no
     # longer needed once `start` returns — cleanup on context exit is safe for the async path.
     with _bundle_run_source(run_request) as (mthds_contents, library_dirs):
-        runner = ApiRunner(user_id=_get_user_id(request), library_dirs=library_dirs)
+        runner = ApiRunner(
+            user_id=_get_user_id(request),
+            storage_scope=_resolve_storage_scope(request, requested=extras.storage_scope),
+            library_dirs=library_dirs,
+        )
         return await runner.start(
             pipe_code=run_request.pipe_code,
             mthds_contents=mthds_contents,

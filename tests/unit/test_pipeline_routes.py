@@ -76,7 +76,7 @@ class TestPipelineRoutes:
         """
         client, execute_mock, _ = _build_client(mocker)
         tokens_usage = LLMTokensUsage(
-            job_metadata=JobMetadata(user_id="user-1", pipeline_run_id="plr-1", pipe_code="echo"),
+            job_metadata=JobMetadata(user_id="user-1", storage_scope="user-1", pipeline_run_id="plr-1", pipe_code="echo"),
             inference_model_name="test-model",
             inference_model_id="test-model-id",
             nb_tokens_by_category={TokenCategory.INPUT: 10, TokenCategory.OUTPUT: 5},

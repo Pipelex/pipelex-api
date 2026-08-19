@@ -192,7 +192,7 @@ class TestProtocolConformance:
         async def fake_start(*, pipe_job: Any, delivery_assignment: DeliveryAssignment) -> PipelexPipeDispatchAck:
             await DeliveryExecutor().execute(
                 pipe_output=None,
-                user_id="conformance-caller",
+                storage_scope="conformance-caller",
                 pipeline_run_id=pipe_job.job_metadata.pipeline_run_id,
                 delivery_assignment=delivery_assignment,
                 status=DeliveryStatus.COMPLETED,

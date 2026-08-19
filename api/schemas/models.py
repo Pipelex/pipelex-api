@@ -19,6 +19,7 @@ from mthds.protocol.working_memory import WorkingMemoryAbstract
 from pipelex.core.pipes.pipe_output import PipeOutput
 from pipelex.pipeline.pipeline_response import PipelexRunResultExecute
 from pipelex.reporting.usage_records import TokensUsageRecord
+from pipelex.system.storage_scope import validate_storage_scope
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.functional_validators import SkipValidation
 
@@ -149,6 +150,15 @@ class StartRequest(RunRequest):
     pipeline_run_id: str | None = Field(default=None, max_length=128)
 
 
+_STORAGE_SCOPE_DESCRIPTION = (
+    "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the host-supplied prefix every object "
+    "this run writes lands under. One to three path-safe segments (e.g. `tenant/run` or "
+    "`org/method/run`); the runtime composes its own leaves (`assets/`, `results/`, `payloads/`) onto "
+    "it and never interprets the value. Omit it and the run is scoped to the caller's own id, which "
+    "is correct for a single-tenant deployment and wrong for a multi-tenant one — a host serving many "
+    "tenants MUST send this."
+)
+
 _ORCHESTRATION_MODE_DESCRIPTION = (
     "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — request the orchestration mode (the backend) "
     "for this run. An OPEN string token: `direct` (in-process, the base default), `temporal`, and any other "
@@ -195,6 +205,22 @@ class PipelineApiExtras(BaseModel):
     pipeline_run_id: str | None = Field(default=None, max_length=128)
     callback_urls: list[str] | None = Field(default=None, max_length=MAX_CALLBACK_URLS)
     orchestration_mode: str | None = Field(default=None, description=_ORCHESTRATION_MODE_DESCRIPTION)
+    storage_scope: str | None = Field(default=None, description=_STORAGE_SCOPE_DESCRIPTION)
+
+    @field_validator("storage_scope")
+    @classmethod
+    def _validate_storage_scope(cls, value: str | None) -> str | None:
+        """Reject a traversal at the WIRE, not just at `JobMetadata`.
+
+        `validate_storage_scope` guards the runtime seam too, so this is a
+        second gate rather than the only one — but it is the one that answers a
+        bad request with a 422 naming the field, instead of a 500 from deep in
+        the run. The value becomes a storage key prefix, so a `..` in it escapes
+        the tenant it is supposed to confine.
+        """
+        if value is None:
+            return None
+        return validate_storage_scope(value=value)
 
     @field_validator("callback_urls")
     @classmethod
@@ -236,6 +262,7 @@ class PipelexApiStartRequest(StartRequest):
         ),
     )
     orchestration_mode: str | None = Field(default=None, description=_ORCHESTRATION_MODE_DESCRIPTION)
+    storage_scope: str | None = Field(default=None, description=_STORAGE_SCOPE_DESCRIPTION)
 
 
 class PipelexApiExecuteRequest(RunRequest):
@@ -247,6 +274,7 @@ class PipelexApiExecuteRequest(RunRequest):
     """
 
     orchestration_mode: str | None = Field(default=None, description=_ORCHESTRATION_MODE_DESCRIPTION)
+    storage_scope: str | None = Field(default=None, description=_STORAGE_SCOPE_DESCRIPTION)
 
 
 class PipeOutputWire(PipeOutput):

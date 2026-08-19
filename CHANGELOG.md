@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`storage_scope` — the runner is told where to write instead of deriving it.** `pipeline_run_setup` requires it, and this server never passed it, so every `/start` and `/execute` against a current `pipelex` died with `TypeError: pipeline_run_setup() missing 1 required keyword-only argument: 'storage_scope'` — a 500 from the runner and a 502 at the caller, on the happy path.
+
+  It arrives in the **body**, not a header, because it is data rather than identity: the runner needs to know where to write, not who to trust. A multi-tenant host computes it where it knows its own tenancy (hosted Pipelex sends `<org_id>/<method_id>/<run_id>`) and this server treats it as an opaque prefix, composing its own leaves (`assets/`, `results/`, `payloads/`) onto it. Validated at the wire by `validate_storage_scope`, so a traversal is a `422` naming the field rather than a `500` from deep inside the run — the runtime seam validates too, so this is a second gate, not the only one.
+
+  **Omitted, a run is scoped to the caller's own id** — never a shared constant. That is the safe default for a single-tenant deployment, and it keeps a multi-tenant deployment that forgets to send a scope isolating its callers instead of pooling them. A shared literal here would be the `anonymous/` bug in a new spelling.
+
+### Fixed
+
+- **`uri_format` in the shipped `.pipelex/pipelex.toml` still used the removed `{primary_id}` / `{secondary_id}` placeholders.** The supported set is now `{extension}`, `{hash}`, `{storage_scope}`, so config validation raised `StorageConfigError` at fixture setup and **every** test in the suite errored — a total red that looked like a code failure and was purely stale config. Migrated to `{storage_scope}/{hash}.{extension}`, matching the kit default in `pipelex`.
+
 ### Changed
 
 - **Breaking: the `anonymous` caller no longer exists.** `ANONYMOUS_USER_ID` is gone, along with every branch that produced or tolerated it. It was reached by *fallback*: `_get_user_id` returned the literal `"anonymous"` whenever no identity had been established, and that string became the first path segment of every storage key the run wrote. A deployment serving many callers therefore put all of them in one namespace where each could read the others' outputs — and it looked like a working request the whole way through. A silent multi-tenant collision is the worst possible failure for a fallback to produce.
