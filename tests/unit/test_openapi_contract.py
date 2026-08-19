@@ -161,14 +161,28 @@ class TestOpenApiErrorContract:
     def test_suggested_fix_surface_is_published(self, openapi_schema: dict[str, Any]):
         """The codegen fix planner's output is part of the published contract: a `ValidationErrorItem`
         may carry a `SuggestedFix`, whose `ops[]` are the machine contract (the rendered diff is not).
+
+        An op is a union discriminated on `kind`, one member model per kind — so a client picks the
+        member off the wire value rather than reading a single open shape whose fields depend on a
+        `kind` enum beside them. The whole vocabulary is published here: this is the `.mthds` fix
+        path, which carries every kind (a ledger carries only the structural subset).
         """
         schemas = openapi_schema["components"]["schemas"]
         suggested_fix = schemas["ValidationErrorItem"]["properties"]["suggested_fix"]
         assert any(option.get("$ref") == "#/components/schemas/SuggestedFix" for option in suggested_fix["anyOf"])
         fix_properties = schemas["SuggestedFix"]["properties"]
         assert {"fix_code", "description", "safety", "ops"} <= set(fix_properties)
-        assert fix_properties["ops"]["items"]["$ref"] == "#/components/schemas/FixOp"
-        assert set(schemas["FixOpKind"]["enum"]) == {"set_key", "ensure_table", "delete_key", "delete_table", "rename_table_key"}
+
+        op_schema = fix_properties["ops"]["items"]
+        assert op_schema["discriminator"]["propertyName"] == "kind"
+        kind_mapping = op_schema["discriminator"]["mapping"]
+        assert set(kind_mapping) == {"set_key", "ensure_table", "delete_key", "delete_table", "rename_table_key", "move_key", "remap_value"}
+        # Every member the discriminator names is a `oneOf` option AND a published schema, so a
+        # client that resolves a `kind` off the wire always lands on a shape the artifact defines.
+        member_refs = {option["$ref"] for option in op_schema["oneOf"]}
+        assert set(kind_mapping.values()) == member_refs
+        assert all(ref.rsplit("/", 1)[-1] in schemas for ref in member_refs)
+
         assert set(schemas["FixSafety"]["enum"]) == {"safe", "unsafe"}
 
     def test_execute_publishes_the_tokens_usage_wire_records(self, openapi_schema: dict[str, Any]):

@@ -103,13 +103,26 @@ def _resolve_http_error_mappers() -> dict[type[Exception], HttpErrorMapperFn]:
     `ERROR_DISCLOSURE` fail-fast above.
 
     Safe at import because the map is a pure function of *installed* plugins (entry
-    points + `config.plugins.disabled`) — never of the `boot_orchestrator` that
+    points + `config.runtime.plugins.disabled`) — never of the `boot_orchestrator` that
     `Pipelex.make` selects at boot — so an import-time resolution yields the identical
-    map a post-boot one would.
+    map a post-boot one would. `boot_orchestrator=None` is passed for exactly that
+    reason: it gates only a plugin's hub-slot claims, which this throwaway registrar
+    never applies, while the HTTP-error mapper a plugin contributes is unconditional.
+    Naming the deployment's real orchestrator here would change nothing in the map and
+    would drag `api.toml` loading onto the import path.
+
+    `load_config_validated` rather than a load followed by a `model_validate`, because
+    that is the tolerant entry point the boot itself uses: a configuration a pipelex
+    schema change left behind is replayed through its migration ledger in memory and
+    re-validated, so a stale-but-explainable config warns instead of stopping the boot.
+    Validating the raw dict here would refuse, at import, a config the very next step
+    (`Pipelex.make` in `lifespan`) accepts — the app would never start over a file
+    pipelex offers to migrate.
     """
-    config = PipelexConfig.model_validate(config_manager.load_config())
+    config = config_manager.load_config_validated(config_cls=PipelexConfig)
     return build_registrar(
         config=config,
+        boot_orchestrator=None,
         builtin_plugins=BUILTIN_PLUGINS,
         core_unconditional_plugin_names=CORE_UNCONDITIONAL_PLUGIN_NAMES,
         entry_point_groups=ENTRY_POINT_GROUPS,
