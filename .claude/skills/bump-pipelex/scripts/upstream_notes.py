@@ -24,29 +24,27 @@ import re
 import sys
 from pathlib import Path
 
+from packaging.version import InvalidVersion, Version
+
 DEFAULT_CHANGELOG = Path(__file__).resolve().parents[4].parent / "pipelex" / "CHANGELOG.md"
 HEADING = re.compile(r"^## \[v?(?P<version>\d+\.\d+\.\d+[^\]]*)\]")
 UNRELEASED = re.compile(r"^## \[Unreleased\]", re.IGNORECASE)
 
 
-VERSION_CORE = re.compile(r"^v?(?P<core>\d+(?:\.\d+)*)(?P<suffix>.*)$")
-
-
-def parse_version(raw: str) -> tuple[int, ...]:
-    """Turn a version string into a comparable tuple.
+def parse_version(raw: str) -> Version:
+    """Parse a version string into a PEP 440 version.
 
     The upstream changelog carries prereleases ('0.18.0b4') alongside plain
-    releases, so anything after the dotted numeric core is treated as a
-    prerelease marker that sorts *before* the release it leads to. The trailing
-    flag is what encodes that: 0 for a prerelease, 1 for the real thing.
+    releases, so the ordering has to hold *among* prereleases as well as between
+    a prerelease and the release it leads to: b3 < b4 < rc1 < 0.18.0. PEP 440 is
+    what encodes that, and equality here is normalization-aware, so a section is
+    matched by the version it denotes rather than by how it was spelled.
     """
-    match = VERSION_CORE.match(raw.strip())
-    if not match:
+    try:
+        return Version(raw.strip())
+    except InvalidVersion as exc:
         msg = f"Not a version this script can compare: {raw!r}"
-        raise SystemExit(msg)
-    parts = tuple(int(piece) for piece in match.group("core").split("."))
-    parts = parts + (0,) * (3 - len(parts)) if len(parts) < 3 else parts
-    return (*parts, 0 if match.group("suffix") else 1)
+        raise SystemExit(msg) from exc
 
 
 def split_sections(text: str) -> list[tuple[str, str]]:

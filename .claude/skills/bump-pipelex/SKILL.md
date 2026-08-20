@@ -92,11 +92,14 @@ pulls an inference provider's SDK; extras never travel through a transitive
 dependency, so dropping one produces an image that imports fine and then fails at
 the first request that reaches that provider. Change the digits and nothing else —
 substituting only the version substring cannot drop an extra, whereas rewriting
-the line can:
+the line can.
 
-```bash
-sed -i '' -E 's/^(  "pipelex\[[^]]*\]==)[0-9]+\.[0-9]+\.[0-9]+"/\10.48.0"/' pyproject.toml
-```
+So make it a substring edit: on that line, replace `==0.47.0"` with `==0.48.0"`
+and leave every other character alone. The pinned version string appears once in
+the file, so the match is unambiguous. Use your editor rather than a shell
+one-liner — `sed -i` takes a separate empty argument on macOS and an attached
+suffix on GNU/Linux, so no single invocation is portable, and the `release` skill
+edits this same file the same way.
 
 Confirm the result with `grep '"pipelex\[' pyproject.toml` before moving on.
 
@@ -193,7 +196,7 @@ Get the release notes for every version **after** the old pin, up to and includi
 the new one. The helper does the boundary arithmetic:
 
 ```bash
-python3 .claude/skills/bump-pipelex/scripts/upstream_notes.py 0.47.0 0.48.0
+.venv/bin/python .claude/skills/bump-pipelex/scripts/upstream_notes.py 0.47.0 0.48.0
 ```
 
 It reads `../pipelex/CHANGELOG.md` from the workspace checkout. Two things it
