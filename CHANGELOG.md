@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.15.1] - 2026-08-20
+
+### Changed
+
+- **Pinned `pipelex` 0.48.0.** Up from `==0.47.0`, exactly. A quiet bump for this server: nothing in it reaches the wire, the committed OpenAPI artifact is unchanged, and no tracked configuration moved. The release is upstream test infrastructure — a canonical MTHDS test corpus that now ships inside the `pipelex` wheel at `pipelex.test_extras.mthds_corpus`, with a loader API (`iter_entries()`, `get_entry()`) for selecting fixtures by tag, execution tier, validity and granularity.
+
+  Worth knowing rather than acting on today: that corpus exists so consumers stop keeping their own copies of language-level `.mthds` methods, which is a duplication this repo's own tests currently have. Adopting it is a separate change, and this pin is what makes it available.
+
 ## [v0.15.0] - 2026-08-20
 
 ### Added
