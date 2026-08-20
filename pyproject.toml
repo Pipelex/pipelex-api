@@ -16,7 +16,7 @@ classifiers = [
 ]
 
 dependencies = [
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.47.0",
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",
@@ -365,3 +365,10 @@ enable = [
   "W0101", # Unreachable code: Used when there is some code behind a "return" or "raise" statement, which will never be accessed.
 ]
 ignore = [".venv", "__pycache__", "build", "dist", ".git"]
+
+[tool.uv.sources]
+# TEMPORARY, and deliberately a git SOURCE rather than the usual exact PyPI pin.
+# `RunMetadata` does not exist in any published pipelex, so this branch cannot
+# resolve against a released version. Move back to
+# `pipelex[...]==X.Y.Z` the moment the `feat/run-metadata` work is released.
+pipelex = { git = "https://github.com/Pipelex/pipelex", rev = "0557ffb0244ea039193bcbfbfd6f2cfcc92dddf5" }
