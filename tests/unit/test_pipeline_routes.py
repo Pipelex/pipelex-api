@@ -14,7 +14,7 @@ from pipelex.cogt.llm.llm_report import LLMTokensUsage
 from pipelex.cogt.usage.cost_category import CostCategory
 from pipelex.cogt.usage.token_category import TokenCategory
 from pipelex.pipeline.pipeline_response import PipelexRunResultStart, RunState
-from pipelex.system.job_metadata import JobMetadata
+from pipelex.system.job_metadata import JobMetadata, RunMetadata
 from pytest_mock import MockerFixture
 
 import api.routes.pipelex.pipeline as pipeline_module
@@ -78,7 +78,7 @@ class TestPipelineRoutes:
         """
         client, execute_mock, _ = _build_client(mocker)
         tokens_usage = LLMTokensUsage(
-            job_metadata=JobMetadata(user_id="user-1", storage_scope="user-1", pipeline_run_id="plr-1", pipe_code="echo"),
+            job_metadata=JobMetadata(run_metadata=RunMetadata(user_id="user-1", storage_scope="user-1", pipeline_run_id="plr-1"), pipe_code="echo"),
             inference_model_name="test-model",
             inference_model_id="test-model-id",
             nb_tokens_by_category={TokenCategory.INPUT: 10, TokenCategory.OUTPUT: 5},

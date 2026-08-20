@@ -48,7 +48,7 @@ class _RecordingStub:
     async def start(self, *, pipe_job: PipeJob, delivery_assignment: DeliveryAssignment | None) -> PipelexPipeDispatchAck:
         self.calls.append({"delivery_assignment": delivery_assignment})
         return PipelexPipeDispatchAck(
-            pipeline_run_id=pipe_job.job_metadata.pipeline_run_id,
+            pipeline_run_id=pipe_job.job_metadata.run_metadata.pipeline_run_id,
             workflow_id=self._workflow_id,
         )
 

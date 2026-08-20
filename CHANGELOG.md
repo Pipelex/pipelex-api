@@ -1,5 +1,25 @@
 # Changelog
 
+## [v0.16.0] - 2026-08-20
+
+### Changed — breaking: built on `pipelex`'s `RunMetadata` split
+
+`JobMetadata` moved its run-constant half — `user_id`, `pipeline_run_id`, `storage_scope`, `request_id` — into a nested `RunMetadata`, reached as `job_metadata.run_metadata.*`. This server's own surface is untouched: `pipeline_run_setup` still takes those four as flat keyword arguments and builds the `JobMetadata` itself, so no route, request model or response shape changes. Only the test doubles that construct a `JobMetadata` directly had to follow.
+
+The wire contract is unchanged, including the published OpenAPI artifact — see below for the one place that was nearly not true.
+
+### Fixed — `PipeOutput` gained a field upstream, and `test_openapi_contract` earned its keep
+
+`pipelex` first carried the run's job on `PipeOutput` as a **model field**. `PipelexApiExecuteResponse.pipe_output` references `PipeOutput`, and `/v1/execute` returns `response.model_dump(...)` — so that field published `user_id`, `request_id`, `otel_context` and `trace_context` into this public API's response body **and** its committed OpenAPI schema.
+
+`test_execute_publishes_the_tokens_usage_wire_records` asserts `{"LLMTokensUsage", "ImgGenTokensUsage", "JobMetadata"}.isdisjoint(schemas)`, and it failed. Upstream now carries the value as a private attribute behind a property — readable by a transport resolving a storage scope, absent from `model_dump`, `model_json_schema` and therefore the wire. **No change was needed on this side**, which is the right shape of fix: the artifact was never supposed to have to trim it.
+
+### Changed — `pipelex` 0.47.0 → 0.50.0
+
+An exact PyPI pin, as this dependency is meant to be expressed. It was briefly a `[tool.uv.sources]` git rev while `RunMetadata` was unreleased; that is gone, and with it the transitive override a source imposes.
+
+The jump crosses three releases, so it picks up more than the `RunMetadata` split: `PipeFactoryErrorType` / `PipeValidationErrorType` moved to `pipelex.validation_error_types` (0.49.0), and the import follows them.
+
 ## [v0.15.1] - 2026-08-20
 
 ### Changed
