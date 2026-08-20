@@ -11,7 +11,7 @@ info:
   license:
     name: MIT
     identifier: MIT
-  version: 0.15.1
+  version: 0.16.0
 paths:
   /health:
     get:
@@ -3478,6 +3478,16 @@ components:
       - description
       - output
       title: PipeExtractBlueprint
+    PipeFactoryErrorType:
+      type: string
+      enum:
+      - unknown_concept
+      - unknown_factory_error
+      title: PipeFactoryErrorType
+      description: 'Types of pipe factory errors.
+
+
+        These error types are raised during pipe creation from blueprints.'
     PipeFuncBlueprint:
       properties:
         source:
@@ -4032,6 +4042,35 @@ components:
       - PipeParallel
       - PipeSequence
       title: PipeType
+    PipeValidationErrorType:
+      type: string
+      enum:
+      - missing_input_variable
+      - extraneous_input_variable
+      - input_stuff_spec_mismatch
+      - inadequate_output_concept
+      - inadequate_output_multiplicity
+      - circular_dependency_error
+      - llm_output_cannot_be_image
+      - invalid_pipe_code_syntax
+      - unknown_pipe_type
+      - missing_pipe_type
+      - batch_item_name_collision
+      - optional_marker_invalid
+      - optional_not_handled
+      - optional_output_required
+      - optional_input_unguarded
+      - optional_branch_required_field
+      - optional_force_redundant
+      - native_concept_redeclaration
+      - unresolved_concept
+      - unresolved_pipe_dependency
+      - unknown_validation_error
+      title: PipeValidationErrorType
+      description: 'Types of pipe validation errors.
+
+
+        These error types are raised during pipe validation from Pipe/Concept classes.'
     PipelexApiExecuteResponse:
       properties:
         pipeline_run_id:
@@ -5249,7 +5288,9 @@ components:
           title: Message
         error_type:
           anyOf:
-          - type: string
+          - $ref: '#/components/schemas/PipeValidationErrorType'
+          - $ref: '#/components/schemas/PipeFactoryErrorType'
+          - $ref: '#/components/schemas/ValidationResidualErrorType'
           - type: 'null'
           title: Error Type
         pipe_code:
@@ -5332,13 +5373,21 @@ components:
         ``exclude_none`` wire projection.
 
 
-        Built exclusively by ``pipelex.pipeline.validation_errors.build_validation_error_items``,
+        The error channel is built exclusively by
 
-        which both the agent CLI (``extract_validation_errors``) and the API path
+        ``pipelex.pipeline.validation_errors.build_validation_error_items``, which both the agent
+
+        CLI (``extract_validation_errors``) and the API path
 
         (``ValidateBundleError.to_error_report``) call — so the CLI''s structured
 
-        output and the API''s 422 ``validation_errors`` can never drift.
+        output and the API''s 422 ``validation_errors`` can never drift. The same
+
+        item type also carries the report''s advisory ``warnings``, built by
+
+        ``pipelex.pipeline.optionality_warnings``: a warning is the same shape of
+
+        diagnostic, differing only in that it does not make the verdict invalid.
 
 
         ``source`` is the declaring file path (CLI) or the per-content source the API
@@ -5352,6 +5401,32 @@ components:
         references it as a typed field and ``base_exceptions`` must not import the
 
         ``pipelex.core`` error modules (which import back into this module).'
+    ValidationResidualErrorType:
+      type: string
+      enum:
+      - DryRunError
+      title: ValidationResidualErrorType
+      description: 'The ``error_type`` of a validation residual — a failure with no stage-level error data.
+
+
+        A residual is what the wire projection emits when a bundle failed but no categorized
+
+        validation stage produced structured data to report. There is exactly one residual that names
+
+        itself: a dry-run failure surfaces a single message from a raised ``DryRunError`` / ``PipeRunError``,
+
+        so the item is tagged with that exception''s own class name.
+
+
+        The other residual — the parse-level one, for a bundle that could not be turned into a
+
+        blueprint at all (a TOML-syntax error, an empty blueprint, an elaborator failure) — carries no
+
+        ``error_type`` and therefore no member here. That is not an omission: it fires for several
+
+        distinct underlying errors, and inventing one code for all of them would tell a consumer it
+
+        knows which fault occurred when it does not. Its message is the authoritative diagnostic.'
     WorkingMemory:
       properties:
         root:

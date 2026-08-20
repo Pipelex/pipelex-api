@@ -23,8 +23,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pipelex.base_exceptions import PipelexConfigError, ValidationErrorCategory
 from pipelex.core.exceptions import PipeFactoryErrorData, PipelexBundleBlueprintValidationErrorData, PipesAndConceptValidationErrorData
-from pipelex.core.pipes.exceptions import PipeFactoryErrorType, PipeValidationErrorType
 from pipelex.pipeline.exceptions import ValidateBundleError
+from pipelex.validation_error_types import PipeFactoryErrorType, PipeValidationErrorType
 from pytest_mock import MockerFixture
 
 from api.exception_handlers import register_exception_handlers

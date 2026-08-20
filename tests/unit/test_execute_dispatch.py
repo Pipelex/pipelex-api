@@ -63,7 +63,7 @@ class _StubOrchestrator:
         return serialize_completed_output(
             pipe_output=PipeOutput(
                 working_memory=working_memory,
-                pipeline_run_id=pipe_job.job_metadata.pipeline_run_id,
+                pipeline_run_id=pipe_job.job_metadata.run_metadata.pipeline_run_id,
                 graph_spec=self._graph_spec,
             ),
             workflow_id=None,
