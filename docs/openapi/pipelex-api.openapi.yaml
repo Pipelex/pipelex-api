@@ -1957,35 +1957,8 @@ components:
       - structure_class_name
       title: Concept
     ConceptBlueprint:
-      properties:
-        source:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Source
-        description:
-          type: string
-          title: Description
-        structure:
-          anyOf:
-          - type: string
-          - additionalProperties:
-              anyOf:
-              - type: string
-              - $ref: '#/components/schemas/ConceptStructureBlueprint'
-            type: object
-          - type: 'null'
-          title: Structure
-        refines:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Refines
-      additionalProperties: false
+      additionalProperties: true
       type: object
-      required:
-      - description
-      title: ConceptBlueprint
     ConceptRepresentationFormat:
       type: string
       enum:
@@ -1995,59 +1968,8 @@ components:
       title: ConceptRepresentationFormat
       description: Output format for concept representations.
     ConceptStructureBlueprint:
-      properties:
-        description:
-          type: string
-          title: Description
-        type:
-          anyOf:
-          - $ref: '#/components/schemas/ConceptStructureBlueprintFieldType'
-          - type: 'null'
-        key_type:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Key Type
-        value_type:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Value Type
-        item_type:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Item Type
-        concept_ref:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Concept Ref
-        item_concept_ref:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Item Concept Ref
-        choices:
-          anyOf:
-          - items:
-              type: string
-            type: array
-          - type: 'null'
-          title: Choices
-        default_value:
-          anyOf:
-          - {}
-          - type: 'null'
-          title: Default Value
-        required:
-          type: boolean
-          title: Required
-          default: false
+      additionalProperties: true
       type: object
-      required:
-      - description
-      title: ConceptStructureBlueprint
     ConceptStructureBlueprintFieldType:
       type: string
       enum:
@@ -2375,6 +2297,22 @@ components:
       required:
       - model
       title: ExtractSetting
+    FieldKind:
+      type: string
+      enum:
+      - text
+      - prose
+      - date
+      - number
+      - boolean
+      - enum
+      - document
+      - image
+      - object
+      - list
+      - unknown
+      title: FieldKind
+      description: The closed `kind` union of the input-form descriptor — field intents, never widget names.
     FixSafety:
       type: string
       enum:
@@ -2535,18 +2473,40 @@ components:
       - message
       title: HealthResponse
       description: Body of `GET /health`.
+    HintLintErrorType:
+      type: string
+      enum:
+      - hint_unknown_key
+      - hint_unknown_intent
+      - hint_inapplicable_intent
+      title: HintLintErrorType
+      description: 'Advisory intent-hints lint findings (spec: intent-hints.md).
+
+
+        Every member is advisory-only: it rides the validation report''s ``warnings`` array and never
+
+        makes a verdict invalid — hints are non-normative, and well-formed unknown content is
+
+        preserved, only warned about. A separate enum rather than new ``PipeValidationErrorType``
+
+        members because hints attach to concepts and structure fields too, so the pipe enum is the
+
+        wrong home.'
     IOMultiplicity:
       type: string
       enum:
       - single
       - variable
+      - fixed
       title: IOMultiplicity
-      description: 'Wire value for an output''s multiplicity: one item, or a list of them.
+      description: 'Wire value for a slot''s multiplicity: one item, a variable-length list, or a fixed count.
 
 
-        Any multiple output — variable-length or fixed-count — reports `variable`; the
+        A fixed-count slot (`Concept[N]`) reports `fixed` and carries the exact count in the
 
-        distinction the contract carries is "one vs many", not the exact count.'
+        contract''s `item_count`; a variable-length slot (`Concept[]`) reports `variable` with no
+
+        count. `Concept[1]` is single — no list framing.'
     IOSpec:
       properties:
         name:
@@ -2686,6 +2646,12 @@ components:
       required:
       - model
       title: ImgGenSetting
+    InputFormField:
+      additionalProperties: true
+      type: object
+    InputSlotBlueprint:
+      additionalProperties: true
+      type: object
     InputsTemplateFormat:
       type: string
       enum:
@@ -3271,7 +3237,9 @@ components:
         inputs:
           anyOf:
           - additionalProperties:
-              type: string
+              anyOf:
+              - type: string
+              - $ref: '#/components/schemas/InputSlotBlueprint'
             type: object
           - type: 'null'
           title: Inputs
@@ -3319,7 +3287,9 @@ components:
         inputs:
           anyOf:
           - additionalProperties:
-              type: string
+              anyOf:
+              - type: string
+              - $ref: '#/components/schemas/InputSlotBlueprint'
             type: object
           - type: 'null'
           title: Inputs
@@ -3365,7 +3335,9 @@ components:
         inputs:
           anyOf:
           - additionalProperties:
-              type: string
+              anyOf:
+              - type: string
+              - $ref: '#/components/schemas/InputSlotBlueprint'
             type: object
           - type: 'null'
           title: Inputs
@@ -3428,7 +3400,9 @@ components:
         inputs:
           anyOf:
           - additionalProperties:
-              type: string
+              anyOf:
+              - type: string
+              - $ref: '#/components/schemas/InputSlotBlueprint'
             type: object
           - type: 'null'
           title: Inputs
@@ -3511,7 +3485,9 @@ components:
         inputs:
           anyOf:
           - additionalProperties:
-              type: string
+              anyOf:
+              - type: string
+              - $ref: '#/components/schemas/InputSlotBlueprint'
             type: object
           - type: 'null'
           title: Inputs
@@ -3566,7 +3542,9 @@ components:
         inputs:
           anyOf:
           - additionalProperties:
-              type: string
+              anyOf:
+              - type: string
+              - $ref: '#/components/schemas/InputSlotBlueprint'
             type: object
           - type: 'null'
           title: Inputs
@@ -3630,10 +3608,17 @@ components:
         concept_ref:
           type: string
           title: Concept Ref
-        optional:
-          type: boolean
-          title: Optional
-          default: false
+        presence:
+          $ref: '#/components/schemas/PresenceMarker'
+          default: plain
+        multiplicity:
+          $ref: '#/components/schemas/IOMultiplicity'
+          default: single
+        item_count:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Item Count
         json_schema:
           additionalProperties: true
           type: object
@@ -3643,6 +3628,18 @@ components:
       - concept_ref
       title: PipeInputContract
       description: 'One declared input: the concept it expects and the JSON Schema of its content.'
+    PipeInputFormDescriptor:
+      properties:
+        fields:
+          items:
+            $ref: '#/components/schemas/InputFormField'
+          type: array
+          title: Fields
+      type: object
+      required:
+      - fields
+      title: PipeInputFormDescriptor
+      description: The input form of one pipe — an `input_form` entry.
     PipeLLMBlueprint:
       properties:
         source:
@@ -3666,7 +3663,9 @@ components:
         inputs:
           anyOf:
           - additionalProperties:
-              type: string
+              anyOf:
+              - type: string
+              - $ref: '#/components/schemas/InputSlotBlueprint'
             type: object
           - type: 'null'
           title: Inputs
@@ -3720,6 +3719,11 @@ components:
           title: Concept Ref
         multiplicity:
           $ref: '#/components/schemas/IOMultiplicity'
+        item_count:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Item Count
         optional:
           type: boolean
           title: Optional
@@ -3729,7 +3733,7 @@ components:
       - concept_ref
       - multiplicity
       title: PipeOutputContract
-      description: 'The pipe''s output: the concept it produces and whether it is one item or a list.'
+      description: 'The pipe''s output: the concept it produces and how many items it resolves to.'
     PipeOutputWire:
       properties:
         working_memory:
@@ -3799,7 +3803,9 @@ components:
         inputs:
           anyOf:
           - additionalProperties:
-              type: string
+              anyOf:
+              - type: string
+              - $ref: '#/components/schemas/InputSlotBlueprint'
             type: object
           - type: 'null'
           title: Inputs
@@ -3845,7 +3851,9 @@ components:
         inputs:
           anyOf:
           - additionalProperties:
-              type: string
+              anyOf:
+              - type: string
+              - $ref: '#/components/schemas/InputSlotBlueprint'
             type: object
           - type: 'null'
           title: Inputs
@@ -3926,7 +3934,9 @@ components:
         inputs:
           anyOf:
           - additionalProperties:
-              type: string
+              anyOf:
+              - type: string
+              - $ref: '#/components/schemas/InputSlotBlueprint'
             type: object
           - type: 'null'
           title: Inputs
@@ -3958,7 +3968,9 @@ components:
         inputs:
           anyOf:
           - additionalProperties:
-              type: string
+              anyOf:
+              - type: string
+              - $ref: '#/components/schemas/InputSlotBlueprint'
             type: object
           - type: 'null'
           title: Inputs
@@ -4007,7 +4019,9 @@ components:
         inputs:
           anyOf:
           - additionalProperties:
-              type: string
+              anyOf:
+              - type: string
+              - $ref: '#/components/schemas/InputSlotBlueprint'
             type: object
           - type: 'null'
           title: Inputs
@@ -4302,6 +4316,16 @@ components:
       type: object
       title: PipelineRef
       description: Reference to the pipeline that was executed.
+    PresenceMarker:
+      type: string
+      enum:
+      - plain
+      - optional
+      - force
+      title: PresenceMarker
+      description: 'Presence of a value in a declared slot: plain (always present), optional (`?` — the slot may
+
+        legitimately hold no value), or force (`!` — a use-site assertion that the value must be present).'
     ProblemDocument:
       properties:
         type:
@@ -5112,6 +5136,11 @@ components:
             $ref: '#/components/schemas/PipeIOContract'
           type: object
           title: Pipe Io Contracts
+        input_form:
+          additionalProperties:
+            $ref: '#/components/schemas/PipeInputFormDescriptor'
+          type: object
+          title: Input Form
         liftable_pipes:
           items:
             $ref: '#/components/schemas/LiftablePipeEntry'
@@ -5163,6 +5192,7 @@ components:
       type: object
       required:
       - bundle_blueprint
+      - input_form
       - mthds_contents
       title: ValidReport
       description: 'The 200 **valid** arm: the canonical `PipelexValidationReport` plus this server''s wire-only extras.
@@ -5291,6 +5321,7 @@ components:
           - $ref: '#/components/schemas/PipeValidationErrorType'
           - $ref: '#/components/schemas/PipeFactoryErrorType'
           - $ref: '#/components/schemas/ValidationResidualErrorType'
+          - $ref: '#/components/schemas/HintLintErrorType'
           - type: 'null'
           title: Error Type
         pipe_code:

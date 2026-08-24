@@ -8,6 +8,22 @@
 
   The waiver was also **already dead on every live path** — the run routes build the model through `RunRequest.from_body`, which copies the declared fields only, so unknown keys were stripped before the validator ever saw them. Removing it is therefore behaviour-neutral, and the substantive change is the message.
 
+- **Pinned `pipelex` 0.52.0 (Breaking).** Up from `==0.50.0`, exactly, and `mthds` follows to 0.8.2 transitively. The jump crosses two releases and brings the input-form descriptor: a pipe's inputs now describe themselves well enough for a caller to render a form from the validation verdict alone, instead of reverse-engineering one from the emitted JSON Schema. No code changed on this side — the report is assembled inside pipelex — but the published contract moved in several places, so this is breaking for anyone reading `/v1/validate`.
+
+  What a caller must change:
+
+  - `ValidReport` gained a **required** `input_form`, mapping each `pipe_ref` to a `PipeInputFormDescriptor` whose `fields` carry the namespaced `concept_ref` and its `refines` chain, presence, gating, fixed counts, authored defaults and one-member `choices`. A consumer deserializing the report strictly must add the member. The closed `kind` vocabulary arrives with it as `FieldKind` (`text`/`prose`/`date`/`number`/`boolean`/`enum`/`document`/`image`/`object`/`list`/`unknown`).
+  - `PipeInputContract.optional` (boolean) is **replaced** by `presence`, a three-valued `PresenceMarker` — `plain`, `optional` (`?`), or `force` (`!`) — so a `!` use-site assertion is now visible where it previously read as an ordinary required slot. Read `presence != "plain"` where you read `optional == true`.
+  - `IOMultiplicity` gained `fixed`, and both the input and the output contract now carry `multiplicity` with an `item_count` present exactly when it is `fixed`. A fixed-count slot (`Concept[N]`) used to report `variable` and lose its count; it now reports the count honestly. Any consumer branching on `variable` to mean "a list" must accept `fixed` as a list too.
+  - Every pipe blueprint's `inputs` map widened from `string` values to `string | InputSlotBlueprint`, so a slot can carry its own table rather than only a concept ref.
+  - `PipeValidationError.error_type` gained the `HintLintErrorType` members (`hint_unknown_key`, `hint_unknown_intent`, `hint_inapplicable_intent`). These are **advisory only** — they ride the report's `warnings` and never make a verdict invalid — but an exhaustive `match` over the union has to handle them.
+
+  Two authoring changes reach anyone posting `.mthds` content: an unknown key in a concept structure-field table is now rejected at parse instead of silently dropped, and `required = true` may no longer be paired with `default_value`. Bundles relying on either being tolerated will start failing validation. The `.pipelex/` config schema did not move, so no migration is required.
+
+- **Four schemas in the OpenAPI artifact went opaque, upstream.** `ConceptBlueprint`, `ConceptStructureBlueprint`, `InputSlotBlueprint` and `InputFormField` now publish as a bare `{"type": "object", "additionalProperties": true}` with no properties, where `ConceptBlueprint` and `ConceptStructureBlueprint` previously published their full field list under `additionalProperties: false`.
+
+  This is a side effect of how intent hints are serialized, not an intentional loosening: each of those models gained a `@model_serializer(mode="wrap")` returning `dict[str, Any]` in order to drop absent `hints` rather than emit `null`, and pydantic derives a model's **serialization** schema from that return annotation. FastAPI generates response schemas in serialization mode, so the annotation is what reaches the artifact — the validation-mode schema is still complete and still `extra="forbid"`. The models did not actually loosen; only their published description did. Nothing here can fix it, and the artifact is regenerated as-is rather than hand-patched; it is filed upstream in `wip/inbox/`.
+
 ### Added
 
 - **The `422` names the extension args this deployment does not handle.** A source-less body that carries keys this server does not handle now gets a message that names them, instead of the generic precondition text. The canonical case is a hosted client pointed at an open-source runner: `{"method_id": "mt_…"}` used to produce an obscure "pipe_code and mthds_contents cannot both be empty", and now answers
