@@ -4,6 +4,7 @@ from typing import Annotated, Literal, Self, Union
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pipelex.base_exceptions import ErrorReport, ValidationErrorItem
+from pipelex.pipeline.input_form import PipeInputFormDescriptor
 from pipelex.pipeline.validation_render import format_validate_markdown, render_invalid_validation_markdown
 from pipelex.pipeline.validation_report import PipelexValidationReport
 from pipelex.tools.typing.pydantic_utils import empty_list_factory_of
@@ -38,6 +39,30 @@ def _resolve_render_formats(render: list[str]) -> set[RenderFormat]:
     return {RenderFormat(token) for token in render if token in supported_values}
 
 
+class ValidationView(StrEnum):
+    """The closed set of server-side **supported** structured views for `/validate`.
+
+    The second opt-in axis beside `render`, with identical mechanics (raw `list[str]` request field,
+    per-token resolution, lenient-ignore) but a different product: `render` yields *rendered text*
+    under a mechanical `rendered_<format>` key, while a view attaches a *structured* artifact under a
+    **same-named** top-level field. The two lists stay separate and independent — a request may carry
+    both, and each resolves its own tokens against its own supported set.
+    """
+
+    INPUT_FORM = "input_form"
+
+
+def _resolve_validation_views(views: list[str]) -> set[ValidationView]:
+    """Resolve raw `views` tokens to the supported `ValidationView` set (deduped, order-insensitive).
+
+    Unknown/unsupported tokens are silently dropped (lenient-ignore, per-token), exactly as for
+    `render`: a view is an opt-in projection of facts the verdict already determined, never part of
+    the verdict contract, so a stale view token must never fail the call with a 422.
+    """
+    supported_values = {view.value for view in ValidationView}
+    return {ValidationView(token) for token in views if token in supported_values}
+
+
 class ValidateRequest(MthdsContentsRequest):
     """The shared `mthds_contents` + `allow_signatures` payload, plus optional per-file sources.
 
@@ -63,6 +88,16 @@ class ValidateRequest(MthdsContentsRequest):
             "(`markdown`) adds a `rendered_<format>` field (e.g. `rendered_markdown`) to the 200 verdict, on both "
             "the valid and invalid arms. Unknown/unsupported tokens are silently ignored (presentation hint, not "
             "part of the verdict contract); the default empty list renders nothing and the response is unchanged."
+        ),
+    )
+    views: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Opt-in Pipelex-API structured views: extra projections to attach to the 200 verdict. A supported token "
+            "(`input_form`) adds a **same-named** top-level field to the valid arm only. Unknown/unsupported tokens are "
+            "silently ignored (a view is a projection of facts the verdict already determined, not part of the verdict "
+            "contract); the default empty list attaches nothing and the response is byte-identical to a request that "
+            "omits the field. Independent of `render`: a request may carry both, each resolving its own tokens."
         ),
     )
     orchestration_mode: str | None = Field(
@@ -94,10 +129,24 @@ class ValidReport(PipelexValidationReport):
     returns for the same bundle, with `is_valid: Literal[True]` (from the report) as the union
     discriminant. The extras exist for HTTP clients only (the webapp reads back `mthds_contents`);
     they are NOT part of the canonical report and no in-process consumer should depend on them.
+
+    One inherited field is deliberately re-declared: `input_form`. The canonical report requires it
+    (a backend that forgets to derive it must fail loudly rather than ship an empty view), but on the
+    wire it is an opt-in structured view gated by the request's `views` — so it is re-declared with a
+    default here, keeping it out of the published schema's `required` set. The value still always
+    arrives from the report; the route pops it when its token was not requested.
     """
 
     mthds_contents: list[str] = Field(..., description="The MTHDS contents that were validated (echo of the request)")
     message: str = Field(default="MTHDS content validated successfully", description="Status message")
+    input_form: dict[str, PipeInputFormDescriptor] = Field(
+        default_factory=dict,
+        description=(
+            "Opt-in Pipelex-API structured view: per-pipe input-form descriptors keyed exactly like `pipe_io_contracts`, "
+            "present only when the request's `views` includes `input_form`. Absent by default — the structured contract "
+            "fields remain the verdict; this is a projection of them."
+        ),
+    )
     rendered_markdown: str | None = Field(
         default=None,
         description=(
@@ -117,7 +166,10 @@ class InvalidReport(BaseModel):
     `mthds_sources` length mismatch, auth, server fault). The structural artifacts
     (`bundle_blueprint`, `pipe_io_contracts`, `graph_spec`, `validated_pipes`) do not exist when
     load/parse/wiring failed, so this arm omits them and carries only the per-error diagnostics
-    plus the runnability facts.
+    plus the runnability facts. The `input_form` view follows them into absence for the same reason
+    — it derives from a crate that was never assembled — so it is never declared here and `views`
+    has no effect on this arm (unlike `rendered_markdown`, which rides both arms because failure
+    text is exactly what a human surface wants).
     """
 
     is_valid: Literal[False] = False
@@ -174,6 +226,9 @@ async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSO
       best-effort `graph_spec`) plus the wire extras (`mthds_contents` echo, `message`). A bundle
       that declares no `main_pipe` validates fine and carries `graph_spec=null`. Pending
       signatures are reported as `pending_signatures` + `is_runnable: false`, never as an error.
+      The opt-in `views` token `input_form` additionally attaches the per-pipe input-form
+      descriptors as a same-named top-level field, keyed like `pipe_io_contracts`; without the
+      token the field is absent and the body is byte-identical to a request that omits `views`.
     - **Invalid verdict (200, `is_valid: false`):** the `InvalidReport` arm — `validation_errors[]`
       (the structured per-error diagnostics, built by pipelex's one shared builder, incl. the
       `dry_run` residual item) + `message`, with the structural artifacts absent. The runner
@@ -191,6 +246,9 @@ async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSO
     # Opt-in presentation formats (D-D): resolved once, threaded into both 200 arms. Empty by
     # default → no `rendered_*` field, response byte-identical to the no-`render` request.
     requested_formats = _resolve_render_formats(request_data.render)
+    # Opt-in structured views (D-D, the `views` axis): resolved once, applied to the valid arm only.
+    # Empty by default → no `input_form` field, response byte-identical to the no-`views` request.
+    requested_views = _resolve_validation_views(request_data.views)
     # Verdict-as-value: the runner resolves the orchestration mode and dispatches through the bundle
     # validator registry, returning either a validation verdict or a classified fault report.
     # Only `ErrorReport`s with validation diagnostics are invalid-bundle verdicts (→ 200
@@ -221,6 +279,14 @@ async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSO
         content["rendered_markdown"] = format_validate_markdown(report.model_dump(mode="json"))
     else:
         content.pop("rendered_markdown", None)
+    # `input_form` is an opt-in structured view (D-D), not part of the default verdict: the canonical
+    # report always carries it (required there, so a backend that forgets to derive it fails loudly),
+    # so absence on the wire is an explicit pop — never a serialization side effect, since the field
+    # is a populated dict rather than a `None` `exclude_none` would drop. Popping keeps the default
+    # response byte-identical for the high-frequency callers (hook pipelines, CI gates, agent loops)
+    # that would otherwise pay for a form they discard.
+    if ValidationView.INPUT_FORM not in requested_views:
+        content.pop("input_form", None)
     return JSONResponse(content=content)
 
 
