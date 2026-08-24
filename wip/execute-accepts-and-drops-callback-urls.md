@@ -40,11 +40,11 @@ The bots proposed making the `handled_keys` allowlist in `RunRequest._refuse_sou
 
 - The diagnostic only fires on **source-less** bodies, which are refused with a `422` either way. Both arms raise the same `PipelineRequestError` through the same `raise_validation_error` at `pipeline.py:556` — same status, same `error_type`, same `error_domain`. The only difference is the wording of `detail`; no request is silently accepted.
 - The message it would produce is factually wrong for these keys. It says the args are "not handled by this deployment" and points a hosted-only selector at the hosted API — but this deployment *does* handle `callback_urls` and `pipeline_run_id`, on `/start`, and validates the former even on `/execute`.
-- "Handled" is defined at the layer, not the route, and that is normative. `docs/specs/pipelex-platform-api.md` Rule 1 names `callback_urls` / `orchestration_mode` / `storage_scope` as layer-2 extensions; Rule 4 says a source-less body with no unhandled keys keeps the base guidance. The verifying conformance test parametrizes over both routes identically (`conformance/tests/pipelex_api/test_run_source_precondition.py:28`). Changing this would be a three-repo spec edit in service of a worse message.
+- "Handled" is defined at the layer, not the route, and that is normative. The Pipelex workspace spec `docs/specs/pipelex-platform-api.md` Rule 1 names `callback_urls` / `orchestration_mode` / `storage_scope` as layer-2 extensions; Rule 4 says a source-less body with no unhandled keys keeps the base guidance. The verifying conformance test parametrizes over both routes identically (`Pipelex/conformance` → `tests/pipelex_api/test_run_source_precondition.py`; its route-level twin in this repo is `tests/unit/test_run_source_precondition.py`). Changing this would be a three-repo spec edit in service of a worse message.
 
 ## Links
 
 - PR: https://github.com/Pipelex/pipelex-api/pull/60
 - Codex thread: https://github.com/Pipelex/pipelex-api/pull/60#discussion_r3844335250
 - cubic thread: https://github.com/Pipelex/pipelex-api/pull/60#discussion_r3844411778
-- Governing spec: `docs/specs/pipelex-platform-api.md` → "Layered extension policy", Rules 1 and 4
+- Governing spec: `Pipelex/pipelex-workspace` → `docs/specs/pipelex-platform-api.md` → "Layered extension policy", Rules 1 and 4
