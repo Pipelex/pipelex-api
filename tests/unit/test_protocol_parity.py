@@ -9,6 +9,12 @@ wire extra — the `success` extra is retired). `graph_spec` is compared by pres
 not value: it carries run-specific identity (graph id, node timings, random dry-run data),
 so two runs never serialize identically.
 
+One report field is gated on the wire rather than dropped: `input_form` is an opt-in structured
+view the route attaches only when the request's `views` names it. So the parity call opts in — the
+claim is that the projection is byte-identical to the local report's, not that a default call
+carries it — and a second assertion pins the gate itself: a default call omits exactly the opt-in
+views and nothing else.
+
 The validate fixtures mirror the protocol-alignment baseline scenarios: the lenient
 signature batch, the strict header+definition batch, the no-`main_pipe` batch (the D2
 regression surface), and a complete main-pipe bundle (the only one producing a graph).
@@ -26,6 +32,11 @@ from tests.unit._constants import HEADER_AND_DEFINITION_BATCH, NO_MAIN_PIPE_MTHD
 
 # The hosted /validate envelope = canonical report + exactly these wire-only extras.
 VALIDATE_WIRE_EXTRAS = {"mthds_contents", "message"}
+
+# Canonical report fields the route carries only when the request's `views` names them. They are
+# report fields (present in the local dump), so they are subtracted from the wire key set on a
+# default call rather than being extras added to it.
+VALIDATE_OPT_IN_VIEWS = {"input_form"}
 
 
 def _build_client() -> TestClient:
@@ -52,12 +63,18 @@ class TestProtocolParity:
         local_dump = local_report.model_dump(mode="json", serialize_as_any=True, by_alias=True)
 
         client = _build_client()
-        response = client.post("/v1/validate", json={"mthds_contents": mthds_contents, "allow_signatures": allow_signatures})
+        # Opt into every gated view so the parity claim covers the whole canonical report: a view is
+        # a projection of report facts, and it must match the local dump exactly when it does ride.
+        response = client.post(
+            "/v1/validate",
+            json={"mthds_contents": mthds_contents, "allow_signatures": allow_signatures, "views": sorted(VALIDATE_OPT_IN_VIEWS)},
+        )
         assert response.status_code == 200, response.text
         body = response.json()
 
         # The wire extras are HTTP-only — and they are the ONLY divergence in key sets.
         assert VALIDATE_WIRE_EXTRAS.isdisjoint(local_dump)
+        assert set(local_dump) >= VALIDATE_OPT_IN_VIEWS, "an opt-in view must be a canonical report field, not a wire-only invention"
         assert set(body) == set(local_dump) | VALIDATE_WIRE_EXTRAS
 
         # graph_spec: presence parity (run-specific content — see module docstring).
@@ -71,6 +88,12 @@ class TestProtocolParity:
         assert body["mthds_contents"] == mthds_contents
         assert body["is_valid"] is True
         assert body["message"]
+
+        # The gate itself: a default call drops exactly the opt-in views and keeps everything else,
+        # so a caller that does not ask pays for no extra bytes.
+        default_response = client.post("/v1/validate", json={"mthds_contents": mthds_contents, "allow_signatures": allow_signatures})
+        assert default_response.status_code == 200, default_response.text
+        assert set(default_response.json()) == set(body) - VALIDATE_OPT_IN_VIEWS
 
     async def test_models_parity_unfiltered(self):
         local_deck = await PipelexMTHDSProtocol().models()

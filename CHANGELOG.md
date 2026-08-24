@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.18.0] - 2026-08-24
+
+### Added
+
+- **New `views` parameter on `/v1/validate`.** `ValidateRequest` now accepts `views: list[str]` (default `[]`), the structured-view counterpart to `render`. Tokens are resolved leniently and as a set: each is matched independently against the supported set, unknown or unsupported tokens are silently dropped and never trigger a 422, and order and duplicates do not matter. `input_form` is the only supported token today, attached exclusively to the valid arm of the response. The two lists are independent — a request may carry both, and a token does not cross axes.
+- **Documentation.** `docs/pipe-validate.md` now covers the new `views` parameter, the previously undocumented `render` parameter (including the lenient, set-based, mutually independent mechanics they share), the `orchestration_mode` override, and the opt-in response fields (`input_form`, `rendered_markdown`).
+- **Tests.** `tests/unit/test_validate_views.py` pins the gate: absent by default on both arms, present on the valid arm when requested, never on the invalid arm even when requested, unknown tokens ignored rather than rejected, and `views` / `render` resolving independently. `tests/unit/test_protocol_parity.py` gained the complementary pair — a default call omits `input_form`, and an opt-in call matches the local canonical report exactly.
+
+### Changed
+
+- **`input_form` is now an opt-in structured view on `/v1/validate` (Breaking).** v0.17.0 shipped it unconditionally on every valid verdict, as a side effect of the `pipelex` 0.52.0 pin rather than a decision. It is now gated, so a caller that does not ask gets a byte-identical response and the high-frequency consumers — editor hooks, CI gates, agent loops — stop paying for a form they discard. Callers that need it must send `{"views": ["input_form"]}`, which returns exactly what v0.17.0 returned unconditionally. In the published OpenAPI artifact, `input_form` leaves `ValidReport`'s `required` set to reflect the opt-in wire behavior; the canonical report still requires it internally, so a backend that forgets to derive it fails loudly rather than shipping an empty view.
+
 ## [v0.17.0] - 2026-08-24
 
 ### Added

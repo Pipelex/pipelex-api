@@ -11,7 +11,7 @@ info:
   license:
     name: MIT
     identifier: MIT
-  version: 0.17.0
+  version: 0.18.0
 paths:
   /health:
     get:
@@ -788,16 +788,19 @@ paths:
         \  `validated_pipes` sweep outcomes, `pending_signatures` + `is_runnable` runnability verdict,\n  best-effort `graph_spec`)\
         \ plus the wire extras (`mthds_contents` echo, `message`). A bundle\n  that declares no `main_pipe` validates fine\
         \ and carries `graph_spec=null`. Pending\n  signatures are reported as `pending_signatures` + `is_runnable: false`,\
-        \ never as an error.\n- **Invalid verdict (200, `is_valid: false`):** the `InvalidReport` arm — `validation_errors[]`\n\
-        \  (the structured per-error diagnostics, built by pipelex's one shared builder, incl. the\n  `dry_run` residual item)\
-        \ + `message`, with the structural artifacts absent. The runner\n  returns this as a value (`ErrorReport` with `validation_errors`)\
-        \ regardless of backend — the\n  in-process arm from the bundle's `ValidateBundleError`, the dispatched arm recovered\
-        \ from the\n  worker — so the route maps it to a 200 by matching validation diagnostics, never by catching an\n  exception.\
-        \ Returned `ErrorReport`s without validation diagnostics are backend/config/runtime\n  faults and keep the global\
-        \ RFC 7807 problem response path.\n- **No verdict (non-2xx):** a malformed request body or an `mthds_sources` length\
-        \ mismatch is a\n  request-shape **422**; a forbidden `orchestration_mode` override is a **403**; a host-wiring\n\
-        \  programmer error or a genuine orchestrator fault is a **5xx**; auth is **401/403**. All are\n  RFC 7807 `application/problem+json`\
-        \ rendered by the global handler in\n  `api.exception_handlers` — routes never shape them."
+        \ never as an error.\n  The opt-in `views` token `input_form` additionally attaches the per-pipe input-form\n  descriptors\
+        \ as a same-named top-level field, keyed like `pipe_io_contracts`; without the\n  token the field is absent and the\
+        \ body is byte-identical to a request that omits `views`.\n- **Invalid verdict (200, `is_valid: false`):** the `InvalidReport`\
+        \ arm — `validation_errors[]`\n  (the structured per-error diagnostics, built by pipelex's one shared builder, incl.\
+        \ the\n  `dry_run` residual item) + `message`, with the structural artifacts absent. The runner\n  returns this as\
+        \ a value (`ErrorReport` with `validation_errors`) regardless of backend — the\n  in-process arm from the bundle's\
+        \ `ValidateBundleError`, the dispatched arm recovered from the\n  worker — so the route maps it to a 200 by matching\
+        \ validation diagnostics, never by catching an\n  exception. Returned `ErrorReport`s without validation diagnostics\
+        \ are backend/config/runtime\n  faults and keep the global RFC 7807 problem response path.\n- **No verdict (non-2xx):**\
+        \ a malformed request body or an `mthds_sources` length mismatch is a\n  request-shape **422**; a forbidden `orchestration_mode`\
+        \ override is a **403**; a host-wiring\n  programmer error or a genuine orchestrator fault is a **5xx**; auth is **401/403**.\
+        \ All are\n  RFC 7807 `application/problem+json` rendered by the global handler in\n  `api.exception_handlers` — routes\
+        \ never shape them."
       operationId: validate_mthds_v1_validate_post
       requestBody:
         content:
@@ -2712,7 +2715,13 @@ components:
 
         load/parse/wiring failed, so this arm omits them and carries only the per-error diagnostics
 
-        plus the runnability facts.'
+        plus the runnability facts. The `input_form` view follows them into absence for the same reason
+
+        — it derives from a crate that was never assembled — so it is never declared here and `views`
+
+        has no effect on this arm (unlike `rendered_markdown`, which rides both arms because failure
+
+        text is exactly what a human surface wants).'
     LLMSetting:
       properties:
         model:
@@ -5141,6 +5150,9 @@ components:
             $ref: '#/components/schemas/PipeInputFormDescriptor'
           type: object
           title: Input Form
+          description: 'Opt-in Pipelex-API structured view: per-pipe input-form descriptors keyed exactly like `pipe_io_contracts`,
+            present only when the request''s `views` includes `input_form`. Absent by default — the structured contract fields
+            remain the verdict; this is a projection of them.'
         liftable_pipes:
           items:
             $ref: '#/components/schemas/LiftablePipeEntry'
@@ -5192,7 +5204,6 @@ components:
       type: object
       required:
       - bundle_blueprint
-      - input_form
       - mthds_contents
       title: ValidReport
       description: 'The 200 **valid** arm: the canonical `PipelexValidationReport` plus this server''s wire-only extras.
@@ -5204,7 +5215,18 @@ components:
 
         discriminant. The extras exist for HTTP clients only (the webapp reads back `mthds_contents`);
 
-        they are NOT part of the canonical report and no in-process consumer should depend on them.'
+        they are NOT part of the canonical report and no in-process consumer should depend on them.
+
+
+        One inherited field is deliberately re-declared: `input_form`. The canonical report requires it
+
+        (a backend that forgets to derive it must fail loudly rather than ship an empty view), but on the
+
+        wire it is an opt-in structured view gated by the request''s `views` — so it is re-declared with a
+
+        default here, keeping it out of the published schema''s `required` set. The value still always
+
+        arrives from the report; the route pops it when its token was not requested.'
     ValidateRequest:
       properties:
         mthds_contents:
@@ -5240,6 +5262,16 @@ components:
             adds a `rendered_<format>` field (e.g. `rendered_markdown`) to the 200 verdict, on both the valid and invalid
             arms. Unknown/unsupported tokens are silently ignored (presentation hint, not part of the verdict contract); the
             default empty list renders nothing and the response is unchanged.'
+        views:
+          items:
+            type: string
+          type: array
+          title: Views
+          description: 'Opt-in Pipelex-API structured views: extra projections to attach to the 200 verdict. A supported token
+            (`input_form`) adds a **same-named** top-level field to the valid arm only. Unknown/unsupported tokens are silently
+            ignored (a view is a projection of facts the verdict already determined, not part of the verdict contract); the
+            default empty list attaches nothing and the response is byte-identical to a request that omits the field. Independent
+            of `render`: a request may carry both, each resolving its own tokens.'
         orchestration_mode:
           anyOf:
           - type: string
