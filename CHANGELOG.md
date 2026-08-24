@@ -1,24 +1,40 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **A source-less run request now fails loudly, and says why.** `RunRequest.validate_request` used to **waive** the "at least one of `pipe_code` / `mthds_contents` / method bundle" precondition whenever the body carried any key outside the declared fields, on the theory that an extension might be the method selector. That theory is obsolete under the layered extension policy now written down in `docs/specs/pipelex-platform-api.md`: an extension-borne method selector is resolved by the layer that owns it *before* the request reaches this server, so a body arriving here with no run source is an error whatever else it carries.
+
+  The waiver was also **already dead on every live path** — the run routes build the model through `RunRequest.from_body`, which copies the declared fields only, so unknown keys were stripped before the validator ever saw them. Removing it is therefore behaviour-neutral, and the substantive change is the message.
+
+### Added
+
+- **The `422` names the extension args this deployment does not handle.** A source-less body that carries keys this server does not handle now gets a message that names them, instead of the generic precondition text. The canonical case is a hosted client pointed at an open-source runner: `{"method_id": "mt_…"}` used to produce an obscure "pipe_code and mthds_contents cannot both be empty", and now answers
+
+  > This request carries no run source this server understands (pipe_code, mthds_contents, or a method bundle). The extension args it does carry (`method_id`) are not handled by this deployment — a hosted-only selector such as `method_id` must be sent to the hosted API, which resolves it into a run source before any runner sees the request.
+
+  The wording is deployment-neutral on purpose: this server does not know whether it is hosted, so it reports what *it* handles rather than asserting anything about the caller's topology. Authored in `from_body` rather than the validator because only the raw body still holds the keys the message needs to name. Keys this server *does* handle — `pipeline_run_id`, `callback_urls`, `orchestration_mode`, `storage_scope`, and the legacy singular `mthds_content` — are never reported as unhandled, and a source-less body carrying only those keeps the base guidance. A body that has a real run source still accepts unknown extension keys untouched: the model stays extension-open.
+
+  No wire-shape change and no OpenAPI artifact change; the published request schemas are untouched.
+
 ## [v0.16.0] - 2026-08-20
 
-### Changed — breaking: built on `pipelex`'s `RunMetadata` split
+### Changed
 
-`JobMetadata` moved its run-constant half — `user_id`, `pipeline_run_id`, `storage_scope`, `request_id` — into a nested `RunMetadata`, reached as `job_metadata.run_metadata.*`. This server's own surface is untouched: `pipeline_run_setup` still takes those four as flat keyword arguments and builds the `JobMetadata` itself, so no route, request model or response shape changes. Only the test doubles that construct a `JobMetadata` directly had to follow.
+- **Built on `pipelex`'s `RunMetadata` split (Breaking).** `JobMetadata` moved its run-constant half — `user_id`, `pipeline_run_id`, `storage_scope`, `request_id` — into a nested `RunMetadata`, reached as `job_metadata.run_metadata.*`. This server's own surface is untouched: `pipeline_run_setup` still takes those four as flat keyword arguments and builds the `JobMetadata` itself, so no route, request model or response shape changes. Only the test doubles that construct a `JobMetadata` directly had to follow.
 
-The wire contract is unchanged, including the published OpenAPI artifact — see below for the one place that was nearly not true.
+  The wire contract is unchanged, including the published OpenAPI artifact — see below for the one place that was nearly not true.
 
-### Fixed — `PipeOutput` gained a field upstream, and `test_openapi_contract` earned its keep
+- **Pinned `pipelex` 0.50.0.** Up from `==0.47.0`, an exact PyPI pin as this dependency is meant to be expressed. It was briefly a `[tool.uv.sources]` git rev while `RunMetadata` was unreleased; that is gone, and with it the transitive override a source imposes.
 
-`pipelex` first carried the run's job on `PipeOutput` as a **model field**. `PipelexApiExecuteResponse.pipe_output` references `PipeOutput`, and `/v1/execute` returns `response.model_dump(...)` — so that field published `user_id`, `request_id`, `otel_context` and `trace_context` into this public API's response body **and** its committed OpenAPI schema.
+  The jump crosses three releases, so it picks up more than the `RunMetadata` split: `PipeFactoryErrorType` / `PipeValidationErrorType` moved to `pipelex.validation_error_types` (0.49.0), and the import follows them.
 
-`test_execute_publishes_the_tokens_usage_wire_records` asserts `{"LLMTokensUsage", "ImgGenTokensUsage", "JobMetadata"}.isdisjoint(schemas)`, and it failed. Upstream now carries the value as a private attribute behind a property — readable by a transport resolving a storage scope, absent from `model_dump`, `model_json_schema` and therefore the wire. **No change was needed on this side**, which is the right shape of fix: the artifact was never supposed to have to trim it.
+### Fixed
 
-### Changed — `pipelex` 0.47.0 → 0.50.0
+- **`PipeOutput` gained a field upstream, and `test_openapi_contract` earned its keep.** `pipelex` first carried the run's job on `PipeOutput` as a **model field**. `PipelexApiExecuteResponse.pipe_output` references `PipeOutput`, and `/v1/execute` returns `response.model_dump(...)` — so that field published `user_id`, `request_id`, `otel_context` and `trace_context` into this public API's response body **and** its committed OpenAPI schema.
 
-An exact PyPI pin, as this dependency is meant to be expressed. It was briefly a `[tool.uv.sources]` git rev while `RunMetadata` was unreleased; that is gone, and with it the transitive override a source imposes.
-
-The jump crosses three releases, so it picks up more than the `RunMetadata` split: `PipeFactoryErrorType` / `PipeValidationErrorType` moved to `pipelex.validation_error_types` (0.49.0), and the import follows them.
+  `test_execute_publishes_the_tokens_usage_wire_records` asserts `{"LLMTokensUsage", "ImgGenTokensUsage", "JobMetadata"}.isdisjoint(schemas)`, and it failed. Upstream now carries the value as a private attribute behind a property — readable by a transport resolving a storage scope, absent from `model_dump`, `model_json_schema` and therefore the wire. **No change was needed on this side**, which is the right shape of fix: the artifact was never supposed to have to trim it.
 
 ## [v0.15.1] - 2026-08-20
 
