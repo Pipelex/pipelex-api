@@ -1,24 +1,56 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **A source-less run request now fails loudly, and says why.** `RunRequest.validate_request` used to **waive** the "at least one of `pipe_code` / `mthds_contents` / method bundle" precondition whenever the body carried any key outside the declared fields, on the theory that an extension might be the method selector. That theory is obsolete under the layered extension policy now written down in `docs/specs/pipelex-platform-api.md`: an extension-borne method selector is resolved by the layer that owns it *before* the request reaches this server, so a body arriving here with no run source is an error whatever else it carries.
+
+  The waiver was also **already dead on every live path** — the run routes build the model through `RunRequest.from_body`, which copies the declared fields only, so unknown keys were stripped before the validator ever saw them. Removing it is therefore behaviour-neutral, and the substantive change is the message.
+
+- **Pinned `pipelex` 0.52.0 (Breaking).** Up from `==0.50.0`, exactly, and `mthds` follows to 0.8.2 transitively. The jump crosses two releases and brings the input-form descriptor: a pipe's inputs now describe themselves well enough for a caller to render a form from the validation verdict alone, instead of reverse-engineering one from the emitted JSON Schema. No code changed on this side — the report is assembled inside pipelex — but the published contract moved in several places, so this is breaking for anyone reading `/v1/validate`.
+
+  What a caller must change:
+
+  - `ValidReport` gained a **required** `input_form`, mapping each `pipe_ref` to a `PipeInputFormDescriptor` whose `fields` carry the namespaced `concept_ref` and its `refines` chain, presence, gating, fixed counts, authored defaults and one-member `choices`. A consumer deserializing the report strictly must add the member. The closed `kind` vocabulary arrives with it as `FieldKind` (`text`/`prose`/`date`/`number`/`boolean`/`enum`/`document`/`image`/`object`/`list`/`unknown`).
+  - `PipeInputContract.optional` (boolean) is **replaced** by `presence`, a three-valued `PresenceMarker` — `plain`, `optional` (`?`), or `force` (`!`) — so a `!` use-site assertion is now visible where it previously read as an ordinary required slot. Read `presence != "plain"` where you read `optional == true`.
+  - `IOMultiplicity` gained `fixed`, and both the input and the output contract now carry `multiplicity` with an `item_count` present exactly when it is `fixed`. A fixed-count list slot (`Concept[N]`, for `N > 1`) used to report `variable` and lose its count; it now reports the count honestly, while `Concept[1]` remains `single` — no list framing. Any consumer branching on `variable` to mean "a list" must accept `fixed` as a list too.
+  - Every pipe blueprint's `inputs` map widened from `string` values to `string | InputSlotBlueprint`, so a slot can carry its own table rather than only a concept ref.
+  - `PipeValidationError.error_type` gained the `HintLintErrorType` members (`hint_unknown_key`, `hint_unknown_intent`, `hint_inapplicable_intent`). These are **advisory only** — they ride the report's `warnings` and never make a verdict invalid — but an exhaustive `match` over the union has to handle them.
+
+  Two authoring changes reach anyone posting `.mthds` content: an unknown key in a concept structure-field table is now rejected at parse instead of silently dropped, and `required = true` may no longer be paired with `default_value`. Bundles relying on either being tolerated will start failing validation. The `.pipelex/` config schema did not move, so no migration is required.
+
+- **Four schemas in the OpenAPI artifact went opaque, upstream.** `ConceptBlueprint`, `ConceptStructureBlueprint`, `InputSlotBlueprint` and `InputFormField` now publish as a bare `{"type": "object", "additionalProperties": true}` with no properties, where `ConceptBlueprint` and `ConceptStructureBlueprint` previously published their full field list under `additionalProperties: false`.
+
+  This is a side effect of how intent hints are serialized, not an intentional loosening: each of those models gained a `@model_serializer(mode="wrap")` returning `dict[str, Any]` in order to drop absent `hints` rather than emit `null`, and pydantic derives a model's **serialization** schema from that return annotation. FastAPI generates response schemas in serialization mode, so the annotation is what reaches the artifact — the validation-mode schema is still complete and still `extra="forbid"`. The models did not actually loosen; only their published description did. Nothing here can fix it, and the artifact is regenerated as-is rather than hand-patched; it is filed upstream in `wip/inbox/`.
+
+### Added
+
+- **The `422` names the extension args this deployment does not handle.** A source-less body that carries keys this server does not handle now gets a message that names them, instead of the generic precondition text. The canonical case is a hosted client pointed at an open-source runner: `{"method_id": "mt_…"}` used to produce an obscure "pipe_code and mthds_contents cannot both be empty", and now answers
+
+  > This request carries no run source this server understands (pipe_code, mthds_contents, or a method bundle). The extension args it does carry (`method_id`) are not handled by this deployment — a hosted-only selector such as `method_id` must be sent to the hosted API, which resolves it into a run source before any runner sees the request.
+
+  The wording is deployment-neutral on purpose: this server does not know whether it is hosted, so it reports what *it* handles rather than asserting anything about the caller's topology. Authored in `from_body` rather than the validator because only the raw body still holds the keys the message needs to name. Keys this server *does* handle — `pipeline_run_id`, `callback_urls`, `orchestration_mode`, `storage_scope`, and the legacy singular `mthds_content` — are never reported as unhandled, and a source-less body carrying only those keeps the base guidance. A body that has a real run source still accepts unknown extension keys untouched: the model stays extension-open.
+
+  No wire-shape change and no OpenAPI artifact change; the published request schemas are untouched.
+
 ## [v0.16.0] - 2026-08-20
 
-### Changed — breaking: built on `pipelex`'s `RunMetadata` split
+### Changed
 
-`JobMetadata` moved its run-constant half — `user_id`, `pipeline_run_id`, `storage_scope`, `request_id` — into a nested `RunMetadata`, reached as `job_metadata.run_metadata.*`. This server's own surface is untouched: `pipeline_run_setup` still takes those four as flat keyword arguments and builds the `JobMetadata` itself, so no route, request model or response shape changes. Only the test doubles that construct a `JobMetadata` directly had to follow.
+- **Built on `pipelex`'s `RunMetadata` split (Breaking).** `JobMetadata` moved its run-constant half — `user_id`, `pipeline_run_id`, `storage_scope`, `request_id` — into a nested `RunMetadata`, reached as `job_metadata.run_metadata.*`. This server's own surface is untouched: `pipeline_run_setup` still takes those four as flat keyword arguments and builds the `JobMetadata` itself, so no route, request model or response shape changes. Only the test doubles that construct a `JobMetadata` directly had to follow.
 
-The wire contract is unchanged, including the published OpenAPI artifact — see below for the one place that was nearly not true.
+  The wire contract is unchanged, including the published OpenAPI artifact — see below for the one place that was nearly not true.
 
-### Fixed — `PipeOutput` gained a field upstream, and `test_openapi_contract` earned its keep
+- **Pinned `pipelex` 0.50.0.** Up from `==0.47.0`, an exact PyPI pin as this dependency is meant to be expressed. It was briefly a `[tool.uv.sources]` git rev while `RunMetadata` was unreleased; that is gone, and with it the transitive override a source imposes.
 
-`pipelex` first carried the run's job on `PipeOutput` as a **model field**. `PipelexApiExecuteResponse.pipe_output` references `PipeOutput`, and `/v1/execute` returns `response.model_dump(...)` — so that field published `user_id`, `request_id`, `otel_context` and `trace_context` into this public API's response body **and** its committed OpenAPI schema.
+  The jump crosses three releases, so it picks up more than the `RunMetadata` split: `PipeFactoryErrorType` / `PipeValidationErrorType` moved to `pipelex.validation_error_types` (0.49.0), and the import follows them.
 
-`test_execute_publishes_the_tokens_usage_wire_records` asserts `{"LLMTokensUsage", "ImgGenTokensUsage", "JobMetadata"}.isdisjoint(schemas)`, and it failed. Upstream now carries the value as a private attribute behind a property — readable by a transport resolving a storage scope, absent from `model_dump`, `model_json_schema` and therefore the wire. **No change was needed on this side**, which is the right shape of fix: the artifact was never supposed to have to trim it.
+### Fixed
 
-### Changed — `pipelex` 0.47.0 → 0.50.0
+- **`PipeOutput` gained a field upstream, and `test_openapi_contract` earned its keep.** `pipelex` first carried the run's job on `PipeOutput` as a **model field**. `PipelexApiExecuteResponse.pipe_output` references `PipeOutput`, and `/v1/execute` returns `response.model_dump(...)` — so that field published `user_id`, `request_id`, `otel_context` and `trace_context` into this public API's response body **and** its committed OpenAPI schema.
 
-An exact PyPI pin, as this dependency is meant to be expressed. It was briefly a `[tool.uv.sources]` git rev while `RunMetadata` was unreleased; that is gone, and with it the transitive override a source imposes.
-
-The jump crosses three releases, so it picks up more than the `RunMetadata` split: `PipeFactoryErrorType` / `PipeValidationErrorType` moved to `pipelex.validation_error_types` (0.49.0), and the import follows them.
+  `test_execute_publishes_the_tokens_usage_wire_records` asserts `{"LLMTokensUsage", "ImgGenTokensUsage", "JobMetadata"}.isdisjoint(schemas)`, and it failed. Upstream now carries the value as a private attribute behind a property — readable by a transport resolving a storage scope, absent from `model_dump`, `model_json_schema` and therefore the wire. **No change was needed on this side**, which is the right shape of fix: the artifact was never supposed to have to trim it.
 
 ## [v0.15.1] - 2026-08-20
 
