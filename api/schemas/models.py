@@ -43,8 +43,13 @@ class RunRequest(BaseModel):
 
     The declared fields are the protocol's **basic** arguments. The model is
     deliberately open (`extra="allow"`): a caller may send extra request
-    properties (an extension may carry the method selector), and they are kept
-    rather than silently dropped.
+    properties, and they are kept rather than silently dropped. Openness is not
+    a waiver, though — an unknown key never satisfies the run-source
+    precondition. Under the layered extension policy (the Pipelex workspace
+    spec `docs/specs/pipelex-platform-api.md` → "Layered extension policy"), an
+    extension-borne method selector is resolved by the layer that owns it
+    BEFORE the request reaches this one, so a body arriving here with no source
+    this server understands is an error whatever else it carries.
 
     Attributes:
         pipe_code: Code of the pipe to execute.
@@ -92,11 +97,10 @@ class RunRequest(BaseModel):
     def validate_request(cls, values: dict[str, Any]) -> dict[str, Any]:
         # The protocol requires at least one of pipe_code / mthds_contents. A method bundle
         # (`bundle_b64` / `files`) carries its own `.mthds` — so it satisfies the precondition
-        # on its own (the pipe to run comes from the bundle's `main_pipe`). When the body carries
-        # extension args (keys outside the declared fields), an extension may be the method
-        # selector — the server is the source of truth, so we do not over-validate.
+        # on its own (the pipe to run comes from the bundle's `main_pipe`). Extension args carry
+        # NO waiver: see the class docstring and `_refuse_source_less_extension_body`, which
+        # authors the better message for that case where the raw body is still in hand.
         has_bundle = values.get("bundle_b64") is not None or values.get("files") is not None
-        has_extensions = any(key not in cls.model_fields for key in values)
         # A bundle carries its own `.mthds`; combining it with inline `mthds_contents` would load
         # both into one library with no dedup, so a shared domain collides deep in the run with an
         # opaque duplicate-domain error. Refuse the combination up front (a bundle + `pipe_code` — to
@@ -104,7 +108,7 @@ class RunRequest(BaseModel):
         if has_bundle and values.get("mthds_contents"):
             msg = "A method bundle (bundle_b64 / files) and inline mthds_contents are mutually exclusive; send one or the other."
             raise PipelineRequestError(msg)
-        if values.get("pipe_code") is None and not values.get("mthds_contents") and not has_bundle and not has_extensions:
+        if values.get("pipe_code") is None and not values.get("mthds_contents") and not has_bundle:
             msg = (
                 "pipe_code and mthds_contents cannot both be empty. Either: both are provided, or if there are no mthds_contents, "
                 "then pipe_code must be provided and must reference a pipe already registered in the library. "
@@ -112,6 +116,49 @@ class RunRequest(BaseModel):
             )
             raise PipelineRequestError(msg)
         return values
+
+    @classmethod
+    def _refuse_source_less_extension_body(cls, *, request_body: dict[str, Any], mthds_contents: list[str] | None) -> None:
+        """Diagnose "a hosted client was pointed at this runner" before the generic precondition fires.
+
+        This lives here, and not in `validate_request`, because only the RAW body still
+        holds the keys the message needs to name: the model copies the declared fields
+        only, so by the time the validator runs the unknown keys are already gone.
+
+        Fires only when the body carries NO run source this server understands AND at
+        least one key it does not handle. A source-less body whose every key IS handled
+        falls through to `validate_request`'s base guidance — there is no extension to
+        name there. Wording stays deployment-neutral: the runner does not know whether
+        it is hosted, so it reports what it handles, never what the caller "should have"
+        deployed.
+
+        Precedence: `_parse_request` validates `PipelineApiExtras` before calling
+        `from_body`, so a body that is BOTH source-less and carries a malformed handled
+        extra (a non-http(s) `callback_urls` entry, say) gets the extras 422 and never
+        reaches this diagnostic. That ordering is deliberate — both are caller mistakes
+        answered with the same status and error domain, and demoting a concrete malformed
+        value to surface a second message would be the worse trade. The naming guarantee
+        therefore covers the single-fault case.
+        """
+        has_bundle = request_body.get("bundle_b64") is not None or request_body.get("files") is not None
+        if request_body.get("pipe_code") is not None or mthds_contents or has_bundle:
+            return
+        # `PipelineApiExtras` is defined below in this module — resolved at call time, which is
+        # always after import. It is the allowlist of API-server-only keys the routes DO handle
+        # (pipeline_run_id, callback_urls, orchestration_mode, storage_scope), so naming one of
+        # them as "not handled" would be a lie.
+        handled_keys = set(cls.model_fields) | set(PipelineApiExtras.model_fields) | {"mthds_content"}
+        unhandled_keys = sorted(key for key in request_body if key not in handled_keys)
+        if not unhandled_keys:
+            return
+        named = ", ".join(f"`{key}`" for key in unhandled_keys)
+        msg = (
+            "This request carries no run source this server understands (pipe_code, mthds_contents, "
+            f"or a method bundle). The extension args it does carry ({named}) are not handled by this "
+            "deployment — a hosted-only selector such as `method_id` must be sent to the hosted API, "
+            "which resolves it into a run source before any runner sees the request."
+        )
+        raise PipelineRequestError(msg)
 
     @classmethod
     def from_body(cls, request_body: dict[str, Any]) -> RunRequest:
@@ -126,6 +173,7 @@ class RunRequest(BaseModel):
             mthds_content = request_body.get("mthds_content")
             if mthds_content is not None:
                 mthds_contents = [mthds_content]
+        cls._refuse_source_less_extension_body(request_body=request_body, mthds_contents=mthds_contents)
         return cls(
             pipe_code=request_body.get("pipe_code"),
             mthds_contents=mthds_contents,
