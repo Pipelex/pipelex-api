@@ -45,8 +45,8 @@ class RunRequest(BaseModel):
     deliberately open (`extra="allow"`): a caller may send extra request
     properties, and they are kept rather than silently dropped. Openness is not
     a waiver, though — an unknown key never satisfies the run-source
-    precondition. Under the layered extension policy
-    (`docs/specs/pipelex-platform-api.md` → "Layered extension policy"), an
+    precondition. Under the layered extension policy (the Pipelex workspace
+    spec `docs/specs/pipelex-platform-api.md` → "Layered extension policy"), an
     extension-borne method selector is resolved by the layer that owns it
     BEFORE the request reaches this one, so a body arriving here with no source
     this server understands is an error whatever else it carries.
@@ -131,6 +131,14 @@ class RunRequest(BaseModel):
         name there. Wording stays deployment-neutral: the runner does not know whether
         it is hosted, so it reports what it handles, never what the caller "should have"
         deployed.
+
+        Precedence: `_parse_request` validates `PipelineApiExtras` before calling
+        `from_body`, so a body that is BOTH source-less and carries a malformed handled
+        extra (a non-http(s) `callback_urls` entry, say) gets the extras 422 and never
+        reaches this diagnostic. That ordering is deliberate — both are caller mistakes
+        answered with the same status and error domain, and demoting a concrete malformed
+        value to surface a second message would be the worse trade. The naming guarantee
+        therefore covers the single-fault case.
         """
         has_bundle = request_body.get("bundle_b64") is not None or request_body.get("files") is not None
         if request_body.get("pipe_code") is not None or mthds_contents or has_bundle:
