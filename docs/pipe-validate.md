@@ -19,6 +19,9 @@ Validate MTHDS content by parsing, loading, and dry-running pipes without execut
 - `mthds_contents` (list[str], required): MTHDS contents to validate (always an array, even for a single file)
 - `allow_signatures` (boolean, optional, default `false`): controls only the **sweep mechanics** for `PipeSignature` placeholders — whether signature pipes are mock-run during the dry-run sweep and therefore listed in `validated_pipes`. It does **not** change the verdict: an unimplemented signature is never a rejection, it is a *runnability fact* reported via `pending_signatures` + `is_runnable` in both modes
 - `mthds_sources` (list[str] | null, optional): per-file sources, parallel to `mthds_contents` — see [Sourcing submitted files](#sourcing-submitted-files). When present it must match `mthds_contents` in length (a mismatch is a 422 request error)
+- `render` (list[str], optional, default `[]`): opt-in *rendered text* to attach to the verdict — see [Opt-in extras](#opt-in-extras-render-and-views)
+- `views` (list[str], optional, default `[]`): opt-in *structured views* to attach to the verdict — see [Opt-in extras](#opt-in-extras-render-and-views)
+- `orchestration_mode` (string | null, optional): per-request backend override for the validation dispatch — see [Where validation runs](#where-validation-runs). Honored only when the deployment allows it; a forbidden override is a 403
 
 **Response (the verdict union):**
 
@@ -68,6 +71,11 @@ The 200 body is one of two arms, discriminated on the mandatory `is_valid` field
 - `mthds_contents` (list[str]): echo of the validated request contents
 - `message` (string): status message
 
+**Response Fields (opt-in, present only when requested):**
+
+- `input_form` (object, valid arm only, requires `views: ["input_form"]`): per-pipe input-form descriptors, keyed by the same namespaced `pipe_ref` as `pipe_io_contracts`. Each entry carries an ordered `fields` list describing what a caller must collect to run that pipe — a field's `kind` (drawn from a closed vocabulary), its `name`, whether it is `required`, whether an empty value should `gate` the run, and the per-kind detail (`choices`, `item_count`, `default_value`, nested `concept_ref`, …). It is a **projection of facts the verdict already states**, derived from what the bundle authored rather than from the emitted JSON Schema, so a client can render a run form from the verdict alone
+- `rendered_markdown` (string, both arms, requires `render: ["markdown"]`): a server-rendered Markdown view of the verdict, produced by the same renderers the local CLI uses
+
 **Invalid arm (`is_valid: false`)** — the per-error diagnostics plus the runnability facts; the structural artifacts (`bundle_blueprint`, `pipe_io_contracts`, `graph_spec`, `validated_pipes`) and `mthds_contents` are **absent**, because they do not exist when load/parse/wiring failed:
 
 ```json
@@ -99,6 +107,24 @@ The 200 body is one of two arms, discriminated on the mandatory `is_valid` field
 **What This Endpoint Does:**
 
 The route wraps the runtime's protocol `validate`: parse → load → dry-run-sweep every pipe → build the per-pipe IO contracts → best-effort graph of the `main_pipe` → assemble the canonical report. The runner returns the verdict as a value — the canonical report on the valid arm, or a structured `ErrorReport` (a bundle the caller can fix) on the invalid arm — and the route maps the invalid verdict to the 200 invalid arm by matching the returned value, never by catching a transport error. A bundle that declares no `main_pipe` validates normally and simply carries `graph_spec: null` — there is no main-pipe precondition.
+
+**Opt-in extras (`render` and `views`):**
+
+The verdict body is lean by default: a request that sends neither list gets exactly the structured contract described above, byte-identical to a request that omits both fields. This matters because the highest-frequency callers of `/validate` — editor hooks, CI gates, agent loops — read a handful of fields and discard the rest, and should never pay for bytes they throw away.
+
+Two independent opt-in axes attach more:
+
+- **`render`** produces *rendered text*, attached under a mechanical `rendered_<format>` key. The supported token is `markdown`, which attaches `rendered_markdown` on **both** 200 arms — failure text is exactly what a human-facing surface wants.
+- **`views`** attaches a *structured* artifact under a **same-named** top-level field. The supported token is `input_form`, which attaches `input_form` on the **valid arm only**: the descriptor derives from a library that was never assembled when load/parse/wiring failed, so it follows `bundle_blueprint`, `pipe_io_contracts` and `graph_spec` into absence on the invalid arm.
+
+Both lists share the same mechanics, and both are deliberately typed as plain `list[str]` rather than closed enums at the request boundary:
+
+- Each token is resolved **independently** against the server's supported set. A known token is honored; an unknown or unsupported one is **silently dropped — never a 422**. A stale token from an older client must not fail the call, and one bad token in a list does not poison the good ones.
+- The lists are treated as **sets**: order-insensitive and deduped.
+- They are **independent of each other**. A request may carry both, and each resolves its own tokens against its own supported set. A token is unknown to the other list — sending `render: ["input_form"]` attaches nothing at all.
+- Neither ever appears on a no-verdict response. No verdict, no view.
+
+Neither axis is part of the verdict contract: a machine consumer branches on the structured fields, and an extra is a presentation or a projection layered on top. That is what keeps adding a token, or changing what one renders, a non-breaking change.
 
 **Sourcing submitted files:**
 
