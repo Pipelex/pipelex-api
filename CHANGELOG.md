@@ -10,7 +10,7 @@
 
 ### Changed
 
-- **`input_form` is now an opt-in structured view on `/v1/validate` (Breaking).** v0.17.0 shipped it unconditionally on every valid verdict, as a side effect of the `pipelex` 0.52.0 pin rather than a decision. It is now gated, so a caller that does not ask gets a byte-identical response and the high-frequency consumers — editor hooks, CI gates, agent loops — stop paying for a form they discard. Callers that need it must send `{"views": ["input_form"]}`, which returns exactly what v0.17.0 returned unconditionally. In the published OpenAPI artifact, `input_form` leaves `ValidReport`'s `required` set to reflect the opt-in wire behavior; the canonical report still requires it internally, so a backend that forgets to derive it fails loudly rather than shipping an empty view.
+- **`input_form` is now an opt-in structured view on `/v1/validate` (Breaking).** v0.17.0 shipped it unconditionally on every valid verdict, as a side effect of the `pipelex` 0.52.0 pin rather than a decision. It is now gated: a caller that does not ask no longer receives it, so the high-frequency consumers — editor hooks, CI gates, agent loops — stop paying for a form they discard. An empty or unknown `views` list changes nothing either, so the default body is byte-identical to a request that omits the field entirely. Callers that need it must send `{"views": ["input_form"]}`, which returns exactly what v0.17.0 returned unconditionally. In the published OpenAPI artifact, `input_form` leaves `ValidReport`'s `required` set to reflect the opt-in wire behavior; the canonical report still requires it internally, so a backend that forgets to derive it fails loudly rather than shipping an empty view.
 
 ## [v0.17.0] - 2026-08-24
 

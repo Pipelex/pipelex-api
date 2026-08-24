@@ -16,6 +16,7 @@ resolving independently.
 
 from typing import Any
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -100,10 +101,12 @@ class TestValidateInputFormView:
         assert body["is_valid"] is True
         assert "input_form" not in body
 
-    def test_mixed_known_and_unknown_tokens_attach_the_known_one(self):
+    @pytest.mark.parametrize("views", [["bogus", "input_form"], ["input_form", "bogus"]], ids=["unknown_first", "known_first"])
+    def test_mixed_known_and_unknown_tokens_attach_the_known_one(self, views: list[str]):
         # Per-token resolution: the known token attaches, the unknown one is dropped (not poisoning).
+        # Both orders, since the tokens resolve as a set — position must not decide the outcome.
         client = _build_client()
-        response = client.post("/v1/validate", json={"mthds_contents": [VALID_MTHDS], "views": ["bogus", "input_form"]})
+        response = client.post("/v1/validate", json={"mthds_contents": [VALID_MTHDS], "views": views})
         assert response.status_code == 200, response.text
         assert "input_form" in response.json()
 

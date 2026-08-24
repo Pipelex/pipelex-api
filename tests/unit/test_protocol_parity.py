@@ -93,7 +93,12 @@ class TestProtocolParity:
         # so a caller that does not ask pays for no extra bytes.
         default_response = client.post("/v1/validate", json={"mthds_contents": mthds_contents, "allow_signatures": allow_signatures})
         assert default_response.status_code == 200, default_response.text
-        assert set(default_response.json()) == set(body) - VALIDATE_OPT_IN_VIEWS
+        default_body = default_response.json()
+        assert set(default_body) == set(body) - VALIDATE_OPT_IN_VIEWS
+        # Gating a view must not perturb what it leaves behind: every retained key keeps its opt-in
+        # value (graph_spec excluded — run-specific content, see the module docstring).
+        for key in sorted(set(default_body) - {"graph_spec"}):
+            assert default_body[key] == body[key], f"default/opt-in divergence on retained key {key!r}"
 
     async def test_models_parity_unfiltered(self):
         local_deck = await PipelexMTHDSProtocol().models()
