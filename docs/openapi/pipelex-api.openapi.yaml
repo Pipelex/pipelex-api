@@ -11,7 +11,7 @@ info:
   license:
     name: MIT
     identifier: MIT
-  version: 0.18.0
+  version: 0.19.0
 paths:
   /health:
     get:
@@ -4085,6 +4085,7 @@ components:
       - optional_input_unguarded
       - optional_branch_required_field
       - optional_force_redundant
+      - input_presence_vacuous
       - native_concept_redeclaration
       - unresolved_concept
       - unresolved_pipe_dependency
@@ -5448,7 +5449,7 @@ components:
 
         item type also carries the report''s advisory ``warnings``, built by
 
-        ``pipelex.pipeline.optionality_warnings``: a warning is the same shape of
+        ``pipelex.pipeline.advisory_warnings``: a warning is the same shape of
 
         diagnostic, differing only in that it does not make the verdict invalid.
 
