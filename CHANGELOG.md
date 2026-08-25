@@ -1,5 +1,23 @@
 # Changelog
 
+## [v0.19.0] - 2026-08-26
+
+### Added
+
+- **New validation error type** — Added `input_presence_vacuous` to `PipeValidationErrorType`, an advisory lint that warns when a required method input points to a concept with no required fields. It is scoped to the bundle's declared `main_pipe`. This does not affect `is_valid`, but consumers performing exhaustive matches over the enum must handle the new member. (Breaking)
+
+### Changed
+
+- **Dependency** — Pinned `pipelex` to `0.53.0` (up from `0.52.0`). The `.pipelex/` config schema did not move, so no migration is required.
+- **Warning output** — Intent-hint warnings are now capped at five unknown-hint-key findings per site, collapsing the rest into an `...and N more` item; hint keys or intent words longer than 60 characters are elided with an ellipsis.
+- **OpenAPI docs** — Regenerated `docs/openapi/pipelex-api.openapi.yaml` to include the new `PipeValidationErrorType` member and updated docstring references (moved from `pipelex.pipeline.optionality_warnings` to `pipelex.pipeline.advisory_warnings`).
+
+### Fixed
+
+- **`.mthds` parsing** — An empty `[concept.X.structure]` table now parses as an object with no fields instead of being described as prose refining `native.Text`.
+- **Python class reflection** — Registered Python classes declaring no fields now reflect as empty objects rather than `unknown`.
+- **Domain locators** — Hierarchical domains (e.g., `legal.contracts`) are now split at the last dot rather than the first when building an advisory warning's locator, so the locator names the correct domain.
+
 ## [v0.18.0] - 2026-08-24
 
 ### Added
