@@ -1,5 +1,18 @@
 # Changelog
 
+## [v0.20.0] - 2026-08-28
+
+### Changed
+
+- **Pinned `pipelex` 0.54.0.** Up from `==0.53.0`, exactly; it brings `mthds` 0.11.1, which now types the input-form descriptor and the pipe I/O contract models for the whole stack. The `.pipelex/` config schema did not move, so no migration is required. Two upstream changes reach callers of this server:
+  - **The `input_form` view's published schema is now the standard's kind-discriminated union (Breaking for generated clients).** `PipeInputFormDescriptor.fields` items are a `oneOf` over one closed model per field kind — `TextField`, `ProseField`, `DateField`, `NumberField`, `BooleanField`, `EnumField`, `DocumentField`, `ImageField`, `ObjectField`, `ListField`, `UnknownField` — discriminated on `kind`, with a parallel `*Item` family for list items. The flat `InputFormField` and the `FieldKind` enum leave the artifact, so a client regenerated from `docs/openapi/pipelex-api.openapi.yaml` loses those type names and gains the per-kind ones. The JSON on the wire is unchanged; hand-written clients are unaffected. The arms publish their full closed shapes (`additionalProperties: false`, real properties), as `mthds` 0.11.1 fixed the serializer annotation that previously erased them to opaque objects.
+  - **A count of one is strictly singular (Breaking).** Upstream, `Concept[1]` is universally the single form: a `[1]` input takes the value itself and refuses a list, a `[1]` output produces one object rather than a one-item list, and `Concept[0]` is rejected at validation time. Methods executed through this server that relied on `[1]` list behavior must be updated.
+- **OpenAPI docs** — Regenerated `docs/openapi/pipelex-api.openapi.yaml` for the pin. Beyond the `input_form` union above, four previously opaque schemas — `ConceptBlueprint`, `ConceptStructureBlueprint`, `ConstructBlueprint`, `InputSlotBlueprint` — now publish their real closed shapes instead of `{"additionalProperties": true}`, another consequence of the same upstream serializer fix.
+
+### Added
+
+- **Contract test for the `input_form` union.** `tests/unit/test_openapi_contract.py` now pins that `PipeInputFormDescriptor.fields` is discriminated on `kind` with exactly the standard's kind set, that every arm is a published closed schema with real properties, and that the flat `InputFormField`/`FieldKind` never resurface — so an upstream regression to the flat or opaque shape fails here instead of shipping silently.
+
 ## [v0.19.0] - 2026-08-26
 
 ### Added

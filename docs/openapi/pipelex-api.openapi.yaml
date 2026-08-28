@@ -11,7 +11,7 @@ info:
   license:
     name: MIT
     identifier: MIT
-  version: 0.19.0
+  version: 0.20.0
 paths:
   /health:
     get:
@@ -1441,6 +1441,134 @@ components:
       - opaque
       - auto
       title: Background
+    BooleanField:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        kind:
+          type: string
+          const: boolean
+          title: Kind
+          default: boolean
+        name:
+          type: string
+          title: Name
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      - name
+      title: BooleanField
+      description: '`boolean` at a named position.'
+    BooleanItem:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        kind:
+          type: string
+          const: boolean
+          title: Kind
+          default: boolean
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      title: BooleanItem
+      description: '`boolean` — true or false.'
     BuildConceptRequest:
       properties:
         spec:
@@ -1960,8 +2088,42 @@ components:
       - structure_class_name
       title: Concept
     ConceptBlueprint:
-      additionalProperties: true
+      properties:
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+        description:
+          type: string
+          title: Description
+        structure:
+          anyOf:
+          - type: string
+          - additionalProperties:
+              anyOf:
+              - type: string
+              - $ref: '#/components/schemas/ConceptStructureBlueprint'
+            type: object
+          - type: 'null'
+          title: Structure
+        refines:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Refines
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+      additionalProperties: false
       type: object
+      required:
+      - description
+      title: ConceptBlueprint
     ConceptRepresentationFormat:
       type: string
       enum:
@@ -1971,8 +2133,72 @@ components:
       title: ConceptRepresentationFormat
       description: Output format for concept representations.
     ConceptStructureBlueprint:
-      additionalProperties: true
+      properties:
+        description:
+          type: string
+          title: Description
+        type:
+          anyOf:
+          - $ref: '#/components/schemas/ConceptStructureBlueprintFieldType'
+          - type: 'null'
+        key_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Key Type
+        value_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Value Type
+        item_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Item Type
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        item_concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Item Concept Ref
+        choices:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Choices
+        default_value:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Default Value
+        required:
+          type: boolean
+          title: Required
+          default: false
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+      additionalProperties: false
       type: object
+      required:
+      - description
+      title: ConceptStructureBlueprint
+      description: 'One field of a concept''s structure table. Unknown keys are rejected — the field table''s
+
+        keys are strict, exactly like an input slot table''s; hint *content* stays lenient (unknown
+
+        hint keys warn and are preserved, per intent-hints.md).'
     ConceptStructureBlueprintFieldType:
       type: string
       enum:
@@ -1988,8 +2214,19 @@ components:
       - concept
       title: ConceptStructureBlueprintFieldType
     ConstructBlueprint:
-      additionalProperties: true
+      properties:
+        fields:
+          additionalProperties:
+            $ref: '#/components/schemas/ConstructFieldBlueprint'
+          type: object
+          title: Fields
+      additionalProperties: false
       type: object
+      required:
+      - fields
+      title: ConstructBlueprint
+      description: "Blueprint for composing a StructuredContent from working memory.\n\nParsed from `[pipe.name.construct]`\
+        \ section in MTHDS files.\n\nAttributes:\n    fields: Dictionary mapping field names to their composition blueprints"
     ConstructFieldBlueprint:
       properties:
         method:
@@ -2070,6 +2307,142 @@ components:
         a 200 discriminated on `is_valid`, carrying the same structured `ValidationErrorItem`s the
 
         local CLI and `/validate` emit for the identical failure.'
+    DateField:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        kind:
+          type: string
+          const: date
+          title: Kind
+          default: date
+        datetime:
+          type: boolean
+          title: Datetime
+        name:
+          type: string
+          title: Name
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      - datetime
+      - name
+      title: DateField
+      description: '`date` at a named position.'
+    DateItem:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        kind:
+          type: string
+          const: date
+          title: Kind
+          default: date
+        datetime:
+          type: boolean
+          title: Datetime
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      - datetime
+      title: DateItem
+      description: '`date` — a calendar date, or a point in time.'
     DeleteKeyOp:
       properties:
         table_path:
@@ -2149,6 +2522,139 @@ components:
       - range
       title: Diagnostic
       description: Structured lint/format diagnostic returned by `pipelex-tools-py`.
+    DocumentField:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        kind:
+          type: string
+          const: document
+          title: Kind
+          default: document
+        name:
+          type: string
+          title: Name
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      - name
+      title: DocumentField
+      description: '`document` at a named position.'
+    DocumentItem:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        kind:
+          type: string
+          const: document
+          title: Kind
+          default: document
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      title: DocumentItem
+      description: '`document` — a document supplied as a file or a URL.
+
+
+        No accept-list and no upload affordance: what the value is rides `concept_ref` and `refines`,
+
+        and how a renderer offers a file is the renderer''s decision.'
     DryRunStatus:
       type: string
       enum:
@@ -2250,6 +2756,146 @@ components:
         Here ``table_path`` addresses the table to create, not its parent, so it cannot be empty:
 
         the document root always exists.'
+    EnumField:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        kind:
+          type: string
+          const: enum
+          title: Kind
+          default: enum
+        choices:
+          items:
+            type: string
+          type: array
+          title: Choices
+        name:
+          type: string
+          title: Name
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      - choices
+      - name
+      title: EnumField
+      description: '`enum` at a named position.'
+    EnumItem:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        kind:
+          type: string
+          const: enum
+          title: Kind
+          default: enum
+        choices:
+          items:
+            type: string
+          type: array
+          title: Choices
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      - choices
+      title: EnumItem
+      description: '`enum` — one of a fixed set of values.'
     ErrorSpec:
       properties:
         error_type:
@@ -2300,22 +2946,6 @@ components:
       required:
       - model
       title: ExtractSetting
-    FieldKind:
-      type: string
-      enum:
-      - text
-      - prose
-      - date
-      - number
-      - boolean
-      - enum
-      - document
-      - image
-      - object
-      - list
-      - unknown
-      title: FieldKind
-      description: The closed `kind` union of the input-form descriptor — field intents, never widget names.
     FixSafety:
       type: string
       enum:
@@ -2502,14 +3132,14 @@ components:
       - variable
       - fixed
       title: IOMultiplicity
-      description: 'Wire value for a slot''s multiplicity: one item, a variable-length list, or a fixed count.
+      description: 'How many items a slot takes or a pipe resolves to: one item, a variable-length list, or a fixed count.
 
 
-        A fixed-count slot (`Concept[N]`) reports `fixed` and carries the exact count in the
+        Read together with `item_count`, which is non-null exactly on the `fixed` arm. `Concept[1]`
 
-        contract''s `item_count`; a variable-length slot (`Concept[]`) reports `variable` with no
+        is `single` — one item, no list framing — because the language says so, so a `fixed` count on
 
-        count. `Concept[1]` is single — no list framing.'
+        this wire is always greater than one.'
     IOSpec:
       properties:
         name:
@@ -2584,6 +3214,72 @@ components:
         The optional `data` field can hold the full serialized content when
 
         full data capture is enabled (via --graph-full-data CLI option).'
+    ImageField:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        kind:
+          type: string
+          const: image
+          title: Kind
+          default: image
+        name:
+          type: string
+          title: Name
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      - name
+      title: ImageField
+      description: '`image` at a named position.'
     ImageFormat:
       type: string
       enum:
@@ -2591,6 +3287,68 @@ components:
       - jpeg
       - webp
       title: ImageFormat
+    ImageItem:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        kind:
+          type: string
+          const: image
+          title: Kind
+          default: image
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      title: ImageItem
+      description: '`image` — an image, which a renderer may preview.'
     ImageSize:
       properties:
         width:
@@ -2649,12 +3407,37 @@ components:
       required:
       - model
       title: ImgGenSetting
-    InputFormField:
-      additionalProperties: true
-      type: object
     InputSlotBlueprint:
-      additionalProperties: true
+      properties:
+        concept:
+          type: string
+          title: Concept
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+      additionalProperties: false
       type: object
+      required:
+      - concept
+      title: InputSlotBlueprint
+      description: 'The expanded input-slot form: `name = { concept = "…", hints = { … } }` (spec: intent-hints.md).
+
+
+        `concept` carries the full slot grammar of the string form (ref, optional multiplicity, optional
+
+        presence marker). The form is deliberately closed (`extra="forbid"` implements the spec''s
+
+        "unknown slot-table keys MUST be rejected") so future per-slot semantic keys land here without a
+
+        second syntax. A slot table carrying no hints collapses to its plain string at parse time (see
+
+        `PipeBlueprint.collapse_hint_free_slot_tables`), so a slot value that IS a table carries
+
+        non-empty hints — hint-free bundles produce byte-identical blueprints to the string form.'
     InputsTemplateFormat:
       type: string
       enum:
@@ -2817,6 +3600,211 @@ components:
       - diagnostics
       title: LintResponse
       description: Response body of `POST /lint`.
+    ListField:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        kind:
+          type: string
+          const: list
+          title: Kind
+          default: list
+        item:
+          oneOf:
+          - $ref: '#/components/schemas/TextItem'
+          - $ref: '#/components/schemas/ProseItem'
+          - $ref: '#/components/schemas/DateItem'
+          - $ref: '#/components/schemas/NumberItem'
+          - $ref: '#/components/schemas/BooleanItem'
+          - $ref: '#/components/schemas/EnumItem'
+          - $ref: '#/components/schemas/DocumentItem'
+          - $ref: '#/components/schemas/ImageItem'
+          - $ref: '#/components/schemas/ObjectItem'
+          - $ref: '#/components/schemas/ListItem'
+          - $ref: '#/components/schemas/UnknownItem'
+          title: Item
+          discriminator:
+            propertyName: kind
+            mapping:
+              boolean: '#/components/schemas/BooleanItem'
+              date: '#/components/schemas/DateItem'
+              document: '#/components/schemas/DocumentItem'
+              enum: '#/components/schemas/EnumItem'
+              image: '#/components/schemas/ImageItem'
+              list: '#/components/schemas/ListItem'
+              number: '#/components/schemas/NumberItem'
+              object: '#/components/schemas/ObjectItem'
+              prose: '#/components/schemas/ProseItem'
+              text: '#/components/schemas/TextItem'
+              unknown: '#/components/schemas/UnknownItem'
+        item_count:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Item Count
+        name:
+          type: string
+          title: Name
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      - item
+      - name
+      title: ListField
+      description: '`list` at a named position, recursing through a nameless `item`.'
+    ListItem:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        kind:
+          type: string
+          const: list
+          title: Kind
+          default: list
+        item:
+          oneOf:
+          - $ref: '#/components/schemas/TextItem'
+          - $ref: '#/components/schemas/ProseItem'
+          - $ref: '#/components/schemas/DateItem'
+          - $ref: '#/components/schemas/NumberItem'
+          - $ref: '#/components/schemas/BooleanItem'
+          - $ref: '#/components/schemas/EnumItem'
+          - $ref: '#/components/schemas/DocumentItem'
+          - $ref: '#/components/schemas/ImageItem'
+          - $ref: '#/components/schemas/ObjectItem'
+          - $ref: '#/components/schemas/ListItem'
+          - $ref: '#/components/schemas/UnknownItem'
+          title: Item
+          discriminator:
+            propertyName: kind
+            mapping:
+              boolean: '#/components/schemas/BooleanItem'
+              date: '#/components/schemas/DateItem'
+              document: '#/components/schemas/DocumentItem'
+              enum: '#/components/schemas/EnumItem'
+              image: '#/components/schemas/ImageItem'
+              list: '#/components/schemas/ListItem'
+              number: '#/components/schemas/NumberItem'
+              object: '#/components/schemas/ObjectItem'
+              prose: '#/components/schemas/ProseItem'
+              text: '#/components/schemas/TextItem'
+              unknown: '#/components/schemas/UnknownItem'
+        item_count:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Item Count
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      - item
+      title: ListItem
+      description: '`list` — an array of one element type, recursing through its `item`.
+
+
+        An input slot authored `Concept[]` is a `list` with no `item_count`; one authored `Concept[N]`
+
+        carries `item_count: N`. `Concept[1]` is single — no list framing — so a stated count is always
+
+        at least 2. `concept_ref` and `refines` name the element concept, and the `item` carries the
+
+        same `concept_ref`; on a plural node the merged `hints` ride both the list and its item.'
     ModelCategory:
       type: string
       enum:
@@ -3223,6 +4211,380 @@ components:
         \ object pass resolve\n     separately). Ordered by descending calls, then by name, so a consumer can\n     take the\
         \ first entry as the dominant model without sorting.\n\nThe same invariants hold for the ``subtree_*`` half, which\
         \ covers this node plus\nevery descendant (rolled up in the assembler, once, so no consumer re-derives it\nand disagrees)."
+    NumberField:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        kind:
+          type: string
+          const: number
+          title: Kind
+          default: number
+        integer:
+          type: boolean
+          title: Integer
+        minimum:
+          anyOf:
+          - type: integer
+          - type: number
+          - type: 'null'
+          title: Minimum
+        maximum:
+          anyOf:
+          - type: integer
+          - type: number
+          - type: 'null'
+          title: Maximum
+        exclusive_minimum:
+          anyOf:
+          - type: integer
+          - type: number
+          - type: 'null'
+          title: Exclusive Minimum
+        exclusive_maximum:
+          anyOf:
+          - type: integer
+          - type: number
+          - type: 'null'
+          title: Exclusive Maximum
+        name:
+          type: string
+          title: Name
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      - integer
+      - name
+      title: NumberField
+      description: '`number` at a named position.'
+    NumberItem:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        kind:
+          type: string
+          const: number
+          title: Kind
+          default: number
+        integer:
+          type: boolean
+          title: Integer
+        minimum:
+          anyOf:
+          - type: integer
+          - type: number
+          - type: 'null'
+          title: Minimum
+        maximum:
+          anyOf:
+          - type: integer
+          - type: number
+          - type: 'null'
+          title: Maximum
+        exclusive_minimum:
+          anyOf:
+          - type: integer
+          - type: number
+          - type: 'null'
+          title: Exclusive Minimum
+        exclusive_maximum:
+          anyOf:
+          - type: integer
+          - type: number
+          - type: 'null'
+          title: Exclusive Maximum
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      - integer
+      title: NumberItem
+      description: '`number` — an integer or a floating-point number, with its optional bounds.'
+    ObjectField:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        kind:
+          type: string
+          const: object
+          title: Kind
+          default: object
+        fields:
+          items:
+            oneOf:
+            - $ref: '#/components/schemas/TextField'
+            - $ref: '#/components/schemas/ProseField'
+            - $ref: '#/components/schemas/DateField'
+            - $ref: '#/components/schemas/NumberField'
+            - $ref: '#/components/schemas/BooleanField'
+            - $ref: '#/components/schemas/EnumField'
+            - $ref: '#/components/schemas/DocumentField'
+            - $ref: '#/components/schemas/ImageField'
+            - $ref: '#/components/schemas/ObjectField'
+            - $ref: '#/components/schemas/ListField'
+            - $ref: '#/components/schemas/UnknownField'
+            discriminator:
+              propertyName: kind
+              mapping:
+                boolean: '#/components/schemas/BooleanField'
+                date: '#/components/schemas/DateField'
+                document: '#/components/schemas/DocumentField'
+                enum: '#/components/schemas/EnumField'
+                image: '#/components/schemas/ImageField'
+                list: '#/components/schemas/ListField'
+                number: '#/components/schemas/NumberField'
+                object: '#/components/schemas/ObjectField'
+                prose: '#/components/schemas/ProseField'
+                text: '#/components/schemas/TextField'
+                unknown: '#/components/schemas/UnknownField'
+          type: array
+          title: Fields
+        name:
+          type: string
+          title: Name
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      - fields
+      - name
+      title: ObjectField
+      description: '`object` at a named position, recursing through `fields` — themselves named.'
+    ObjectItem:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        kind:
+          type: string
+          const: object
+          title: Kind
+          default: object
+        fields:
+          items:
+            oneOf:
+            - $ref: '#/components/schemas/TextField'
+            - $ref: '#/components/schemas/ProseField'
+            - $ref: '#/components/schemas/DateField'
+            - $ref: '#/components/schemas/NumberField'
+            - $ref: '#/components/schemas/BooleanField'
+            - $ref: '#/components/schemas/EnumField'
+            - $ref: '#/components/schemas/DocumentField'
+            - $ref: '#/components/schemas/ImageField'
+            - $ref: '#/components/schemas/ObjectField'
+            - $ref: '#/components/schemas/ListField'
+            - $ref: '#/components/schemas/UnknownField'
+            discriminator:
+              propertyName: kind
+              mapping:
+                boolean: '#/components/schemas/BooleanField'
+                date: '#/components/schemas/DateField'
+                document: '#/components/schemas/DocumentField'
+                enum: '#/components/schemas/EnumField'
+                image: '#/components/schemas/ImageField'
+                list: '#/components/schemas/ListField'
+                number: '#/components/schemas/NumberField'
+                object: '#/components/schemas/ObjectField'
+                prose: '#/components/schemas/ProseField'
+                text: '#/components/schemas/TextField'
+                unknown: '#/components/schemas/UnknownField'
+          type: array
+          title: Fields
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      - fields
+      title: ObjectItem
+      description: '`object` — a structured concept, recursing through its resolved payload fields.'
     PipeBatchBlueprint:
       properties:
         source:
@@ -3523,11 +4885,22 @@ components:
           title: Inputs
         output:
           $ref: '#/components/schemas/PipeOutputContract'
+      additionalProperties: false
       type: object
       required:
+      - inputs
       - output
       title: PipeIOContract
-      description: The input/output contract of one pipe — a `pipe_io_contracts` entry.
+      description: 'The contract of one pipe — one `pipe_io_contracts` entry, with both members required.
+
+
+        `inputs` is a map from authored input name to input contract, and it deliberately contracts no
+
+        order: an ordered view of a pipe''s inputs is the input-form descriptor''s job, which keeps this
+
+        artifact byte-stable whatever a renderer needs. A pipe with no declared inputs carries
+
+        `inputs: {}` — a stated fact, never an omitted member. Closed shape (`extra="forbid"`).'
     PipeImgGenBlueprint:
       properties:
         source:
@@ -3619,10 +4992,8 @@ components:
           title: Concept Ref
         presence:
           $ref: '#/components/schemas/PresenceMarker'
-          default: plain
         multiplicity:
           $ref: '#/components/schemas/IOMultiplicity'
-          default: single
         item_count:
           anyOf:
           - type: integer
@@ -3632,23 +5003,71 @@ components:
           additionalProperties: true
           type: object
           title: Json Schema
+      additionalProperties: false
       type: object
       required:
       - concept_ref
+      - presence
+      - multiplicity
+      - item_count
+      - json_schema
       title: PipeInputContract
-      description: 'One declared input: the concept it expects and the JSON Schema of its content.'
+      description: 'One declared input slot: the concept it expects, its presence, its plurality and the JSON Schema of its
+        content.
+
+
+        Keyed in `PipeIOContract.inputs` by the authored input name, dotted names included.
+
+        Every member is required: `item_count` is always on the wire, `null` off the fixed arm.
+
+        Closed shape (`extra="forbid"`): an unknown member is version drift, rejected at the parse.'
     PipeInputFormDescriptor:
       properties:
         fields:
           items:
-            $ref: '#/components/schemas/InputFormField'
+            oneOf:
+            - $ref: '#/components/schemas/TextField'
+            - $ref: '#/components/schemas/ProseField'
+            - $ref: '#/components/schemas/DateField'
+            - $ref: '#/components/schemas/NumberField'
+            - $ref: '#/components/schemas/BooleanField'
+            - $ref: '#/components/schemas/EnumField'
+            - $ref: '#/components/schemas/DocumentField'
+            - $ref: '#/components/schemas/ImageField'
+            - $ref: '#/components/schemas/ObjectField'
+            - $ref: '#/components/schemas/ListField'
+            - $ref: '#/components/schemas/UnknownField'
+            discriminator:
+              propertyName: kind
+              mapping:
+                boolean: '#/components/schemas/BooleanField'
+                date: '#/components/schemas/DateField'
+                document: '#/components/schemas/DocumentField'
+                enum: '#/components/schemas/EnumField'
+                image: '#/components/schemas/ImageField'
+                list: '#/components/schemas/ListField'
+                number: '#/components/schemas/NumberField'
+                object: '#/components/schemas/ObjectField'
+                prose: '#/components/schemas/ProseField'
+                text: '#/components/schemas/TextField'
+                unknown: '#/components/schemas/UnknownField'
           type: array
           title: Fields
+      additionalProperties: false
       type: object
       required:
       - fields
       title: PipeInputFormDescriptor
-      description: The input form of one pipe — an `input_form` entry.
+      description: 'The input form of one pipe — one `input_form` entry.
+
+
+        `fields` holds one descriptor per declared input slot, in authored input order: the order is why
+
+        the descriptor is a sibling artifact of the contract rather than a decoration inside it. A pipe
+
+        with no inputs maps to `{"fields": []}` — an empty form is a valid form, not an omitted entry.
+
+        Closed shape (`extra="forbid"`).'
     PipeLLMBlueprint:
       properties:
         source:
@@ -3736,13 +5155,26 @@ components:
         optional:
           type: boolean
           title: Optional
-          default: false
+      additionalProperties: false
       type: object
       required:
       - concept_ref
       - multiplicity
+      - item_count
+      - optional
       title: PipeOutputContract
-      description: 'The pipe''s output: the concept it produces and how many items it resolves to.'
+      description: 'What the pipe resolves to: the concept it produces, how many items that is, and whether it may be absent.
+
+
+        Deliberately asymmetric with the input side: an output carries a two-valued `optional` where
+
+        an input carries a three-valued `presence`, because `!` MUST NOT appear on an output — a force
+
+        marker is a use-site assertion about an input, so a three-valued output slot would have an arm
+
+        nothing can ever produce. No output member carries a schema: the payload a run produces is the
+
+        run''s own result. Closed shape (`extra="forbid"`).'
     PipeOutputWire:
       properties:
         working_memory:
@@ -4333,9 +5765,20 @@ components:
       - optional
       - force
       title: PresenceMarker
-      description: 'Presence of a value in a declared slot: plain (always present), optional (`?` — the slot may
+      description: 'The authored presence marker of a declared input slot, verbatim and three-valued.
 
-        legitimately hold no value), or force (`!` — a use-site assertion that the value must be present).'
+
+        `plain` (no marker) and `force` (`!`) are the same requirement on the caller — the slot
+
+        must be supplied — and differ only in what the author asserted; `optional` (`?`) means the
+
+        caller may omit the slot and the pipe handles the absence itself. The distinction is kept on
+
+        the wire because lint and graph surfaces read it, and a producer flattening it to a boolean
+
+        would destroy it for every consumer at once. A consumer that only needs "may this be absent?"
+
+        answers it as `is_optional`, in exactly one place.'
     ProblemDocument:
       properties:
         type:
@@ -4453,6 +5896,174 @@ components:
       - low
       - auto
       title: PromptImageDetail
+    ProseField:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        min_length:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Min Length
+        max_length:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Length
+        pattern:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pattern
+        format:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Format
+        kind:
+          type: string
+          const: prose
+          title: Kind
+          default: prose
+        name:
+          type: string
+          title: Name
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      - name
+      title: ProseField
+      description: '`prose` at a named position.'
+    ProseItem:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        min_length:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Min Length
+        max_length:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Length
+        pattern:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pattern
+        format:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Format
+        kind:
+          type: string
+          const: prose
+          title: Kind
+          default: prose
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      title: ProseItem
+      description: '`prose` — flowing free text.'
     ProviderErrorMetadata:
       properties:
         provider:
@@ -5000,6 +6611,92 @@ components:
       - tag_style
       title: TemplatingStyle
       description: 'How a pipe''s inputs are tagged and formatted into its prompt: a tag style and a text format.'
+    TextField:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        min_length:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Min Length
+        max_length:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Length
+        pattern:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pattern
+        format:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Format
+        kind:
+          type: string
+          const: text
+          title: Kind
+          default: text
+        name:
+          type: string
+          title: Name
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      - name
+      title: TextField
+      description: '`text` at a named position — a top-level field or a structure field.'
     TextFormat:
       type: string
       enum:
@@ -5008,6 +6705,88 @@ components:
       - html
       - json
       title: TextFormat
+    TextItem:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        min_length:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Min Length
+        max_length:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Length
+        pattern:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pattern
+        format:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Format
+        kind:
+          type: string
+          const: text
+          title: Kind
+          default: text
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      title: TextItem
+      description: '`text` — a short single-line string.'
     TimingSpec:
       properties:
         started_at:
@@ -5097,6 +6876,139 @@ components:
         ``nb_tokens_by_category`` keys) are open sets on the wire, typed as plain strings —
 
         runtime enum churn is non-breaking for clients.'
+    UnknownField:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        kind:
+          type: string
+          const: unknown
+          title: Kind
+          default: unknown
+        name:
+          type: string
+          title: Name
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      - name
+      title: UnknownField
+      description: '`unknown` at a named position.'
+    UnknownItem:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        concept_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Concept Ref
+        refines:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Refines
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        required:
+          type: boolean
+          title: Required
+        presence:
+          anyOf:
+          - $ref: '#/components/schemas/PresenceMarker'
+          - type: 'null'
+        gating:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Gating
+        default_value:
+          title: Default Value
+        examples:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Examples
+        hints:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Hints
+        kind:
+          type: string
+          const: unknown
+          title: Kind
+          default: unknown
+      additionalProperties: false
+      type: object
+      required:
+      - required
+      title: UnknownItem
+      description: '`unknown` — not honestly describable as any other kind.
+
+
+        The mandatory escape hatch that makes a total derivation truthful: a renderer falls back to raw
+
+        entry against the slot''s `json_schema` in the pipe I/O contract.'
     UserAction:
       properties:
         kind:
