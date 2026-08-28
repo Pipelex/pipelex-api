@@ -207,3 +207,28 @@ class TestOpenApiErrorContract:
 
         # Nothing else references the internal usage models, so they leave the artifact entirely.
         assert {"LLMTokensUsage", "ImgGenTokensUsage", "JobMetadata"}.isdisjoint(schemas)
+
+    def test_input_form_fields_are_a_kind_discriminated_union_of_closed_shapes(self, openapi_schema: dict[str, Any]):
+        """`PipeInputFormDescriptor.fields` publishes the standard's per-kind field models as a
+        union discriminated on `kind` — one member model per kind, the flat `InputFormField`
+        gone. The arms must stay closed shapes with real properties: the standard's field models
+        share a wrap serializer, and an imprecise return annotation on it silently erases every
+        arm to an open `{"additionalProperties": true}` object (validation-mode schemas and
+        `model_dump()` both stay correct, so nothing else notices). This is what would catch an
+        upstream regression to the flat or opaque shape.
+        """
+        schemas = openapi_schema["components"]["schemas"]
+        field_schema = schemas["PipeInputFormDescriptor"]["properties"]["fields"]["items"]
+        assert field_schema["discriminator"]["propertyName"] == "kind"
+        kind_mapping = field_schema["discriminator"]["mapping"]
+        assert set(kind_mapping) == {"text", "prose", "date", "number", "boolean", "enum", "document", "image", "object", "list", "unknown"}
+        member_refs = {option["$ref"] for option in field_schema["oneOf"]}
+        assert set(kind_mapping.values()) == member_refs
+
+        for ref in member_refs:
+            member = schemas[ref.rsplit("/", 1)[-1]]
+            assert member["additionalProperties"] is False
+            assert {"kind", "name", "required"} <= set(member["properties"])
+
+        # The flat pre-union models must not resurface beside the per-kind ones.
+        assert {"InputFormField", "FieldKind"}.isdisjoint(schemas)
