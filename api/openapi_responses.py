@@ -116,9 +116,13 @@ PROBLEM_401: dict[str, Any] = _problem(
     },
 )
 
-PROBLEM_403_ORCHESTRATION_MODE: dict[str, Any] = _problem(
-    "`OrchestrationModeOverrideForbidden` — the request asked for an `orchestration_mode` this deployment does not "
-    "allow overriding per request (`allow_request_orchestration_mode_override = false`).",
+PROBLEM_403_RUN_POLICY: dict[str, Any] = _problem(
+    "A deployment-policy refusal: `OrchestrationModeOverrideForbidden` — the request asked for an "
+    "`orchestration_mode` this deployment does not allow overriding per request "
+    "(`allow_request_orchestration_mode_override = false`); `CustomCodeRequiresSandbox` — the method (a bundle, or a "
+    "fetched `method_ref` package) ships custom Python and this deployment is not sandbox-hosted; or "
+    "`MethodStructuresRefusedError` — a fetched package declares in-process Python structure classes, which hosted "
+    "execution always refuses (express the types as MTHDS concepts instead).",
 )
 
 PROBLEM_409_DUPLICATE_RUN: dict[str, Any] = _problem(
@@ -156,9 +160,15 @@ PROBLEM_501_ASYNC_NOT_ENABLED: dict[str, Any] = _problem(
     "current deployment; do not retry.",
 )
 
+PROBLEM_404_METHOD_PACKAGE: dict[str, Any] = _problem(
+    "`MethodPackageNotFoundError` — the `method_ref` repository was fetched, but no package in it matches the "
+    "requested address by manifest identity. The message lists the packages the repository does contain.",
+)
+
 PROBLEM_501_METHOD_REF: dict[str, Any] = _problem(
-    "`MethodRefNotSupported` — the request selected its closure by `method_ref`, which the published contract accepts "
-    "but no server-side method registry resolves yet. Submit inline `files[]` instead.",
+    "`MethodRefNotSupported` — the request selected its closure by a **registry-form** `method_ref` (not a "
+    "`github.com/...` address), and no server-side method registry resolves those yet. Use an address-form reference "
+    "or submit inline `files[]` instead.",
 )
 
 

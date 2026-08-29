@@ -12,11 +12,15 @@ DEFAULT_MAX_REQUEST_BODY_MIB = 100
 DEFAULT_MAX_MTHDS_FILE_KIB = 1024  # 1 MiB per .mthds file
 DEFAULT_MAX_MTHDS_FILES_PER_REQUEST = 16
 DEFAULT_MAX_PIPE_CODE_LEN = 256
+MAX_METHOD_REF_LEN = 512  # `method_ref` selector strings; a fixed schema bound, not env-tunable
 DEFAULT_MAX_CALLBACK_URLS = 5
 DEFAULT_MAX_CALLBACK_URL_LEN = 2048
 DEFAULT_MAX_AGENT_SPEC_KIB = 256  # 256 KiB for JSON concept/pipe specs
 DEFAULT_MAX_BUNDLE_FILES = 128  # entries in a materialized method bundle (.mthds + .py + requirements.txt)
 DEFAULT_MAX_BUNDLE_TOTAL_KIB = 8 * 1024  # 8 MiB decompressed across the whole bundle (zip-bomb guard)
+DEFAULT_MAX_METHOD_CACHE_CLONES = 64  # cached method-package clones (one per resolved commit SHA)
+DEFAULT_MAX_METHOD_CACHE_TOTAL_KIB = 512 * 1024  # 512 MiB across all cached clones
+DEFAULT_MAX_METHOD_CACHE_AGE_HOURS = 24  # a cached clone unused for this long is evicted
 
 
 def _read_positive_int(env_var: str, default: int) -> int:
@@ -48,3 +52,7 @@ MAX_AGENT_SPEC_BYTES = _read_positive_int("MAX_AGENT_SPEC_KIB", DEFAULT_MAX_AGEN
 
 MAX_BUNDLE_FILES = _read_positive_int("MAX_BUNDLE_FILES", DEFAULT_MAX_BUNDLE_FILES)
 MAX_BUNDLE_TOTAL_BYTES = _read_positive_int("MAX_BUNDLE_TOTAL_KIB", DEFAULT_MAX_BUNDLE_TOTAL_KIB) * 1024
+
+MAX_METHOD_CACHE_CLONES = _read_positive_int("MAX_METHOD_CACHE_CLONES", DEFAULT_MAX_METHOD_CACHE_CLONES)
+MAX_METHOD_CACHE_TOTAL_BYTES = _read_positive_int("MAX_METHOD_CACHE_TOTAL_KIB", DEFAULT_MAX_METHOD_CACHE_TOTAL_KIB) * 1024
+MAX_METHOD_CACHE_AGE_SECONDS = _read_positive_int("MAX_METHOD_CACHE_AGE_HOURS", DEFAULT_MAX_METHOD_CACHE_AGE_HOURS) * 3600

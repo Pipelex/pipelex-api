@@ -2,9 +2,13 @@
 
 Pins `docs/specs/pipelex-codegen.md#route-envelopes` (workspace root): the request accepts inline
 `files[]` XOR a `method_ref`; a produced verdict is a 200 discriminated on `is_valid` with the
-crate on the valid arm; request-shape errors are 422 problem+json; `method_ref` is an honest 501
-until the method registry exists.
+crate on the valid arm; request-shape errors are 422 problem+json; an address-form `method_ref`
+resolves the fetched package's `.mthds` files into the closure, while the registry form keeps its
+honest 501 until the method registry exists.
 """
+
+from collections.abc import Callable
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -73,9 +77,26 @@ class TestResolveRoute:
         assert "crate" not in body
         assert "is_runnable" not in body
 
-    def test_method_ref_is_501_problem_json_until_registry_exists(self):
+    def test_address_method_ref_resolves_the_fetched_package(self, install_method_package: Callable[..., Path]):
+        # The address-form un-reserve (run-by-address MVP Phase 2): a `github.com/...` ref
+        # resolves through the same fetch path as a `method_ref` run, and the package's
+        # `.mthds` files feed the closure with their real relative paths as sources.
+        install_method_package(files={"documents.mthds": VALID_MTHDS})
         client = _build_client()
-        response = client.post("/v1/resolve", json={"method_ref": "github.com/acme/methods/invoice"})
+        response = client.post("/v1/resolve", json={"method_ref": "github.com/pipelex/methods/documents@v0.1.0"})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["is_valid"] is True
+        crate = body["crate"]
+        assert "smoke.echo" in crate["pipes"]
+        # The package's real file name rides the crate's provenance map.
+        assert crate["source_map"]["smoke.echo"] == "documents.mthds"
+
+    def test_registry_form_method_ref_keeps_the_501(self):
+        # The registry form (any non-address reference) stays reserved for the packaging
+        # program's closing phase — an honest 501, never a silent empty verdict.
+        client = _build_client()
+        response = client.post("/v1/resolve", json={"method_ref": "acme/invoice-tools"})
         assert response.status_code == 501, response.text
         assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "MethodRefNotSupported"

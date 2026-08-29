@@ -8,7 +8,7 @@ from pipelex.pipe_machinery.rendering.input_renderer import InputsTemplateFormat
 from pipelex.pipeline.exceptions import ValidateBundleError
 from pydantic import BaseModel, Field, model_validator
 
-from api.openapi_responses import PROBLEM_501_METHOD_REF
+from api.openapi_responses import PROBLEM_404_METHOD_PACKAGE, PROBLEM_501_METHOD_REF
 from api.routes.pipelex.crate_ops import (
     CrateInvalidReport,
     RequestedPipe,
@@ -137,7 +137,7 @@ def _render_report(*, requested: BuildInputsRequest, requested_pipe: RequestedPi
     response_model=BuildInputsResponse,
     # On top of the composite router's shared 401/413/422/500: the `method_ref` closure selector the
     # envelope accepts but no server-side method registry resolves yet (shared with /resolve, /codegen).
-    responses={501: PROBLEM_501_METHOD_REF},
+    responses={404: PROBLEM_404_METHOD_PACKAGE, 501: PROBLEM_501_METHOD_REF},
 )
 async def build_inputs(request_data: BuildInputsRequest) -> JSONResponse:
     """Generate an example inputs template for a pipe (the inputs projection, per pipe).

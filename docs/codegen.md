@@ -4,14 +4,14 @@ Resolve a library closure into its **normalized library crate**, and project tha
 
 Both are **Pipelex API extensions**, not MTHDS Protocol routes: they are not tagged `x-mthds-protocol` in the [OpenAPI artifact](openapi/pipelex-api.openapi.yaml), and an MTHDS runner is not required to serve them. The *crate* is a different matter — its shape is the standard's [Library Crate Format](https://mthds.ai), so the wire fields are brand-neutral and any MTHDS tool can read one. What is ours is the HTTP surface that produces it, and the type projection on top (the standard specifies none).
 
-Both endpoints speak the [`POST /v1/validate`](pipe-validate.md) verdict discipline: a **produced verdict is always a `200`** discriminated on `is_valid`; the invalid arm carries the structured `validation_errors[]` from pipelex's one shared builder — each item optionally carrying a [`suggested_fix`](error-responses.md#suggested-fixes). Non-2xx is reserved for *no verdict could be produced*: request-shape errors (an unknown projection `kind`/`target`, a malformed closure selector) are `422` RFC 7807 `application/problem+json`, `method_ref` is `501`, auth is `401`/`403`, server faults are `5xx`.
+Both endpoints speak the [`POST /v1/validate`](pipe-validate.md) verdict discipline: a **produced verdict is always a `200`** discriminated on `is_valid`; the invalid arm carries the structured `validation_errors[]` from pipelex's one shared builder — each item optionally carrying a [`suggested_fix`](error-responses.md#suggested-fixes). Non-2xx is reserved for *no verdict could be produced*: request-shape errors (an unknown projection `kind`/`target`, a malformed closure selector) are `422` RFC 7807 `application/problem+json`, a registry-form `method_ref` is `501`, an address-form `method_ref` that fails to resolve maps per the [`method_ref` error table](pipe-run.md#running-a-method-by-address-method_ref), auth is `401`/`403`, server faults are `5xx`.
 
 ## Selecting the closure
 
 Both endpoints accept the same closure selector — exactly one of:
 
 - `files` (list, content-passing): inline MTHDS bundles, each `{ "content": "...", "source": "optional/logical/path.mthds" }`. `source` threads onto diagnostics and the crate's `source_map`.
-- `method_ref` (string): a reference to an installed/published method resolving to a library plus its exported entry pipe. The envelope accepts it today, but the server answers **`501`** (`MethodRefNotSupported`) until method-registry resolution lands.
+- `method_ref` (string): a reference to a published method. The **address form** — `github.com/<owner>/<repo>` plus an optional package selector and `@<tag>` — is resolved server-side through the same fetch path as a [`method_ref` run](pipe-run.md#running-a-method-by-address-method_ref): the package's `.mthds` files feed the closure, each with its real relative path as `source` (so diagnostics and the crate's `source_map` carry true per-file labels). Only `.mthds` data travels on these routes — the package's Python (if any) never loads here. The **registry form** (any non-address reference) stays reserved: the server answers **`501`** (`MethodRefNotSupported`) until method-registry resolution lands.
 
 Providing neither or both is a request-shape `422`.
 
