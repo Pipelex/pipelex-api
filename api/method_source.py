@@ -14,8 +14,9 @@ manifest-identity package location, the bounds, and the structures check all liv
   files are materialized into a temporary `library_dirs` entry — exactly the split the
   method-bundle transport uses, so a fetched package runs the same proven path.
 - The tooling routes (`/resolve`, `/codegen`, `/build/*`) use
-  :func:`fetch_method_mthds_files`: only the `.mthds` files, as `files[]` items. No Python
-  ever loads there, so the execution-locus gate does not apply.
+  :func:`fetch_method_mthds_files`: only the `.mthds` files, as `files[]` items, paired with
+  the manifest's `main_pipe` so the per-pipe projections default their selector exactly as a
+  run does. No Python ever loads there, so the execution-locus gate does not apply.
 
 The security gate (packaging invariant 7 — execution locus decides): `.mthds` content is
 data, always acceptable. On a deployment that is NOT sandbox-hosted, a fetched package
@@ -34,6 +35,7 @@ can never race a running pipeline.
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
+from typing import NamedTuple
 
 from mthds.package.discovery import MANIFEST_FILENAME
 from pipelex import log
@@ -63,6 +65,16 @@ class FetchedMethodSource(BaseModel):
     library_dirs: list[str] | None = None
     main_pipe: str | None = Field(default=None, description="The manifest's declared entry pipe; a request `pipe_code` overrides it.")
     provenance: MethodProvenance
+
+
+class FetchedMthdsFiles(NamedTuple):
+    """A fetched package shaped for the tooling path: its `.mthds` files plus the manifest's entry pipe."""
+
+    files: list[MthdsFileItem]
+    """The package's `.mthds` files as `files[]` items, each labelled with its real relative path."""
+
+    main_pipe: str | None
+    """The manifest's declared `main_pipe` (a bare pipe code), or None when the manifest declares none."""
 
 
 def _fetch_package(method_ref: str) -> FetchedMethodPackage:
@@ -171,13 +183,16 @@ def fetched_method_source(method_ref: str) -> Generator[FetchedMethodSource, Non
         )
 
 
-def fetch_method_mthds_files(method_ref: str) -> list[MthdsFileItem]:
-    """Fetch a `method_ref`'s package and return its `.mthds` files as `files[]` items.
+def fetch_method_mthds_files(method_ref: str) -> FetchedMthdsFiles:
+    """Fetch a `method_ref`'s package and return its `.mthds` files as `files[]` items, plus its `main_pipe`.
 
     The tooling-route shape: each item pairs the file's content with its real relative path
     as `source`, so crate provenance and diagnostics carry true per-file labels. Only
     `.mthds` data travels — the package's Python (if any) never loads on these routes, so
-    the execution-locus gate does not apply here.
+    the execution-locus gate does not apply here. The manifest's `main_pipe` rides beside the
+    files so a per-pipe projection can default its selector the way a run does — the manifest
+    is the package author's declaration of the entry pipe, and dropping it here would make
+    `main_pipe` buy them nothing on the tooling routes.
 
     Args:
         method_ref: The raw `method_ref` string from the request.
@@ -196,4 +211,4 @@ def fetch_method_mthds_files(method_ref: str) -> list[MthdsFileItem]:
         items.append(MthdsFileItem(content=content, source=relative))
     if not items:
         raise_validation_error(message=f"Method package '{package.full_address}' contains no .mthds file.")
-    return items
+    return FetchedMthdsFiles(files=items, main_pipe=package.manifest.main_pipe)

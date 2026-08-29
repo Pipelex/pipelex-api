@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **The per-pipe build routes honor a fetched package's manifest `main_pipe`.** `POST /v1/build/{inputs,output,runner}` with an address-form `method_ref` and no `pipe_ref` used to answer `422` ("the closure declares no `main_pipe`") whenever the package's domains declared none themselves — even though its `METHODS.toml` named an entry pipe, which the run routes already honored. The tooling routes now default the pipe with the run routes' precedence: the request's `pipe_ref`, then the fetched manifest's `main_pipe`, then the closure's own declared `main_pipe` (still a `422` when that declares none, or several). Inline `files[]` requests carry no manifest and behave exactly as before. A manifest `main_pipe` naming a pipe the closure does not contain is a `422` that says where the selector came from. `/resolve` and `/codegen` select no pipe and are unchanged. The OpenAPI artifact's `pipe_ref` / `requested_pipe_ref` descriptions are regenerated to say so.
+
 ## [v0.21.0] - 2026-08-29
 
 ### Added

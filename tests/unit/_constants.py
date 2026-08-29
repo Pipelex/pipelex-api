@@ -37,6 +37,37 @@ main_pipe = "echo"
 pipes = ["echo"]
 """
 
+# The same stub manifest with `main_pipe` naming `shout` — a pipe the closure's own declarations
+# would NOT default to (and, beside a second declared main_pipe, could not default at all). Exercises
+# the manifest outranking the closure in the tooling routes' pipe-default chain.
+STUB_METHOD_MANIFEST_MAIN_PIPE_SHOUT = """\
+[package]
+name = "documents"
+address = "github.com/pipelex/methods"
+version = "0.1.0"
+description = "A stub package whose manifest names an entry pipe the closure would not default to."
+main_pipe = "shout"
+
+[exports.smoke]
+pipes = ["echo"]
+
+[exports.other]
+pipes = ["shout"]
+"""
+
+# The same stub manifest declaring NO `main_pipe` — the chain then falls through to the closure's
+# own declaration, exactly as for inline `files[]`.
+STUB_METHOD_MANIFEST_NO_MAIN_PIPE = """\
+[package]
+name = "documents"
+address = "github.com/pipelex/methods"
+version = "0.1.0"
+description = "A stub package whose manifest declares no entry pipe."
+
+[exports.smoke]
+pipes = ["echo"]
+"""
+
 # A minimal, valid single-pipe bundle used across the build/validate/pipeline route tests.
 VALID_MTHDS = """\
 domain = "smoke"

@@ -62,7 +62,10 @@ class BuildInputsValidReport(BaseModel):
     pipe_ref: str = Field(..., description="The qualified pipe the template was generated for — the resolved selector.")
     requested_pipe_ref: str | None = Field(
         default=None,
-        description="The `pipe_ref` as submitted. Absent when it was omitted and defaulted to the closure's `main_pipe`.",
+        description=(
+            "The `pipe_ref` as submitted. Absent when it was omitted and defaulted — to the fetched package manifest's "
+            "`main_pipe` on a `method_ref` request, else to the closure's declared `main_pipe`."
+        ),
     )
     format: InputsTemplateFormat = Field(..., description="The template encoding (echo of the request).")
     explicit: bool = Field(..., description="Whether the ceremonial envelope shape was emitted (echo of the request).")
@@ -161,16 +164,24 @@ async def build_inputs(request_data: BuildInputsRequest) -> JSONResponse:
     - **Valid verdict (200, `is_valid: true`):** the template, in `inputs` or `inputs_toml` per `format`.
     - **Invalid verdict (200, `is_valid: false`):** the closure could not be parsed, loaded, or
       validated — `validation_errors[]` from pipelex's one shared builder; no template exists.
-    - **No verdict (non-2xx):** an unknown pipe ref, an omitted `pipe_ref` on a closure with no (or
-      several) `main_pipe`, or a malformed closure selector is a request-shape 422 problem+json;
-      `method_ref` is a 501 until server-side method-registry resolution exists.
+    - **No verdict (non-2xx):** an unknown pipe ref, an omitted `pipe_ref` that nothing defaults (no
+      fetched-manifest `main_pipe`, and a closure declaring no — or several — `main_pipe`), or a
+      malformed closure selector is a request-shape 422 problem+json; a registry-form `method_ref`
+      is a 501 until server-side method-registry resolution exists.
+
+    An omitted `pipe_ref` defaults the way a run by address does: to the fetched package manifest's
+    `main_pipe` on a `method_ref` request, else to the closure's own declared `main_pipe`.
     """
     try:
-        crate = resolve_requested_crate(request_data)
+        resolved = resolve_requested_crate(request_data)
     except ValidateBundleError as validate_error:
         return invalid_crate_report_response(validate_error.to_error_report())
     try:
-        requested_pipe = resolve_requested_pipe(crate, pipe_ref=request_data.pipe_ref)
+        requested_pipe = resolve_requested_pipe(
+            resolved.crate,
+            pipe_ref=request_data.pipe_ref,
+            manifest_main_pipe=resolved.manifest_main_pipe,
+        )
         report = _render_report(requested=request_data, requested_pipe=requested_pipe)
         # exclude_none drops the template field the `format` did not select (and an absent
         # `requested_pipe_ref`), so exactly the fields the caller's own request implies are present.

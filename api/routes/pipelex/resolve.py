@@ -69,7 +69,8 @@ async def resolve_mthds(request_data: MthdsFilesRequest) -> JSONResponse:
       `application/problem+json` via the global handlers.
     """
     try:
-        crate = resolve_requested_crate(request_data)
+        # Whole-closure route: no pipe is selected here, so the manifest's `main_pipe` beside the crate is unused.
+        crate = resolve_requested_crate(request_data).crate
     except ValidateBundleError as validate_error:
         return invalid_crate_report_response(validate_error.to_error_report())
     try:

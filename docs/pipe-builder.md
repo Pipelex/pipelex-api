@@ -9,8 +9,8 @@ All three build endpoints speak the same verdict discipline as [`POST /v1/valida
 All three take the same **closure selector** as [`POST /v1/resolve` and `POST /v1/codegen`](codegen.md) — inline `files[]` **XOR** a `method_ref` — plus a **pipe selector**:
 
 - `files` (list, required unless `method_ref`): the inline MTHDS bundles forming the closure. Each item is `{ "content": "<mthds text>", "source": "<optional logical path>" }`. The optional `source` is threaded onto the blueprint, so diagnostics point at the owning file.
-- `method_ref` (string): a reference to an installed/published method. Accepted by the envelope, but this server answers `501` until server-side method-registry resolution exists.
-- `pipe_ref` (string, **optional**): the qualified pipe ref `domain.pipe_code` to project — the same selector as `pipelex codegen inputs --pipe`. Omitted, it defaults to the closure's declared `main_pipe`. A closure that declares **no** `main_pipe`, or **several** across domains, cannot be defaulted: an omitted `pipe_ref` is a `422` there.
+- `method_ref` (string): a reference to a published method. The **address form** — `github.com/<owner>/<repo>` plus an optional package selector and `@<tag>` — is resolved server-side through the same fetch path as a [`method_ref` run](pipe-run.md#running-a-method-by-address-method_ref): the package's `.mthds` files feed the closure (only `.mthds` data travels — the package's Python never loads here), and the package manifest's `main_pipe` becomes the default pipe selector. The **registry form** (any non-address reference) answers `501` (`MethodRefNotSupported`) until method-registry resolution lands.
+- `pipe_ref` (string, **optional**): the qualified pipe ref `domain.pipe_code` to project — the same selector as `pipelex codegen inputs --pipe`. Omitted, it defaults with the same precedence as a run by address: on a `method_ref` request, to the fetched package manifest's `main_pipe` (the package author's declared entry pipe); otherwise to the closure's own declared `main_pipe`. A closure that declares **no** `main_pipe`, or **several** across domains, cannot be defaulted from its declarations, so when no manifest `main_pipe` settles it an omitted `pipe_ref` is a `422` there. Inline `files[]` carry no manifest, so for them the default is always the closure's declaration.
 
 Every valid arm echoes both `pipe_ref` (the ref actually projected) and `requested_pipe_ref` (the ref as submitted — **absent** when it was omitted and defaulted), so a caller can always see which pipe it got. The echoed `pipe_ref` is **always qualified**, read back off the resolved pipe: a bare code still resolves (the engine's lookup falls back across domains), but you are told `smoke.echo`, not the `echo` you sent.
 
@@ -156,7 +156,7 @@ Generate a Python runner script for executing a pipe. The script's imports, exam
 
 - `allow_signatures` (boolean, optional): tolerate unimplemented pipe signatures in the dry-run sweep (default `false`). This is the only build route that takes it — the only one that still sweeps.
 
-The sweep is scoped to the requested pipe, so unrelated broken siblings do not block a good pipe. When `pipe_ref` is omitted the scope cannot be known before the closure loads, so the **whole closure** is swept and the pipe then defaults to its `main_pipe` — a stricter verdict, and the honest one for a caller who did not say which pipe they meant.
+The sweep is scoped to the requested pipe, so unrelated broken siblings do not block a good pipe. When `pipe_ref` is omitted the scope is not settled before the closure loads, so the **whole closure** is swept and the pipe then defaults as described in the shared envelope above — the fetched manifest's `main_pipe` on a `method_ref` request, else the closure's own — a stricter verdict, and the honest one for a caller who did not say which pipe they meant.
 
 **Response (valid verdict):**
 

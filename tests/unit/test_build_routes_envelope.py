@@ -1,11 +1,15 @@
 """Envelope tests for the migrated `/v1/build/*` projections.
 
 Pins the Phase-2/3 migration: the three build routes ride the shared `files[]` XOR `method_ref`
-closure selector (`MthdsFilesRequest`) plus an optional qualified `pipe_ref` that defaults to the
-closure's `main_pipe`; `/build/{inputs,output}` resolve their crate **statically** (no dry-run sweep,
-so no `allow_signatures`), while `/build/runner` keeps both. Verdicts stay on the `/validate`
-discipline — 200 discriminated on `is_valid`, non-2xx only for no-verdict conditions.
+closure selector (`MthdsFilesRequest`) plus an optional qualified `pipe_ref` that defaults with the
+run routes' precedence — the fetched package manifest's `main_pipe` on a `method_ref` request, else
+the closure's declared `main_pipe`; `/build/{inputs,output}` resolve their crate **statically** (no
+dry-run sweep, so no `allow_signatures`), while `/build/runner` keeps both. Verdicts stay on the
+`/validate` discipline — 200 discriminated on `is_valid`, non-2xx only for no-verdict conditions.
 """
+
+from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -22,10 +26,16 @@ from tests.unit._constants import (
     NO_MAIN_PIPE_MTHDS,
     SECOND_MAIN_PIPE_MTHDS,
     SIGNATURE_MTHDS,
+    STUB_METHOD_ADDRESS,
+    STUB_METHOD_MANIFEST_MAIN_PIPE_SHOUT,
+    STUB_METHOD_MANIFEST_NO_MAIN_PIPE,
     VALID_MTHDS,
 )
 
 BUILD_PATHS = ["/v1/build/inputs", "/v1/build/output", "/v1/build/runner"]
+
+# The address-form reference the stubbed clone (`install_method_package`) answers to.
+STUB_METHOD_REF = f"{STUB_METHOD_ADDRESS}@v0.1.0"
 
 
 def _build_client() -> TestClient:
@@ -109,6 +119,89 @@ class TestBuildRoutesEnvelope:
         assert response.status_code == 501, response.text
         assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "MethodRefNotSupported"
+
+    @pytest.mark.parametrize("path", BUILD_PATHS)
+    def test_method_ref_omitted_pipe_ref_defaults_to_the_manifest_main_pipe(self, path: str, install_method_package: Callable[..., Path]):
+        # The fetched package's closure declares NO main_pipe — on its own it cannot default the
+        # selector (the 422 pinned above for inline files). But the package manifest declares one
+        # (`STUB_METHOD_MANIFEST`: `main_pipe = "echo"`), and that is the package author's entry pipe:
+        # the run routes already honor it, so an omitted `pipe_ref` here resolves to it too, and is
+        # echoed qualified — a manifest `main_pipe` is a bare code riding the cross-domain fallback.
+        install_method_package(files={"documents.mthds": NO_MAIN_PIPE_MTHDS})
+        client = _build_client()
+        response = client.post(path, json={"method_ref": STUB_METHOD_REF})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["is_valid"] is True
+        assert body["pipe_ref"] == "nomain.echo"
+        assert "requested_pipe_ref" not in body, "a manifest-defaulted selector must not be echoed back as if it were requested"
+
+    @pytest.mark.parametrize("path", BUILD_PATHS)
+    def test_manifest_main_pipe_outranks_the_closures_own_declarations(self, path: str, install_method_package: Callable[..., Path]):
+        # Two domains, two declared main_pipes: by the closure's own declarations the default is
+        # ambiguous (the 422 pinned above for inline files). The manifest names `shout`, and it sits
+        # above the closure in the chain — `pipe_ref or manifest main_pipe or closure main_pipe`, the
+        # run routes' `pipe_code or fetched.main_pipe` — so it both settles the ambiguity and wins
+        # over `smoke`'s own `echo`.
+        install_method_package(
+            files={"smoke.mthds": VALID_MTHDS, "other.mthds": SECOND_MAIN_PIPE_MTHDS},
+            manifest_toml=STUB_METHOD_MANIFEST_MAIN_PIPE_SHOUT,
+        )
+        client = _build_client()
+        response = client.post(path, json={"method_ref": STUB_METHOD_REF})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["pipe_ref"] == "other.shout"
+        assert "requested_pipe_ref" not in body
+
+    @pytest.mark.parametrize("path", BUILD_PATHS)
+    def test_explicit_pipe_ref_outranks_the_manifest_main_pipe(self, path: str, install_method_package: Callable[..., Path]):
+        # The request's own selector stays first in the chain: the manifest says `echo`, the caller
+        # says `other.shout`, and the caller wins — echoed as requested and resolved.
+        install_method_package(files={"smoke.mthds": VALID_MTHDS, "other.mthds": SECOND_MAIN_PIPE_MTHDS})
+        client = _build_client()
+        response = client.post(path, json={"method_ref": STUB_METHOD_REF, "pipe_ref": "other.shout"})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["pipe_ref"] == "other.shout"
+        assert body["requested_pipe_ref"] == "other.shout"
+
+    @pytest.mark.parametrize("path", BUILD_PATHS)
+    def test_a_manifest_without_main_pipe_falls_back_to_the_closures_declaration(self, path: str, install_method_package: Callable[..., Path]):
+        # A manifest may declare no `main_pipe`. Then the chain falls through to the closure's own
+        # declaration — the same default inline `files[]` get — rather than refusing.
+        install_method_package(files={"documents.mthds": VALID_MTHDS}, manifest_toml=STUB_METHOD_MANIFEST_NO_MAIN_PIPE)
+        client = _build_client()
+        response = client.post(path, json={"method_ref": STUB_METHOD_REF})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["pipe_ref"] == "smoke.echo"
+        assert "requested_pipe_ref" not in body
+
+    @pytest.mark.parametrize("path", BUILD_PATHS)
+    def test_method_ref_with_nothing_to_default_from_is_still_422(self, path: str, install_method_package: Callable[..., Path]):
+        # The whole chain empty: no `pipe_ref`, a manifest with no `main_pipe`, a closure declaring
+        # none. The closure-declaration arm's 422 is unchanged — the manifest only ever ADDS a default.
+        install_method_package(files={"documents.mthds": NO_MAIN_PIPE_MTHDS}, manifest_toml=STUB_METHOD_MANIFEST_NO_MAIN_PIPE)
+        client = _build_client()
+        response = client.post(path, json={"method_ref": STUB_METHOD_REF})
+        assert response.status_code == 422, response.text
+        assert response.headers["content-type"] == "application/problem+json"
+        assert "main_pipe" in response.json()["detail"]
+
+    @pytest.mark.parametrize("path", BUILD_PATHS)
+    def test_a_manifest_main_pipe_absent_from_the_closure_is_a_422_naming_its_origin(self, path: str, install_method_package: Callable[..., Path]):
+        # The manifest names `echo` but the package's closure only contains `other.shout`. Nothing
+        # about the closure is wrong, so it is the same request-shape 422 as an unknown explicit ref —
+        # but the caller never spelled `echo`, so the detail must say where it came from.
+        install_method_package(files={"other.mthds": SECOND_MAIN_PIPE_MTHDS})
+        client = _build_client()
+        response = client.post(path, json={"method_ref": STUB_METHOD_REF})
+        assert response.status_code == 422, response.text
+        assert response.headers["content-type"] == "application/problem+json"
+        detail = response.json()["detail"]
+        assert "'echo'" in detail
+        assert "manifest" in detail, f"the 422 must say the selector came from the manifest: {detail}"
 
     @pytest.mark.parametrize("path", BUILD_PATHS)
     def test_source_labels_ride_through_to_diagnostics(self, path: str):
