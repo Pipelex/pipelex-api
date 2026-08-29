@@ -7,7 +7,7 @@ from pipelex.codegen.crate_encoding import encode_crate_json
 from pipelex.pipeline.exceptions import ValidateBundleError
 from pydantic import BaseModel, Field
 
-from api.openapi_responses import PROBLEM_501_METHOD_REF
+from api.openapi_responses import PROBLEM_404_METHOD_PACKAGE, PROBLEM_501_METHOD_REF
 from api.routes.pipelex.crate_ops import (
     CrateInvalidReport,
     invalid_crate_report_response,
@@ -43,7 +43,7 @@ ResolveResponse = Annotated[Union[ResolveValidReport, CrateInvalidReport], Field
     response_model=ResolveResponse,
     # On top of the composite router's shared 401/413/422/500: the `method_ref` closure selector
     # the envelope accepts but no server-side method registry resolves yet.
-    responses={501: PROBLEM_501_METHOD_REF},
+    responses={404: PROBLEM_404_METHOD_PACKAGE, 501: PROBLEM_501_METHOD_REF},
     # NOT tagged `x-mthds-protocol`: the MTHDS Protocol is the five operations `execute`, `start`,
     # `validate`, `models`, `version`. `/resolve` is a Pipelex API extension. The *artifact* it
     # emits — the normalized library crate — IS standard-owned (the MTHDS Library Crate Format), so

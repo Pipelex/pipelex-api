@@ -43,14 +43,17 @@ class ErrorType(StrEnum):
     # A run request carried a malformed method bundle (`bundle_b64` / `files`): a corrupt zip, an
     # unsafe entry name (absolute path or `..` traversal), or both transport forms supplied at once.
     INVALID_BUNDLE = "InvalidBundle"
-    # A run request shipped custom Python (`.py` in the bundle) to a deployment that is NOT
-    # sandbox-hosted. Running customer code in-process is refused (403): the bundle-with-code
-    # transport is a sandbox-hosted capability only. Use a sandbox-hosted deployment.
+    # A method carrying custom Python (`.py` in a bundle, or in a fetched `method_ref` package)
+    # reached a deployment that is NOT sandbox-hosted. Running customer code in-process is
+    # refused (403): custom code is a sandbox-hosted capability only. Use a sandbox-hosted
+    # deployment. (On a sandbox-hosted deployment, a fetched package declaring Python STRUCTURE
+    # classes is still refused — that is pipelex's `MethodStructuresRefusedError`, not this.)
     CUSTOM_CODE_REQUIRES_SANDBOX = "CustomCodeRequiresSandbox"
 
-    # A caller selected a closure by `method_ref` on `/resolve` or `/codegen`. The request envelope
-    # accepts the field (it is the registry hinge the spec pins), but no method-registry resolution
-    # exists on this server yet — an honest 501, never a silent empty verdict.
+    # A caller selected a closure by a REGISTRY-FORM `method_ref` (not a `github.com/...`
+    # address) on a tooling route. Address-form refs resolve server-side (fetch at tag, package
+    # located by manifest identity); the registry form is the packaging program's closing phase,
+    # so it keeps an honest 501 until a method registry exists — never a silent empty verdict.
     METHOD_REF_NOT_SUPPORTED = "MethodRefNotSupported"
 
     # Misc

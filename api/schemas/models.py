@@ -17,13 +17,21 @@ from mthds.protocol.pipe_output import VariableMultiplicity
 from mthds.protocol.pipeline_inputs import PipelineInputs
 from mthds.protocol.working_memory import WorkingMemoryAbstract
 from pipelex.core.pipes.pipe_output import PipeOutput
-from pipelex.pipeline.pipeline_response import PipelexRunResultExecute
+from pipelex.methods.fetching import MethodProvenance
+from pipelex.pipeline.pipeline_response import PipelexRunResultExecute, PipelexRunResultStart
 from pipelex.reporting.usage_records import TokensUsageRecord
 from pipelex.system.storage_scope import validate_storage_scope
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.functional_validators import SkipValidation
 
-from api.limits import MAX_CALLBACK_URL_LEN, MAX_CALLBACK_URLS, MAX_MTHDS_FILE_BYTES, MAX_MTHDS_FILES_PER_REQUEST, MAX_PIPE_CODE_LEN
+from api.limits import (
+    MAX_CALLBACK_URL_LEN,
+    MAX_CALLBACK_URLS,
+    MAX_METHOD_REF_LEN,
+    MAX_MTHDS_FILE_BYTES,
+    MAX_MTHDS_FILES_PER_REQUEST,
+    MAX_PIPE_CODE_LEN,
+)
 
 
 def _ensure_mthds_file_within_bytes_limit(content: str) -> None:
@@ -65,6 +73,11 @@ class RunRequest(BaseModel):
             temporary library directory before the run. Mutually exclusive with `files`.
         files: PIPELEX-API EXTENSION — the bundle as a `{relative_path: text}` map (the
             unzipped equivalent of `bundle_b64`). Mutually exclusive with `bundle_b64`.
+        method_ref: PIPELEX-API EXTENSION — run a published method by address instead of
+            inline source. Resolved by THIS runner (git fetch at the tag, package located
+            by manifest identity); mutually exclusive with `mthds_contents` and with a
+            method bundle. `pipe_code` may accompany it to override the manifest's
+            `main_pipe`.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -91,6 +104,22 @@ class RunRequest(BaseModel):
             "`{relative_path: text}` map (the unzipped equivalent of `bundle_b64`). Mutually exclusive with `bundle_b64`."
         ),
     )
+    method_ref: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_METHOD_REF_LEN,
+        description=(
+            "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — run a published method by reference instead of "
+            "inline source. Address form: `github.com/<owner>/<repo>[/<selector>][@<tag>]` (e.g. "
+            "`github.com/Pipelex/methods/documents@v0.1.0`) — resolved by THIS runner: the repository is fetched at the "
+            "tag (a bare address means the default branch at HEAD), the package is located by manifest identity, and "
+            "the resolved commit SHA is recorded as `method_provenance` on the response. Mutually exclusive with "
+            "`mthds_contents` and with a method bundle (`bundle_b64` / `files`); `pipe_code` may accompany it to "
+            "override the manifest's `main_pipe`. A package shipping custom Python is only honored on a sandbox-hosted "
+            "deployment, and a package declaring Python structure classes is always refused — hosted execution accepts "
+            "MTHDS concepts and sandboxed PipeFuncs, not in-process Python."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -101,6 +130,7 @@ class RunRequest(BaseModel):
         # NO waiver: see the class docstring and `_refuse_source_less_extension_body`, which
         # authors the better message for that case where the raw body is still in hand.
         has_bundle = values.get("bundle_b64") is not None or values.get("files") is not None
+        has_method_ref = values.get("method_ref") is not None
         # A bundle carries its own `.mthds`; combining it with inline `mthds_contents` would load
         # both into one library with no dedup, so a shared domain collides deep in the run with an
         # opaque duplicate-domain error. Refuse the combination up front (a bundle + `pipe_code` — to
@@ -108,7 +138,17 @@ class RunRequest(BaseModel):
         if has_bundle and values.get("mthds_contents"):
             msg = "A method bundle (bundle_b64 / files) and inline mthds_contents are mutually exclusive; send one or the other."
             raise PipelineRequestError(msg)
-        if values.get("pipe_code") is None and not values.get("mthds_contents") and not has_bundle:
+        # `method_ref` is a complete run source of its own (the fetched package carries its
+        # `.mthds` and its entry pipe): exactly one source per request, so it excludes both
+        # inline contents and a bundle. `pipe_code` beside it is fine — it overrides the
+        # manifest's `main_pipe` to pick which pipe in the fetched package to run.
+        if has_method_ref and values.get("mthds_contents"):
+            msg = "method_ref and inline mthds_contents are mutually exclusive; send one or the other."
+            raise PipelineRequestError(msg)
+        if has_method_ref and has_bundle:
+            msg = "method_ref and a method bundle (bundle_b64 / files) are mutually exclusive; send one or the other."
+            raise PipelineRequestError(msg)
+        if values.get("pipe_code") is None and not values.get("mthds_contents") and not has_bundle and not has_method_ref:
             msg = (
                 "pipe_code and mthds_contents cannot both be empty. Either: both are provided, or if there are no mthds_contents, "
                 "then pipe_code must be provided and must reference a pipe already registered in the library. "
@@ -141,7 +181,7 @@ class RunRequest(BaseModel):
         therefore covers the single-fault case.
         """
         has_bundle = request_body.get("bundle_b64") is not None or request_body.get("files") is not None
-        if request_body.get("pipe_code") is not None or mthds_contents or has_bundle:
+        if request_body.get("pipe_code") is not None or mthds_contents or has_bundle or request_body.get("method_ref") is not None:
             return
         # `PipelineApiExtras` is defined below in this module — resolved at call time, which is
         # always after import. It is the allowlist of API-server-only keys the routes DO handle
@@ -183,6 +223,7 @@ class RunRequest(BaseModel):
             dynamic_output_concept_ref=request_body.get("dynamic_output_concept_ref"),
             bundle_b64=request_body.get("bundle_b64"),
             files=request_body.get("files"),
+            method_ref=request_body.get("method_ref"),
         )
 
 
@@ -340,15 +381,37 @@ class PipeOutputWire(PipeOutput):
     tokens_usages: list[TokensUsageRecord] | None = None  # type: ignore[assignment]
 
 
+_METHOD_PROVENANCE_DESCRIPTION = (
+    "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — provenance of a `method_ref` run: the package's "
+    "resolved full address, the requested tag (null for a bare address), and the commit SHA that was actually "
+    "fetched. The SHA is what keeps the run explainable when a tag moves. Absent (or null) for runs from inline "
+    "source or a bundle."
+)
+
+
 class PipelexApiExecuteResponse(PipelexRunResultExecute):
     """Documented 200 body of `POST /execute` — the run result with the wire-shaped `pipe_output`.
 
     Used only to publish the OpenAPI response schema. `/execute` returns a `JSONResponse`
     built from the trimmed dump, so FastAPI never serializes through this model; declaring it
-    is what keeps the published artifact honest about what the route actually emits.
+    is what keeps the published artifact honest about what the route actually emits
+    (`method_provenance` is attached to the dump by the route for `method_ref` runs, and is
+    absent otherwise).
     """
 
     pipe_output: PipeOutputWire  # type: ignore[assignment]
+    method_provenance: MethodProvenance | None = Field(default=None, description=_METHOD_PROVENANCE_DESCRIPTION)
+
+
+class PipelexApiStartResponse(PipelexRunResultStart):
+    """The 202 body of `POST /start` — the protocol's start ack plus this server's `method_provenance` extension.
+
+    Unlike its `/execute` counterpart this model IS what the route returns (FastAPI serializes
+    through it): the ack is small, so wrapping it costs nothing and keeps the artifact and the
+    wire in lockstep. `method_provenance` is populated for `method_ref` runs and null otherwise.
+    """
+
+    method_provenance: MethodProvenance | None = Field(default=None, description=_METHOD_PROVENANCE_DESCRIPTION)
 
 
 class MthdsFileItem(BaseModel):
@@ -380,8 +443,11 @@ class MthdsFilesRequest(BaseModel):
     """Shared closure selector for the resolve/codegen routes: inline `files[]` XOR a `method_ref`.
 
     Exactly one of the two must be provided (spec'd envelope) — both or neither is a request-shape
-    422. `method_ref` is accepted by the envelope today but resolves to a 501 until server-side
-    method-registry resolution exists.
+    422. An **address-form** `method_ref` (`github.com/<owner>/<repo>[/<selector>][@<tag>]`) is
+    resolved by this server: the repository is fetched at the tag, the package is located by
+    manifest identity, and its `.mthds` files feed the closure with their real relative paths as
+    per-file sources. The **registry form** (any non-address reference) stays reserved and answers
+    501 until server-side method-registry resolution exists.
     """
 
     files: list[MthdsFileItem] | None = Field(
@@ -393,10 +459,11 @@ class MthdsFilesRequest(BaseModel):
     method_ref: str | None = Field(
         default=None,
         min_length=1,
-        max_length=512,
+        max_length=MAX_METHOD_REF_LEN,
         description=(
-            "Reference to an installed/published method, resolving to a library plus its exported entry pipe. "
-            "Accepted by the envelope; served once server-side method-registry resolution lands (501 until then)."
+            "Reference to a published method, resolving to its package's `.mthds` files. Address form "
+            "(`github.com/<owner>/<repo>[/<selector>][@<tag>]`) is fetched and resolved server-side; the registry "
+            "form stays reserved (501 until a method registry exists)."
         ),
     )
 
@@ -438,30 +505,53 @@ parameterizes that sweep, so the static `/build/{inputs,output}` projections do 
 
 
 class MthdsContentsRequest(BaseModel):
-    """The `POST /validate` request envelope: bare `mthds_contents` strings plus the sweep's `allow_signatures`.
+    """The `POST /validate` request envelope: `mthds_contents` XOR `method_ref`, plus the sweep's `allow_signatures`.
 
     This is the flat-list envelope. `/validate` uses it through this class (its `ValidateRequest`
     subclass adds a parallel `mthds_sources` for per-file source labels), and the run routes
     `/execute` and `/start` carry the same `mthds_contents` field independently on `RunRequest`.
     The newer Pipelex-API extension routes (`/resolve`, `/codegen`, `/build/*`) use
     `MthdsFilesRequest` instead (`files[]` pairing each content with its `source`, XOR a
-    `method_ref`), which folds the source label into each entry and adds the method-registry
-    selector. `/validate` stays here deliberately: it is an MTHDS Protocol route, so changing its
-    envelope is a protocol-level decision owned by the `mthds/` spec, not this server's to take
-    (see `TODOS.md` → follow-ups).
+    `method_ref`), which folds the source label into each entry. `/validate` keeps the flat-list
+    shape deliberately: it is an MTHDS Protocol route, so changing its inline envelope is a
+    protocol-level decision owned by the `mthds/` spec, not this server's to take. `method_ref` is
+    this server's layer-2 extension beside that inline shape — an address is resolved by the
+    runner, so validate-by-address belongs here (the hosted-only `method_id` does not).
     """
 
-    mthds_contents: list[str] = Field(
-        ...,
+    mthds_contents: list[str] | None = Field(
+        default=None,
         min_length=1,
         max_length=MAX_MTHDS_FILES_PER_REQUEST,
-        description="MTHDS contents to load (always an array, even for a single file).",
+        description="MTHDS contents to load (always an array, even for a single file). Exactly one of `mthds_contents` / `method_ref`.",
+    )
+    method_ref: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_METHOD_REF_LEN,
+        description=(
+            "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — validate a published method by reference "
+            "instead of inline contents. Address form: `github.com/<owner>/<repo>[/<selector>][@<tag>]`, resolved by "
+            "THIS runner through the same fetch path as a `method_ref` run; the package's `.mthds` files feed the "
+            "validation with their real relative paths as per-file sources. Exactly one of `mthds_contents` / "
+            "`method_ref`. A resolution failure (fetch, package location, the custom-Python policy) is a non-2xx "
+            "`problem+json` — never an `is_valid: false` verdict, which is reserved for actual MTHDS content."
+        ),
     )
     allow_signatures: bool = Field(default=False, description=ALLOW_SIGNATURES_DESCRIPTION)
 
     @field_validator("mthds_contents")
     @classmethod
-    def _bound_each_file(cls, value: list[str]) -> list[str]:
-        for content in value:
+    def _bound_each_file(cls, value: list[str] | None) -> list[str] | None:
+        for content in value or []:
             _ensure_mthds_file_within_bytes_limit(content)
         return value
+
+    @model_validator(mode="after")
+    def _exactly_one_content_selector(self) -> Self:
+        # Strict XOR (the addressing design's tooling-route rule): a stateless diagnostic call
+        # has no linkage slot, so a second selector could only be ignored — refuse it instead.
+        if (self.mthds_contents is None) == (self.method_ref is None):
+            msg = "provide exactly one of `mthds_contents` or `method_ref`"
+            raise ValueError(msg)
+        return self

@@ -4,7 +4,7 @@ import hashlib
 import hmac
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Annotated, Any, cast
+from typing import TYPE_CHECKING, Annotated, Any, NamedTuple, cast
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -31,15 +31,24 @@ from api.bundle import ParsedBundle, materialize_parsed, parse_bundle
 from api.error_types import ErrorType
 from api.errors import raise_bad_request, raise_forbidden, raise_validation_error
 from api.logging_context import get_request_id
+from api.method_source import fetched_method_source
 from api.openapi_responses import (
     PROBLEM_400_START_REQUIRES_ASYNC,
-    PROBLEM_403_ORCHESTRATION_MODE,
+    PROBLEM_403_RUN_POLICY,
+    PROBLEM_404_METHOD_PACKAGE,
     PROBLEM_409_DUPLICATE_RUN,
     PROBLEM_429,
     PROBLEM_501_ASYNC_NOT_ENABLED,
 )
 from api.routes.pipelex.utils import get_current_iso_timestamp
-from api.schemas.models import PipelexApiExecuteRequest, PipelexApiExecuteResponse, PipelexApiStartRequest, PipelineApiExtras, RunRequest
+from api.schemas.models import (
+    PipelexApiExecuteRequest,
+    PipelexApiExecuteResponse,
+    PipelexApiStartRequest,
+    PipelexApiStartResponse,
+    PipelineApiExtras,
+    RunRequest,
+)
 from api.security import SINGLE_TENANT_USER_ID
 
 if TYPE_CHECKING:
@@ -50,6 +59,7 @@ if TYPE_CHECKING:
     from mthds.protocol.working_memory import WorkingMemoryAbstract
     from pipelex.base_exceptions import ErrorReport
     from pipelex.core.memory.working_memory import WorkingMemory
+    from pipelex.methods.fetching import MethodProvenance
     from pipelex.pipe_run.pipe_job import PipeJob
     from pipelex.pipeline.validation_report import PipelexValidationReport
     from pipelex.plugins.orchestrator_registry import OrchestratorProtocol
@@ -610,19 +620,59 @@ def _bundle_run_source(run_request: RunRequest) -> Generator[tuple[list[str] | N
         yield mthds_contents, [str(bundle.directory)]
 
 
+class _ResolvedRunSource(NamedTuple):
+    """What the run routes hand the runner, whatever the request's source form was."""
+
+    mthds_contents: list[str] | None
+    library_dirs: list[str] | None
+    pipe_code: str | None
+    method_provenance: MethodProvenance | None
+
+
+@contextmanager
+def _run_source(run_request: RunRequest) -> Generator[_ResolvedRunSource, None, None]:
+    """Resolve the request's run source: a `method_ref` fetch, a bundle, or the inline contents.
+
+    A `method_ref` resolves through `api.method_source.fetched_method_source` (fetch → locate →
+    execution-locus gate → materialize) into exactly the shape a bundle produces — `.mthds` text
+    as `mthds_contents`, non-`.mthds` files in a temp `library_dirs` entry — so the engine runs
+    the same proven path. The entry pipe defaults to the fetched manifest's `main_pipe`; a
+    request `pipe_code` overrides it. Provenance `(address, tag, commit_sha)` rides back so the
+    routes can put it on the response. The other two forms delegate to `_bundle_run_source`,
+    unchanged.
+    """
+    if run_request.method_ref is not None:
+        with fetched_method_source(run_request.method_ref) as fetched:
+            yield _ResolvedRunSource(
+                mthds_contents=fetched.mthds_contents,
+                library_dirs=fetched.library_dirs,
+                pipe_code=run_request.pipe_code or fetched.main_pipe,
+                method_provenance=fetched.provenance,
+            )
+        return
+    with _bundle_run_source(run_request) as (mthds_contents, library_dirs):
+        yield _ResolvedRunSource(
+            mthds_contents=mthds_contents,
+            library_dirs=library_dirs,
+            pipe_code=run_request.pipe_code,
+            method_provenance=None,
+        )
+
+
 @router.post(
     "/execute",
     # Documented 200 = the run result with the WIRE-shaped `pipe_output`: the handler returns a
     # `JSONResponse` built from a trimmed dump, so FastAPI never serializes through this model —
     # it is purely what the artifact publishes, and it must match `apply_tokens_usage_wire_shape`.
     response_model=PipelexApiExecuteResponse,
-    # On top of the composite router's shared 401/413/422/500: a forbidden per-request
-    # `orchestration_mode` override (403), and the provider rate-limit passthrough (429) —
-    # `/execute` is the only route that runs inference, so it is the only one that can be
-    # rate-limited upstream. NO 409: unlike `/start`, `/execute` takes no client-supplied
-    # `pipeline_run_id` (the base runner generates one per call), so a caller cannot collide
-    # with an in-flight run.
-    responses={403: PROBLEM_403_ORCHESTRATION_MODE, 429: PROBLEM_429},
+    # On top of the composite router's shared 401/413/422/500: the policy 403s (a forbidden
+    # per-request `orchestration_mode` override, the custom-code sandbox gate, the structures
+    # refusal on a fetched package), the `method_ref` package-not-found 404, and the provider
+    # rate-limit passthrough (429) — `/execute` is the only route that runs inference, so it is
+    # the only one that can be rate-limited upstream. NO 409: unlike `/start`, `/execute` takes
+    # no client-supplied `pipeline_run_id` (the base runner generates one per call), so a caller
+    # cannot collide with an in-flight run.
+    responses={403: PROBLEM_403_RUN_POLICY, 404: PROBLEM_404_METHOD_PACKAGE, 429: PROBLEM_429},
     # Documented body = the protocol's RunRequest plus THIS server's own
     # `orchestration_mode` extension (the route honors a per-request override). The
     # body is read through the raw Request (kajson decoding — see
@@ -649,15 +699,15 @@ async def execute(request: Request) -> JSONResponse:
     turns them into an RFC 7807 problem response.
     """
     run_request, extras = await _parse_request(request)
-    with _bundle_run_source(run_request) as (mthds_contents, library_dirs):
+    with _run_source(run_request) as source:
         runner = ApiRunner(
             user_id=_get_user_id(request),
             storage_scope=_resolve_storage_scope(request, requested=extras.storage_scope),
-            library_dirs=library_dirs,
+            library_dirs=source.library_dirs,
         )
         response = await runner.execute(
-            pipe_code=run_request.pipe_code,
-            mthds_contents=mthds_contents,
+            pipe_code=source.pipe_code,
+            mthds_contents=source.mthds_contents,
             inputs=run_request.inputs,
             output_name=run_request.output_name,
             output_multiplicity=run_request.output_multiplicity,
@@ -669,24 +719,31 @@ async def execute(request: Request) -> JSONResponse:
     # `TokensUsageRecord` wire shape instead (pipelex owns the shape authority).
     response_dump = response.model_dump(mode="json", serialize_as_any=True, by_alias=True)
     apply_tokens_usage_wire_shape(response_dump, pipe_output=response.pipe_output)
+    # Provenance of a `method_ref` run (address, tag, resolved commit SHA) — attached only when
+    # the run was selected by reference, so the classic response stays byte-identical.
+    if source.method_provenance is not None:
+        response_dump["method_provenance"] = source.method_provenance.model_dump(mode="json")
     return JSONResponse(content=response_dump)
 
 
 @router.post(
     "/start",
-    response_model=PipelexRunResultStart,
+    response_model=PipelexApiStartResponse,
     status_code=202,
     # On top of the composite router's shared 401/413/422/500. `/start` is fire-and-forget, so
     # its extra failures are all about the backend's ability to honor that and about the
     # client-supplied run id it (alone) accepts:
     #   400 — the resolved orchestrator is blocking-only (the in-process `direct` base): refuse
     #         honestly rather than block-and-ack. Use `/execute`.
-    #   403 — a per-request `orchestration_mode` override the deployment forbids.
+    #   403 — a per-request `orchestration_mode` override the deployment forbids, the
+    #         custom-code sandbox gate, or the structures refusal on a fetched package.
+    #   404 — a `method_ref` whose repository holds no matching package.
     #   409 — the submitted `pipeline_run_id` is still registered for an in-flight run.
     #   501 — an async-capable deployment whose async execution is not enabled.
     responses={
         400: PROBLEM_400_START_REQUIRES_ASYNC,
-        403: PROBLEM_403_ORCHESTRATION_MODE,
+        403: PROBLEM_403_RUN_POLICY,
+        404: PROBLEM_404_METHOD_PACKAGE,
         409: PROBLEM_409_DUPLICATE_RUN,
         501: PROBLEM_501_ASYNC_NOT_ENABLED,
     },
@@ -706,7 +763,7 @@ async def execute(request: Request) -> JSONResponse:
 async def start(
     request: Request,
     parsed: Annotated[tuple[RunRequest, PipelineApiExtras], Depends(_parse_request)],
-) -> PipelexRunResultStart:
+) -> PipelexApiStartResponse:
     """Start a method run and return its pipeline_run_id with a 202 ack (MTHDS Protocol `POST /start`).
 
     Answers `202 Accepted` with a `StartAck`. A client-supplied `pipeline_run_id` is
@@ -725,18 +782,19 @@ async def start(
     The completion callback (`callback_urls` / storage delivery) fires on the async path.
     """
     run_request, extras = parsed
-    # The bundle is materialized only for the synchronous setup phase: `start` builds the PipeJob
-    # (crate carrying the captured `python_sources`) before it enqueues, so the temp dir is no
-    # longer needed once `start` returns — cleanup on context exit is safe for the async path.
-    with _bundle_run_source(run_request) as (mthds_contents, library_dirs):
+    # The run source is materialized only for the synchronous setup phase: `start` builds the
+    # PipeJob (crate carrying the captured `python_sources`) before it enqueues, so the temp dir
+    # (a bundle's, or a fetched package's) is no longer needed once `start` returns — cleanup on
+    # context exit is safe for the async path.
+    with _run_source(run_request) as source:
         runner = ApiRunner(
             user_id=_get_user_id(request),
             storage_scope=_resolve_storage_scope(request, requested=extras.storage_scope),
-            library_dirs=library_dirs,
+            library_dirs=source.library_dirs,
         )
-        return await runner.start(
-            pipe_code=run_request.pipe_code,
-            mthds_contents=mthds_contents,
+        start_result = await runner.start(
+            pipe_code=source.pipe_code,
+            mthds_contents=source.mthds_contents,
             inputs=run_request.inputs,
             output_name=run_request.output_name,
             output_multiplicity=run_request.output_multiplicity,
@@ -746,3 +804,10 @@ async def start(
             request_id=get_request_id(),
             requested_orchestration_mode=extras.orchestration_mode,
         )
+    # The ack plus this server's provenance extension: `(address, tag, commit_sha)` for a
+    # `method_ref` run, null otherwise — the caller (and, on hosted, the platform's Run row)
+    # learns exactly what was fetched and at which commit.
+    return PipelexApiStartResponse(
+        **dict(start_result),
+        method_provenance=source.method_provenance,
+    )

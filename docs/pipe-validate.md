@@ -4,7 +4,7 @@ Validate MTHDS content by parsing, loading, and dry-running pipes without execut
 
 **Endpoint:** `POST /v1/validate`
 
-`/validate` is a **diagnostic endpoint**: any verdict the validator can produce — valid, invalid, or valid-but-not-runnable — rides an HTTP **200**, discriminated in the body on `is_valid`. "Invalid, here are the problems" is the *successful product* of the call, not a transport failure. Non-2xx is reserved for the cases where **no verdict could be produced** (a malformed request body, an `mthds_sources` length mismatch, auth, or a server fault).
+`/validate` is a **diagnostic endpoint**: any verdict the validator can produce — valid, invalid, or valid-but-not-runnable — rides an HTTP **200**, discriminated in the body on `is_valid`. "Invalid, here are the problems" is the *successful product* of the call, not a transport failure. Non-2xx is reserved for the cases where **no verdict could be produced** (a malformed request body, an `mthds_sources` length mismatch, a `method_ref` that could not be resolved, auth, or a server fault).
 
 **Request Body:**
 
@@ -16,7 +16,8 @@ Validate MTHDS content by parsing, loading, and dry-running pipes without execut
 
 **Request Fields:**
 
-- `mthds_contents` (list[str], required): MTHDS contents to validate (always an array, even for a single file)
+- `mthds_contents` (list[str], optional): MTHDS contents to validate (always an array, even for a single file). Exactly one of `mthds_contents` / `method_ref` must be provided
+- `method_ref` (string, optional): **Pipelex-API extension.** Validate a published method by address — `github.com/<owner>/<repo>` plus an optional package selector and `@<tag>` — resolved by this server through the same fetch path as a [`method_ref` run](pipe-run.md#running-a-method-by-address-method_ref): the repository is fetched at the tag, the package located by manifest identity, and its `.mthds` files validated with their **real relative paths** feeding the per-file sources (so `validation_errors[].source` names the owning file). Exactly one of `mthds_contents` / `method_ref`; `mthds_sources` cannot accompany it
 - `allow_signatures` (boolean, optional, default `false`): controls only the **sweep mechanics** for `PipeSignature` placeholders — whether signature pipes are mock-run during the dry-run sweep and therefore listed in `validated_pipes`. It does **not** change the verdict: an unimplemented signature is never a rejection, it is a *runnability fact* reported via `pending_signatures` + `is_runnable` in both modes
 - `mthds_sources` (list[str] | null, optional): per-file sources, parallel to `mthds_contents` — see [Sourcing submitted files](#sourcing-submitted-files). When present it must match `mthds_contents` in length (a mismatch is a 422 request error)
 - `render` (list[str], optional, default `[]`): opt-in *rendered text* to attach to the verdict — see [Opt-in extras](#opt-in-extras-render-and-views)
@@ -142,8 +143,9 @@ The graph is best-effort: a bundle that validates but whose graph dry-run fails 
 
 Only conditions where the endpoint could not produce a verdict are non-2xx, rendered as [RFC 7807 problem documents](error-responses.md):
 
-- **422** — a malformed request body, or an `mthds_sources` / `mthds_contents` length mismatch (a request-shape error caught before the runtime).
+- **422** — a malformed request body, an `mthds_sources` / `mthds_contents` length mismatch, or both/neither of `mthds_contents` / `method_ref` (request-shape errors caught before the runtime).
 - **401 / 403** — unauthenticated / forbidden (including a per-request `orchestration_mode` override the deployment does not allow).
+- **`method_ref` resolution failures** — a selector that could not be resolved produced no verdict, so it is never rendered as `is_valid: false`: a malformed reference or a failed fetch is a **422**, no matching package in the repository a **404**, and the custom-Python policy (the sandbox gate, the structures refusal) a **403** — the same statuses and `error_type`s as on the run routes (see the [error table](pipe-run.md#running-a-method-by-address-method_ref)).
 - **5xx** — a server fault (including a host-wiring programmer error, surfaced as `PipelexUnexpectedError`).
 
 Read it as one rule: a non-2xx on `/validate` always means "the endpoint could not produce a verdict," never "your bundle is bad."

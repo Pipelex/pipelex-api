@@ -37,10 +37,11 @@ Execute a Pipelex pipeline with flexible inputs and wait for completion.
 - `dynamic_output_concept_ref` (string, optional): Override output concept ref
 - `bundle_b64` (string, optional): **Pipelex-API extension.** Base64-encoded zip of a whole method bundle — see [Shipping a method bundle](#shipping-a-method-bundle-custom-pipefunc). Mutually exclusive with `files`.
 - `files` (dict[str, str], optional): **Pipelex-API extension.** The same bundle as a `{relative_path: text}` map (the unzipped equivalent of `bundle_b64`). Mutually exclusive with `bundle_b64`.
+- `method_ref` (string, optional): **Pipelex-API extension.** Run a published method by address instead of inline source — see [Running a method by address](#running-a-method-by-address-method_ref). Mutually exclusive with `mthds_contents` and with a method bundle; `pipe_code` may accompany it to override the package's `main_pipe`.
 
 **Validation Rules:**
 
-- At least one of `pipe_code` or `mthds_contents` must be provided
+- At least one of `pipe_code`, `mthds_contents`, a method bundle, or `method_ref` must be provided
 - If only `pipe_code`: Must reference a pipe already registered in the library
 - If only `mthds_contents`: Must contain a `main_pipe` property
 - If both: `pipe_code` specifies which pipe to execute from the `mthds_contents`
@@ -72,6 +73,7 @@ Execute a Pipelex pipeline with flexible inputs and wait for completion.
 - `main_stuff_name` (string | null): Key under `pipe_output.working_memory.root` where the main result lives. Use this to extract the typed output: `pipe_output.working_memory.root[main_stuff_name].content`.
 - `pipe_output` (object): Result of the pipeline execution. Contains `working_memory` with `root` (every named stuff produced during the run) and `aliases` (built-in name mappings such as `main_stuff`).
 - `pipe_output.tokens_usages` (array | null): Per-inference-call token usage in the client wire shape (`TokensUsageRecord`): `model_type`, model name/id, `pipe_code`, job-kind fields, `nb_tokens_by_category`, computed USD `cost` (`null` when the model has no rate table), and ISO timestamps. `null` when usage assembly was off for the run, `[]` when no inference happened. `pipe_output.usage_assembly_error` (string | null) is non-null when usage assembly failed. See the pipelex runtime's [TokensUsage Wire Records](https://docs.pipelex.com/under-the-hood/tokens-usage-wire-records/) for the full field reference.
+- `method_provenance` (object, only on `method_ref` runs): `{address, tag, commit_sha}` — the package's resolved full address, the requested tag (`null` for a bare address), and the commit SHA that was actually fetched. Absent for runs from inline source or a bundle. See [Running a method by address](#running-a-method-by-address-method_ref).
 
 **Errors** are returned as [RFC 7807 `application/problem+json`](error-responses.md) bodies with HTTP 4xx/5xx status codes. The successful response body has no `status`/`error` field — the HTTP status code is the source of truth.
 
@@ -110,10 +112,11 @@ Start a pipeline execution and get its `pipeline_run_id` back with a `202` ack.
 - `dynamic_output_concept_ref` (string, optional): Override output concept ref
 - `bundle_b64` (string, optional): **Pipelex-API extension.** Base64-encoded zip of a whole method bundle — see [Shipping a method bundle](#shipping-a-method-bundle-custom-pipefunc). Mutually exclusive with `files`.
 - `files` (dict[str, str], optional): **Pipelex-API extension.** The same bundle as a `{relative_path: text}` map (the unzipped equivalent of `bundle_b64`). Mutually exclusive with `bundle_b64`.
+- `method_ref` (string, optional): **Pipelex-API extension.** Run a published method by address instead of inline source — see [Running a method by address](#running-a-method-by-address-method_ref). Mutually exclusive with `mthds_contents` and with a method bundle; `pipe_code` may accompany it to override the package's `main_pipe`.
 
 **Validation Rules:**
 
-- At least one of `pipe_code` or `mthds_contents` must be provided
+- At least one of `pipe_code`, `mthds_contents`, a method bundle, or `method_ref` must be provided
 - If only `pipe_code`: Must reference a pipe already registered in the library
 - If only `mthds_contents`: Must contain a `main_pipe` property
 - If both: `pipe_code` specifies which pipe to execute from the `mthds_contents`
@@ -148,6 +151,7 @@ Start a pipeline execution and get its `pipeline_run_id` back with a `202` ack.
 - `main_stuff_name` (null): Always `null`; populated only on the eventual completion callback.
 - `pipe_output` (null): Always `null`; the result isn't ready yet.
 - `workflow_id` (string | null): The async orchestrator's workflow ID. A `202` ack is only ever returned by an async-capable backend (e.g. a Temporal flavor), so this carries that orchestrator's id; the in-process `direct` base never acks here — it returns a `400` (`StartRequiresAsyncOrchestration`) instead.
+- `method_provenance` (object | null): `{address, tag, commit_sha}` for a `method_ref` run — see [Running a method by address](#running-a-method-by-address-method_ref); `null` for runs from inline source or a bundle.
 
 **Errors** follow the same convention as `/execute`: HTTP 4xx/5xx with an [RFC 7807 `application/problem+json`](error-responses.md) body.
 
@@ -223,6 +227,47 @@ The server materializes the bundle into a temporary library directory for the ru
 - Supplying **both** `bundle_b64` and `files`, an empty bundle, or a corrupt zip → `422 InvalidBundle`; invalid base64 → `400 InvalidBase64`.
 
 **Sandbox-hosted only for custom Python.** A bundle that ships any `.py` is honored **only on a sandbox-hosted deployment**, where the load path captures the source without importing it and execution happens in an isolated sandbox. On a non-hosted deployment such a bundle is refused with `403 CustomCodeRequiresSandbox` — running caller-supplied code in-process is never done implicitly. A bundle that carries only `.mthds` (no `.py`) is accepted on any deployment.
+
+---
+
+## Running a method by address (`method_ref`)
+
+Both `/execute` and `/start` accept **`method_ref`** — a globally resolvable address of a published method package, resolved **by this server** (a Pipelex-API extension; the hosted-only catalog selector `method_id` is a different, platform-resolved field that never reaches this runner):
+
+```json
+{
+  "method_ref": "github.com/Pipelex/methods/documents@v0.1.0",
+  "inputs": { "document": "https://example.com/report.pdf" }
+}
+```
+
+**The reference grammar is `<address>[@<tag>]`.** The address is `github.com/<owner>/<repo>` optionally followed by a package selector within the repository (`github.com` only for now). A bare address means the repository's default branch at HEAD; `@<tag>` pins the repository at that **git tag** (recommended form `vX.Y.Z`) — branch names are refused, so a reference can never silently track a moving branch. Full browser URLs (`https://github.com/...`, including `/tree/<branch>/...` deep links) are accepted and normalized.
+
+**Resolution.** The server fetches the repository (shallow clone, at the tag when one is named), records the **commit SHA** of what was fetched, and locates the requested package **by manifest identity**: it scans the clone for `METHODS.toml` manifests and selects the one whose declared address (plus `name`, for a package in a library repo) equals the requested address — never by directory path. The package's `.mthds` files then run exactly like an inline submission; its non-`.mthds` files travel like a bundle's.
+
+**Entry pipe.** The pipe to run defaults to the package manifest's `main_pipe`; an explicit `pipe_code` in the request overrides it (to run another pipe from the fetched package).
+
+**Provenance.** The response carries `method_provenance = {address, tag, commit_sha}` — on `/execute` only for `method_ref` runs, on the `/start` ack as a nullable field. Tags can move; the recorded SHA is what keeps a run explainable after the fact.
+
+**Custom Python follows the bundle rules, plus one more.** What decides is *where the code would execute*: `.mthds` content is data, always acceptable. On a deployment that is **not** sandbox-hosted, a fetched package carrying any `.py` is refused with `403 CustomCodeRequiresSandbox`. On a sandbox-hosted deployment, PipeFunc `.py` is accepted (captured as text, executed in the isolated sandbox) — but a package declaring **Python structure classes** (`StructuredContent` subclasses) is always refused with a `403` (`MethodStructuresRefusedError`): structures are imported into the runner's own process, and hosted execution accepts MTHDS concepts and sandboxed PipeFuncs, not in-process Python. Express the types as MTHDS concepts with inline structures instead.
+
+**Errors.** Every resolution failure is a distinct RFC 7807 `problem+json` with the originating class as `error_type` (see [Error responses](error-responses.md)):
+
+| Failure | Status | `error_type` |
+|---|---|---|
+| Reference does not match the grammar | 422 | `MethodRefParseError` |
+| Repository could not be fetched, or `@<tag>` is not a tag | 422 | `MethodFetchError` |
+| No package matches the address (message lists what the repo contains) | 404 | `MethodPackageNotFoundError` |
+| More than one package matches | 422 | `MethodPackageAmbiguityError` |
+| Package exceeds the fetched-package ceilings | 422 | `MethodPackageTooLargeError` |
+| Package declares Python structure classes | 403 | `MethodStructuresRefusedError` |
+| Package ships `.py` on a non-sandbox deployment | 403 | `CustomCodeRequiresSandbox` |
+
+**The clone cache.** Fetched repositories are cached on local disk **keyed by resolved commit SHA** — never by tag. Each request first resolves the reference to its current SHA with a cheap `git ls-remote` (no clone); a cached SHA is reused, a new one (a moved tag, an advanced HEAD) triggers a fresh clone. The cache is per server instance and bounded by count, total bytes, and age.
+
+**Environment knobs.** The cache: `MAX_METHOD_CACHE_CLONES` (default 64), `MAX_METHOD_CACHE_TOTAL_KIB` (default 512 MiB), `MAX_METHOD_CACHE_AGE_HOURS` (default 24), `METHOD_CACHE_DIR` (default: a fixed directory under the system temp dir). The fetch itself is bounded by the pipelex runtime's fetched-package ceilings: `PIPELEX_MAX_FETCHED_PACKAGE_FILES` (default 256), `PIPELEX_MAX_FETCHED_PACKAGE_TOTAL_KIB` (default 8 MiB), and the manifest-scan bounds `PIPELEX_MAX_SCANNED_MANIFESTS` (default 100 manifests considered per fetched repository) and `PIPELEX_MAX_MANIFEST_FILE_KIB` (default 256 KiB per `METHODS.toml` read during package location). All are read once at process start.
+
+`method_ref` also selects the method on the tooling routes: natively on [`POST /v1/validate`](pipe-validate.md), and as the closure selector on [`/resolve` and `/codegen`](codegen.md) (address form resolved; the registry form stays a `501`).
 
 ---
 

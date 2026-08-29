@@ -322,6 +322,32 @@ _ERROR_TYPE_STATUS_OVERRIDES: dict[str, int] = {
     # tells clients "this id is currently in use": resubmit after the
     # in-flight run finishes, or pick a fresh id.
     "PipelineManagerAlreadyExistsError": 409,
+    # The `method_ref` resolution failures (pipelex `MethodRefError` subclasses). The library
+    # declares no `error_domain` on them, so without an override each would default to 500 —
+    # wrong for what are overwhelmingly caller-fixable conditions. Each entry keeps the class
+    # name as the distinct `error_type` the caller (or an agent) branches on:
+    #   - A reference that does not match the `<address>[@<tag>]` grammar: the caller's own
+    #     input, plainly fixable → 422.
+    "MethodRefParseError": 422,
+    #   - The repository could not be fetched (nonexistent repo, a `@tag` that is not a tag,
+    #     network refusal). The dominant cause is a mistyped address or tag — caller-fixable —
+    #     so 422; the message carries git's own explanation for the rarer upstream faults.
+    "MethodFetchError": 422,
+    #   - The repository was fetched but holds no package matching the address by manifest
+    #     identity: the referenced resource does not exist → 404 (mirroring the hosted
+    #     platform's unknown-`method_id` mapping); the message lists what the repo does contain.
+    "MethodPackageNotFoundError": 404,
+    #   - More than one package matches the address: the caller must disambiguate with the
+    #     package's full address → 422.
+    "MethodPackageAmbiguityError": 422,
+    #   - The selected package exceeds the fetched-package ceilings: the referenced content
+    #     cannot be processed under this deployment's bounds → 422 (not 413, which is about
+    #     the request entity itself).
+    "MethodPackageTooLargeError": 422,
+    #   - The fetched package declares in-process Python structure classes: a policy refusal
+    #     (hosted execution accepts MTHDS concepts and sandboxed PipeFuncs, not in-process
+    #     Python) → 403, the same status as the bundle transport's custom-code gate.
+    "MethodStructuresRefusedError": 403,
 }
 
 

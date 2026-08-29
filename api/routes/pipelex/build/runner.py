@@ -24,7 +24,7 @@ from pipelex.tools.typing.pydantic_utils import empty_list_factory_of
 from pydantic import BaseModel, Field
 
 from api.errors import raise_validation_error
-from api.openapi_responses import PROBLEM_501_METHOD_REF
+from api.openapi_responses import PROBLEM_404_METHOD_PACKAGE, PROBLEM_501_METHOD_REF
 from api.routes.pipelex.crate_ops import (
     CrateInvalidReport,
     GeneratedArtifact,
@@ -128,7 +128,7 @@ def _output_is_list(blueprints: list[PipelexBundleBlueprint], *, pipe_ref: str) 
     response_model=BuildRunnerResponse,
     # On top of the composite router's shared 401/413/422/500: the `method_ref` closure selector the
     # envelope accepts but no server-side method registry resolves yet (shared with /resolve, /codegen).
-    responses={501: PROBLEM_501_METHOD_REF},
+    responses={404: PROBLEM_404_METHOD_PACKAGE, 501: PROBLEM_501_METHOD_REF},
 )
 async def build_runner(request_data: BuildRunnerRequest) -> JSONResponse:
     """Generate a Python runner script for a pipe, riding the codegen types projection.

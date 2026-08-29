@@ -37,6 +37,21 @@ PIPELEX_ENV=dev
 # rejects with 413. Defaults to 100 MiB. Raise it for larger documents,
 # lower it to harden the server. Read at startup — change requires a restart.
 # MAX_REQUEST_BODY_MIB=100
+
+# ── Running a method by address (`method_ref`) ────────────────────────────
+# See pipe-run.md → "Running a method by address". All read at startup.
+#
+# The per-instance clone cache (one entry per resolved commit SHA):
+# METHOD_CACHE_DIR=/var/cache/pipelex-api-methods  # default: under the OS temp dir
+# MAX_METHOD_CACHE_CLONES=64          # cached clones kept before oldest-first eviction
+# MAX_METHOD_CACHE_TOTAL_KIB=524288   # total bytes across cached clones (default 512 MiB)
+# MAX_METHOD_CACHE_AGE_HOURS=24       # a clone unused this long is evicted
+#
+# Fetched-package ceilings (enforced by the pipelex runtime on every fetch):
+# PIPELEX_MAX_FETCHED_PACKAGE_FILES=256       # files in the selected package
+# PIPELEX_MAX_FETCHED_PACKAGE_TOTAL_KIB=8192  # bytes across the selected package (default 8 MiB)
+# PIPELEX_MAX_SCANNED_MANIFESTS=100           # METHODS.toml files considered per repository
+# PIPELEX_MAX_MANIFEST_FILE_KIB=256           # per METHODS.toml read during package location
 ```
 
 Pipelex config TOML files can reference env vars via `${VAR}` substitution — that's how secrets like provider API keys flow from the container's environment into Pipelex's runtime config without hard-coding them. Set whichever vars your mounted `.pipelex/` files reference.

@@ -10,8 +10,10 @@ from pipelex.pipeline.validation_report import PipelexValidationReport
 from pipelex.tools.typing.pydantic_utils import empty_list_factory_of
 from pydantic import BaseModel, Field, model_validator
 
+from api.errors import raise_validation_error
 from api.exception_handlers import problem_response_from_error_report
-from api.openapi_responses import PROBLEM_403_ORCHESTRATION_MODE
+from api.method_source import fetched_method_source
+from api.openapi_responses import PROBLEM_403_RUN_POLICY, PROBLEM_404_METHOD_PACKAGE
 from api.routes.pipelex.pipeline import ApiRunner
 from api.schemas.models import MthdsContentsRequest
 
@@ -113,10 +115,15 @@ class ValidateRequest(MthdsContentsRequest):
 
     @model_validator(mode="after")
     def _sources_match_contents(self) -> Self:
+        # `mthds_sources` labels INLINE contents; a `method_ref`'s sources are the package's own
+        # file names, so pairing the two is a request-shape bug → 422.
+        if self.mthds_sources is not None and self.method_ref is not None:
+            msg = "mthds_sources accompanies inline mthds_contents; a method_ref's sources are the package's own file names"
+            raise ValueError(msg)
         # A caller-supplied length mismatch is a request-shape bug → caught here as a 422.
         # Without this guard it reaches the runtime's `validate_bundle`, which treats the
         # mismatch as an internal host error (500) — the wrong status for caller input.
-        if self.mthds_sources is not None and len(self.mthds_sources) != len(self.mthds_contents):
+        if self.mthds_sources is not None and self.mthds_contents is not None and len(self.mthds_sources) != len(self.mthds_contents):
             msg = "mthds_sources, when provided, must be a per-item source list matching mthds_contents in length"
             raise ValueError(msg)
         return self
@@ -204,11 +211,13 @@ ValidationResponse = Annotated[Union[ValidReport, InvalidReport], Field(discrimi
 @router.post(
     "/validate",
     response_model=ValidationResponse,
-    # On top of the composite router's shared 401/413/422/500. Validation runs no inference and
-    # accepts no run id, so its only extra failure is the policy gate on the `orchestration_mode`
-    # override it shares with `/start`. Note what is deliberately NOT here: an *invalid bundle* is
-    # a produced verdict on a 200, never a 4xx.
-    responses={403: PROBLEM_403_ORCHESTRATION_MODE},
+    # On top of the composite router's shared 401/413/422/500: the policy 403s (the
+    # `orchestration_mode` override gate it shares with `/start`, plus — for a `method_ref` —
+    # the custom-code sandbox gate and the structures refusal) and the `method_ref`
+    # package-not-found 404. Note what is deliberately NOT here: an *invalid bundle* is a
+    # produced verdict on a 200, never a 4xx — and a selector-resolution failure is a non-2xx
+    # problem+json, never an `is_valid: false` verdict.
+    responses={403: PROBLEM_403_RUN_POLICY, 404: PROBLEM_404_METHOD_PACKAGE},
     openapi_extra={"x-mthds-protocol": True},
 )
 async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSONResponse:
@@ -237,11 +246,15 @@ async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSO
       worker — so the route maps it to a 200 by matching validation diagnostics, never by catching an
       exception. Returned `ErrorReport`s without validation diagnostics are backend/config/runtime
       faults and keep the global RFC 7807 problem response path.
-    - **No verdict (non-2xx):** a malformed request body or an `mthds_sources` length mismatch is a
-      request-shape **422**; a forbidden `orchestration_mode` override is a **403**; a host-wiring
-      programmer error or a genuine orchestrator fault is a **5xx**; auth is **401/403**. All are
-      RFC 7807 `application/problem+json` rendered by the global handler in
-      `api.exception_handlers` — routes never shape them.
+    - **No verdict (non-2xx):** a malformed request body, an `mthds_sources` length mismatch, or
+      both/neither of `mthds_contents` / `method_ref` is a request-shape **422**; a forbidden
+      `orchestration_mode` override is a **403**; a host-wiring programmer error or a genuine
+      orchestrator fault is a **5xx**; auth is **401/403**. A `method_ref` **resolution failure**
+      is also a no-verdict condition — never an `is_valid: false`: a malformed reference or a
+      failed fetch is a **422**, no matching package in the repository a **404**, and the
+      custom-Python policy (the sandbox gate, the structures refusal) a **403**, each with the
+      originating error class as `error_type`. All are RFC 7807 `application/problem+json`
+      rendered by the global handler in `api.exception_handlers` — routes never shape them.
     """
     # Opt-in presentation formats (D-D): resolved once, threaded into both 200 arms. Empty by
     # default → no `rendered_*` field, response byte-identical to the no-`render` request.
@@ -253,12 +266,33 @@ async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSO
     # validator registry, returning either a validation verdict or a classified fault report.
     # Only `ErrorReport`s with validation diagnostics are invalid-bundle verdicts (→ 200
     # InvalidReport); backend/config/runtime reports keep the global problem+json mapping.
-    verdict = await ApiRunner().validate_verdict(
-        mthds_contents=request_data.mthds_contents,
-        mthds_sources=request_data.mthds_sources,
-        allow_signatures=request_data.allow_signatures,
-        requested_orchestration_mode=request_data.orchestration_mode,
-    )
+    if request_data.method_ref is not None:
+        # Validate-by-address (the addressing design's Phase 2 delta): the runner resolves the
+        # `method_ref` through the SAME fetch path as a `method_ref` run, and the package's real
+        # file names feed `mthds_sources` so diagnostics carry true per-file labels. Every
+        # selector-resolution failure — parse, fetch, no package, ambiguity, the custom-Python
+        # policy — raises OUT of this block as a non-2xx problem+json: no verdict was produced,
+        # so it is never rendered as `is_valid: false` (that verdict is about MTHDS content).
+        with fetched_method_source(request_data.method_ref) as fetched:
+            validated_contents = fetched.mthds_contents
+            verdict = await ApiRunner(library_dirs=fetched.library_dirs).validate_verdict(
+                mthds_contents=fetched.mthds_contents,
+                mthds_sources=fetched.mthds_sources,
+                allow_signatures=request_data.allow_signatures,
+                requested_orchestration_mode=request_data.orchestration_mode,
+            )
+    elif request_data.mthds_contents is not None:
+        validated_contents = request_data.mthds_contents
+        verdict = await ApiRunner().validate_verdict(
+            mthds_contents=request_data.mthds_contents,
+            mthds_sources=request_data.mthds_sources,
+            allow_signatures=request_data.allow_signatures,
+            requested_orchestration_mode=request_data.orchestration_mode,
+        )
+    else:
+        # Unreachable: the envelope's XOR validator already 422'd this shape. Kept for the type
+        # checker (and as a defensive backstop should the envelope ever loosen).
+        raise_validation_error(message="provide exactly one of `mthds_contents` or `method_ref`")
     if not isinstance(verdict, PipelexValidationReport):
         if verdict.validation_errors:
             return _invalid_report_response(verdict, requested_formats=requested_formats)
@@ -268,7 +302,7 @@ async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSO
     # Splat the report's own field/value pairs so a future canonical field rides the wire
     # automatically — the wrapper never enumerates (and silently drops) report fields. `is_valid`
     # rides through from the report as the valid-arm discriminant (True).
-    response_data = ValidReport.model_validate({**dict(report), "mthds_contents": request_data.mthds_contents})
+    response_data = ValidReport.model_validate({**dict(report), "mthds_contents": validated_contents})
     content = response_data.model_dump(mode="json", serialize_as_any=True, by_alias=True)
     # `rendered_markdown` is a presentation extra (D-D), not part of the report: attach it only when
     # `markdown` was requested, else pop it so the response stays byte-identical to a no-`render` call
