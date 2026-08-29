@@ -136,7 +136,9 @@ async def codegen_mthds(request_data: CodegenRequest) -> JSONResponse:
       server fault is 5xx.
     """
     try:
-        crate = resolve_requested_crate(request_data)
+        # `types` is concept-set-wide: no pipe is selected, so the manifest's `main_pipe` beside the crate is unused.
+        # A future per-pipe kind takes it from the `ResolvedClosure` and hands it to `resolve_requested_pipe`.
+        crate = resolve_requested_crate(request_data).crate
     except ValidateBundleError as validate_error:
         return invalid_crate_report_response(validate_error.to_error_report())
     try:

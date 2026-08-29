@@ -72,7 +72,17 @@ def invalid_crate_report_response(error_report: ErrorReport) -> JSONResponse:
     return JSONResponse(content=invalid_report.model_dump(mode="json", serialize_as_any=True, by_alias=True, exclude_none=True))
 
 
-def selected_files(request_data: MthdsFilesRequest) -> list[MthdsFileItem]:
+class SelectedFiles(NamedTuple):
+    """What the closure selector resolved to: the files, plus the fetched manifest's entry pipe when there is one."""
+
+    files: list[MthdsFileItem]
+    """The `.mthds` files forming the closure — inline `files[]` verbatim, or the fetched package's."""
+
+    manifest_main_pipe: str | None
+    """The fetched package manifest's `main_pipe` (a bare pipe code). Always None for inline `files[]`, which carry no manifest."""
+
+
+def selected_files(request_data: MthdsFilesRequest) -> SelectedFiles:
     """The files the closure selector names: inline `files[]`, or an address `method_ref`'s package.
 
     Shared by every route on the `files[]` envelope — including `/build/runner`, which cannot use
@@ -81,10 +91,11 @@ def selected_files(request_data: MthdsFilesRequest) -> list[MthdsFileItem]:
 
     An **address-form** `method_ref` (`github.com/<owner>/<repo>[/<selector>][@<tag>]`) resolves
     through the same fetch path the run routes use: the package's `.mthds` files come back as
-    `files[]` items with their real relative paths as per-file sources. Only `.mthds` data
-    travels — the package's Python (if any) never loads on these routes. The **registry form**
-    (any non-address reference) stays reserved and keeps its 501 until the packaging program's
-    registry phase.
+    `files[]` items with their real relative paths as per-file sources, and the manifest's
+    `main_pipe` rides beside them so the per-pipe projections can default their selector the way
+    a run by address does. Only `.mthds` data travels — the package's Python (if any) never loads
+    on these routes. The **registry form** (any non-address reference) stays reserved and keeps
+    its 501 until the packaging program's registry phase.
 
     Raises:
         ApiError: 501 for a registry-form `method_ref`; 422 for a fetched package this server
@@ -94,17 +105,28 @@ def selected_files(request_data: MthdsFilesRequest) -> list[MthdsFileItem]:
     """
     if request_data.method_ref is not None:
         if looks_like_method_ref(request_data.method_ref):
-            return fetch_method_mthds_files(request_data.method_ref)
+            fetched = fetch_method_mthds_files(request_data.method_ref)
+            return SelectedFiles(files=fetched.files, manifest_main_pipe=fetched.main_pipe)
         raise_not_implemented(
             "Registry-form method_ref resolution is not available on this server: no method registry is wired. "
             "Use an address-form reference (a `github.com/...` address, e.g. `github.com/Pipelex/methods/documents@v0.1.0`) "
             "or submit inline `files[]`.",
             error_type=ErrorType.METHOD_REF_NOT_SUPPORTED,
         )
-    return request_data.files or []
+    return SelectedFiles(files=request_data.files or [], manifest_main_pipe=None)
 
 
-def resolve_requested_crate(request_data: MthdsFilesRequest) -> LibraryCrate:
+class ResolvedClosure(NamedTuple):
+    """A resolved closure: its normalized crate, plus the fetched manifest's entry pipe when there is one."""
+
+    crate: LibraryCrate
+    """The normalized library crate the closure resolved to."""
+
+    manifest_main_pipe: str | None
+    """The fetched package manifest's `main_pipe`, carried through from `selected_files` (None for inline `files[]`)."""
+
+
+def resolve_requested_crate(request_data: MthdsFilesRequest) -> ResolvedClosure:
     """Resolve the request's closure selector into a normalized library crate.
 
     Inherits the engine core's **loaded-on-success contract**: on success the freshly opened
@@ -112,16 +134,21 @@ def resolve_requested_crate(request_data: MthdsFilesRequest) -> LibraryCrate:
     teardown — call `teardown_current_library()` in a `finally`. On failure the core has already
     torn down and restored.
 
+    The fetched manifest's `main_pipe` (when the selector was a `method_ref`) rides beside the
+    crate so a per-pipe route can hand it to `resolve_requested_pipe` — the crate itself only
+    knows the domains' own `main_pipe` declarations.
+
     Raises:
         ValidateBundleError: the produced negative verdict (route maps it to the 200 invalid arm).
         ApiError: 501 for a registry-form `method_ref` (see `selected_files`).
         MethodRefError subclasses: address-form fetch/location failures (see `selected_files`).
     """
-    files = selected_files(request_data)
-    return resolve_crate_from_contents(
-        mthds_contents=[item.content for item in files],
-        mthds_sources=[item.source for item in files],
+    selection = selected_files(request_data)
+    crate = resolve_crate_from_contents(
+        mthds_contents=[item.content for item in selection.files],
+        mthds_sources=[item.source for item in selection.files],
     )
+    return ResolvedClosure(crate=crate, manifest_main_pipe=selection.manifest_main_pipe)
 
 
 class RequestedPipe(NamedTuple):
@@ -134,28 +161,37 @@ class RequestedPipe(NamedTuple):
     """The live pipe, read from the library `resolve_requested_crate` left loaded + current."""
 
 
-def resolve_requested_pipe(crate: LibraryCrate, *, pipe_ref: str | None) -> RequestedPipe:
-    """Select the pipe a per-pipe projection targets, defaulting to the closure's `main_pipe`.
+def resolve_requested_pipe(crate: LibraryCrate, *, pipe_ref: str | None, manifest_main_pipe: str | None) -> RequestedPipe:
+    """Select the pipe a per-pipe projection targets, defaulting to the manifest's, then the closure's, `main_pipe`.
 
-    Mirrors `pipelex codegen inputs` (`inputs_cmd.py::_default_main_pipe_ref`): an omitted selector
-    resolves to the single declared `main_pipe`, and **both** un-defaultable arms are rejected — a
-    closure declaring none, and one declaring several across domains (ambiguous). Both are
-    request-shape 422s, as is an unknown ref: nothing about the *closure* is wrong in any of them, so
-    none of them is an invalid-crate verdict.
+    The precedence is the run routes' (`pipeline.py`: `pipe_code or fetched.main_pipe`): the request's
+    `pipe_ref` wins; omitted, a fetched package's manifest `main_pipe` is the package author's
+    declared entry pipe and is taken next; only then does the closure's own declaration decide.
+    That last step mirrors `pipelex codegen inputs` (`inputs_cmd.py::_default_main_pipe_ref`): the
+    single declared `main_pipe`, with **both** un-defaultable arms rejected — a closure declaring
+    none, and one declaring several across domains (ambiguous). Both are request-shape 422s, as is
+    an unknown ref: nothing about the *closure* is wrong in any of them, so none of them is an
+    invalid-crate verdict. Inline `files[]` carry no manifest, so for them the chain is exactly the
+    closure-declared default it always was.
 
     The returned `ref` is read back off the **resolved pipe**, never echoed from the request: the
     engine's lookup accepts a bare code too (falling back across domains), so a caller that submits
     `"echo"` must still be told `"smoke.echo"` — the valid arms promise a qualified ref, and echoing
     the request back would quietly break that promise for exactly the callers who leaned on the
-    fallback.
+    fallback. A manifest `main_pipe` is always a bare code, so it rides that same fallback.
 
     Must be called while the library `resolve_requested_crate` opened is still loaded + current.
     """
-    selector = pipe_ref or _default_main_pipe_ref(crate)
+    selector = pipe_ref or manifest_main_pipe or _default_main_pipe_ref(crate)
     try:
         the_pipe = get_required_entry_pipe(pipe_code=selector)
     except PipeLibraryError as exc:
-        raise_validation_error(f"Pipe '{selector}' not found in the submitted closure: {exc}")
+        if pipe_ref is None and manifest_main_pipe is not None:
+            # The caller never spelled this selector — say where it came from, or the 422 names a pipe out of nowhere.
+            msg = f"Pipe '{selector}' (the fetched package manifest's `main_pipe`) not found in the package's closure: {exc}"
+        else:
+            msg = f"Pipe '{selector}' not found in the submitted closure: {exc}"
+        raise_validation_error(msg)
     return RequestedPipe(ref=the_pipe.pipe_ref, pipe=the_pipe)
 
 

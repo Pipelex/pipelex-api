@@ -84,8 +84,11 @@ paths:
         \ discipline):\n\n- **Valid verdict (200, `is_valid: true`):** the template, in `inputs` or `inputs_toml` per `format`.\n\
         - **Invalid verdict (200, `is_valid: false`):** the closure could not be parsed, loaded, or\n  validated — `validation_errors[]`\
         \ from pipelex's one shared builder; no template exists.\n- **No verdict (non-2xx):** an unknown pipe ref, an omitted\
-        \ `pipe_ref` on a closure with no (or\n  several) `main_pipe`, or a malformed closure selector is a request-shape\
-        \ 422 problem+json;\n  `method_ref` is a 501 until server-side method-registry resolution exists."
+        \ `pipe_ref` that nothing defaults (no\n  fetched-manifest `main_pipe`, and a closure declaring no — or several —\
+        \ `main_pipe`), or a\n  malformed closure selector is a request-shape 422 problem+json; a registry-form `method_ref`\n\
+        \  is a 501 until server-side method-registry resolution exists.\n\nAn omitted `pipe_ref` defaults the way a run by\
+        \ address does: to the fetched package manifest's\n`main_pipe` on a `method_ref` request, else to the closure's own\
+        \ declared `main_pipe`."
       operationId: build_inputs_v1_build_inputs_post
       requestBody:
         content:
@@ -169,10 +172,12 @@ paths:
         \ a promise the pipe runs. Ask `/validate` for that.\n\nResponse contract (the `/validate` discipline):\n\n- **Valid\
         \ verdict (200, `is_valid: true`):** the representation, in `output` or `output_python` per `format`.\n- **Invalid\
         \ verdict (200, `is_valid: false`):** the closure could not be parsed, loaded, or\n  validated — `validation_errors[]`;\
-        \ no representation exists.\n- **No verdict (non-2xx):** an unknown pipe ref, an omitted `pipe_ref` on a closure with\
-        \ no (or\n  several) `main_pipe`, a pipe whose `native.Anything` output has no determinable shape, or a\n  malformed\
-        \ closure selector is a request-shape 422 problem+json; `method_ref` is a 501 until\n  server-side method-registry\
-        \ resolution exists."
+        \ no representation exists.\n- **No verdict (non-2xx):** an unknown pipe ref, an omitted `pipe_ref` that nothing defaults\
+        \ (no\n  fetched-manifest `main_pipe`, and a closure declaring no — or several — `main_pipe`), a pipe\n  whose `native.Anything`\
+        \ output has no determinable shape, or a malformed closure selector is a\n  request-shape 422 problem+json; a registry-form\
+        \ `method_ref` is a 501 until server-side\n  method-registry resolution exists.\n\nAn omitted `pipe_ref` defaults\
+        \ the way a run by address does: to the fetched package manifest's\n`main_pipe` on a `method_ref` request, else to\
+        \ the closure's own declared `main_pipe`."
       operationId: build_output_v1_build_output_post
       requestBody:
         content:
@@ -268,11 +273,13 @@ paths:
 
         The sweep is scoped to the requested pipe, so unrelated broken siblings do not block a good pipe.
 
-        When `pipe_ref` is omitted the scope cannot be known before the closure loads, so the whole closure
+        When `pipe_ref` is omitted the scope is not settled before the closure loads, so the whole closure
 
-        is swept and the pipe then defaults to its `main_pipe` — a stricter verdict, and the honest one for
+        is swept and the pipe then defaults the way a run by address does — to the fetched package
 
-        a caller who did not say which pipe they meant.
+        manifest''s `main_pipe` on a `method_ref` request, else to the closure''s own declared `main_pipe` —
+
+        a stricter verdict, and the honest one for a caller who did not say which pipe they meant.
 
 
         Response contract (the `/validate` discipline): an invalid closure — including a failed dry-run of
@@ -281,11 +288,13 @@ paths:
 
         `validation_errors[]`. Non-2xx is reserved for no-verdict conditions: a request-shape 422 (an
 
-        unknown pipe ref, an omitted `pipe_ref` on a closure with no — or several — `main_pipe`, or a
+        unknown pipe ref, an omitted `pipe_ref` that nothing defaults — no fetched-manifest `main_pipe`,
 
-        requested pipe whose cross-package dependencies are absent from the request), a 501 for
+        and a closure declaring no, or several, `main_pipe` — or a requested pipe whose cross-package
 
-        `method_ref`, auth, server fault — RFC 7807 via the global handlers.'
+        dependencies are absent from the request), a 501 for a registry-form `method_ref`, auth, server
+
+        fault — RFC 7807 via the global handlers.'
       operationId: build_runner_v1_build_runner_post
       requestBody:
         content:
@@ -1731,8 +1740,9 @@ components:
             minLength: 1
           - type: 'null'
           title: Pipe Ref
-          description: Qualified pipe ref (`domain.pipe_code`) to project. Optional — defaults to the closure's declared `main_pipe`;
-            a closure declaring none, or several, requires it explicitly.
+          description: Qualified pipe ref (`domain.pipe_code`) to project. Optional — defaults to the fetched package manifest's
+            `main_pipe` on a `method_ref` request, else to the closure's declared `main_pipe`; a closure declaring none, or
+            several, with no manifest `main_pipe` to settle it, requires it explicitly.
         format:
           $ref: '#/components/schemas/InputsTemplateFormat'
           description: Template encoding. `json` returns the parsed template in `inputs`; `toml` returns the raw text in `inputs_toml`.
@@ -1767,7 +1777,8 @@ components:
           - type: string
           - type: 'null'
           title: Requested Pipe Ref
-          description: The `pipe_ref` as submitted. Absent when it was omitted and defaulted to the closure's `main_pipe`.
+          description: The `pipe_ref` as submitted. Absent when it was omitted and defaulted — to the fetched package manifest's
+            `main_pipe` on a `method_ref` request, else to the closure's declared `main_pipe`.
         format:
           $ref: '#/components/schemas/InputsTemplateFormat'
           description: The template encoding (echo of the request).
@@ -1844,8 +1855,9 @@ components:
             minLength: 1
           - type: 'null'
           title: Pipe Ref
-          description: Qualified pipe ref (`domain.pipe_code`) to project. Optional — defaults to the closure's declared `main_pipe`;
-            a closure declaring none, or several, requires it explicitly.
+          description: Qualified pipe ref (`domain.pipe_code`) to project. Optional — defaults to the fetched package manifest's
+            `main_pipe` on a `method_ref` request, else to the closure's declared `main_pipe`; a closure declaring none, or
+            several, with no manifest `main_pipe` to settle it, requires it explicitly.
         format:
           $ref: '#/components/schemas/ConceptRepresentationFormat'
           description: Representation to render. `schema` (JSON Schema) and `json` (example value) return a parsed object
@@ -1870,7 +1882,8 @@ components:
           - type: string
           - type: 'null'
           title: Requested Pipe Ref
-          description: The `pipe_ref` as submitted. Absent when it was omitted and defaulted to the closure's `main_pipe`.
+          description: The `pipe_ref` as submitted. Absent when it was omitted and defaulted — to the fetched package manifest's
+            `main_pipe` on a `method_ref` request, else to the closure's declared `main_pipe`.
         format:
           $ref: '#/components/schemas/ConceptRepresentationFormat'
           description: The representation format (echo of the request).
@@ -1978,8 +1991,9 @@ components:
             minLength: 1
           - type: 'null'
           title: Pipe Ref
-          description: Qualified pipe ref (`domain.pipe_code`) to project. Optional — defaults to the closure's declared `main_pipe`;
-            a closure declaring none, or several, requires it explicitly.
+          description: Qualified pipe ref (`domain.pipe_code`) to project. Optional — defaults to the fetched package manifest's
+            `main_pipe` on a `method_ref` request, else to the closure's declared `main_pipe`; a closure declaring none, or
+            several, with no manifest `main_pipe` to settle it, requires it explicitly.
         allow_signatures:
           type: boolean
           title: Allow Signatures
@@ -2010,7 +2024,8 @@ components:
           - type: string
           - type: 'null'
           title: Requested Pipe Ref
-          description: The `pipe_ref` as submitted. Absent when it was omitted and defaulted to the closure's `main_pipe`.
+          description: The `pipe_ref` as submitted. Absent when it was omitted and defaulted — to the fetched package manifest's
+            `main_pipe` on a `method_ref` request, else to the closure's declared `main_pipe`.
         python_code:
           type: string
           title: Python Code
