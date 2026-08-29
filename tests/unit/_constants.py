@@ -20,6 +20,23 @@ class RoutePath(StrEnum):
     PING = "/ping"
 
 
+# The stubbed method-package fixtures (`install_method_package` in conftest.py) present a fake
+# fetched clone in the library-repo layout: `methods/documents/METHODS.toml` declaring this
+# manifest, so the package's full address is `github.com/pipelex/methods/documents`.
+STUB_METHOD_ADDRESS = "github.com/pipelex/methods/documents"
+STUB_METHOD_COMMIT_SHA = "0123456789abcdef0123456789abcdef01234567"
+STUB_METHOD_MANIFEST = """\
+[package]
+name = "documents"
+address = "github.com/pipelex/methods"
+version = "0.1.0"
+description = "A stub package for method_ref route tests."
+main_pipe = "echo"
+
+[exports.smoke]
+pipes = ["echo"]
+"""
+
 # A minimal, valid single-pipe bundle used across the build/validate/pipeline route tests.
 VALID_MTHDS = """\
 domain = "smoke"

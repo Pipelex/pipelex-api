@@ -12,7 +12,7 @@ from pipelex.tools.misc.package_utils import get_package_version
 from pipelex.tools.typing.pydantic_utils import empty_list_factory_of
 from pydantic import BaseModel, Field, model_validator
 
-from api.openapi_responses import PROBLEM_501_METHOD_REF
+from api.openapi_responses import PROBLEM_404_METHOD_PACKAGE, PROBLEM_501_METHOD_REF
 from api.routes.pipelex.crate_ops import (
     CrateInvalidReport,
     GeneratedArtifact,
@@ -111,7 +111,7 @@ CodegenResponse = Annotated[Union[CodegenValidReport, CrateInvalidReport], Field
     response_model=CodegenResponse,
     # On top of the composite router's shared 401/413/422/500: the `method_ref` closure selector
     # the envelope accepts but no server-side method registry resolves yet (shared with `/resolve`).
-    responses={501: PROBLEM_501_METHOD_REF},
+    responses={404: PROBLEM_404_METHOD_PACKAGE, 501: PROBLEM_501_METHOD_REF},
     # NOT tagged `x-mthds-protocol` — a Pipelex API extension, like `/resolve`. The MTHDS standard
     # specifies the crate this reads (the Library Crate Format); it specifies no type projection, so
     # every `target` here — `ts-zod` and `python-pydantic` no less than `python-structures` — is ours.

@@ -21,6 +21,7 @@ from pipelex.base_exceptions import ErrorReport, ValidationErrorItem
 from pipelex.interpreter_hub import clear_current_library, get_current_library_id_or_none, get_library_manager, get_required_entry_pipe
 from pipelex.libraries.library_crate import LibraryCrate
 from pipelex.libraries.pipe.exceptions import PipeLibraryError
+from pipelex.methods.method_ref import looks_like_method_ref
 from pipelex.pipe_machinery.pipe_abstract import PipeAbstract
 from pipelex.pipeline.resolve_bundle import resolve_crate_from_contents
 from pipelex.tools.typing.pydantic_utils import empty_list_factory_of
@@ -28,6 +29,7 @@ from pydantic import BaseModel, Field
 
 from api.error_types import ErrorType
 from api.errors import raise_not_implemented, raise_validation_error
+from api.method_source import fetch_method_mthds_files
 from api.schemas.models import MthdsFileItem, MthdsFilesRequest
 
 
@@ -71,18 +73,32 @@ def invalid_crate_report_response(error_report: ErrorReport) -> JSONResponse:
 
 
 def selected_files(request_data: MthdsFilesRequest) -> list[MthdsFileItem]:
-    """The inline files the closure selector names, 501-ing the `method_ref` arm.
+    """The files the closure selector names: inline `files[]`, or an address `method_ref`'s package.
 
     Shared by every route on the `files[]` envelope — including `/build/runner`, which cannot use
     `resolve_requested_crate` (it needs `validate_bundle`'s dry-run sweep) but owes the caller the
-    same answer on the selector it does not serve.
+    same answer on every selector.
+
+    An **address-form** `method_ref` (`github.com/<owner>/<repo>[/<selector>][@<tag>]`) resolves
+    through the same fetch path the run routes use: the package's `.mthds` files come back as
+    `files[]` items with their real relative paths as per-file sources. Only `.mthds` data
+    travels — the package's Python (if any) never loads on these routes. The **registry form**
+    (any non-address reference) stays reserved and keeps its 501 until the packaging program's
+    registry phase.
 
     Raises:
-        ApiError: 501 for the `method_ref` arm until server-side registry resolution exists.
+        ApiError: 501 for a registry-form `method_ref`; 422 for a fetched package this server
+            cannot accept.
+        MethodRefError subclasses: parse, fetch, location, and bounds failures on the address
+            form, rendered as `problem+json` by the global handler.
     """
     if request_data.method_ref is not None:
+        if looks_like_method_ref(request_data.method_ref):
+            return fetch_method_mthds_files(request_data.method_ref)
         raise_not_implemented(
-            "method_ref resolution is not available on this server yet: no method registry is wired. Submit inline `files[]` instead.",
+            "Registry-form method_ref resolution is not available on this server: no method registry is wired. "
+            "Use an address-form reference (a `github.com/...` address, e.g. `github.com/Pipelex/methods/documents@v0.1.0`) "
+            "or submit inline `files[]`.",
             error_type=ErrorType.METHOD_REF_NOT_SUPPORTED,
         )
     return request_data.files or []
@@ -98,7 +114,8 @@ def resolve_requested_crate(request_data: MthdsFilesRequest) -> LibraryCrate:
 
     Raises:
         ValidateBundleError: the produced negative verdict (route maps it to the 200 invalid arm).
-        ApiError: 501 for the `method_ref` arm until server-side registry resolution exists.
+        ApiError: 501 for a registry-form `method_ref` (see `selected_files`).
+        MethodRefError subclasses: address-form fetch/location failures (see `selected_files`).
     """
     files = selected_files(request_data)
     return resolve_crate_from_contents(

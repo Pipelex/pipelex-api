@@ -9,7 +9,7 @@ from pipelex.pipeline.exceptions import ValidateBundleError
 from pydantic import BaseModel, Field, model_validator
 
 from api.errors import raise_validation_error
-from api.openapi_responses import PROBLEM_501_METHOD_REF
+from api.openapi_responses import PROBLEM_404_METHOD_PACKAGE, PROBLEM_501_METHOD_REF
 from api.routes.pipelex.crate_ops import (
     CrateInvalidReport,
     RequestedPipe,
@@ -113,7 +113,7 @@ def _render_report(*, requested: BuildOutputRequest, requested_pipe: RequestedPi
     response_model=BuildOutputResponse,
     # On top of the composite router's shared 401/413/422/500: the `method_ref` closure selector the
     # envelope accepts but no server-side method registry resolves yet (shared with /resolve, /codegen).
-    responses={501: PROBLEM_501_METHOD_REF},
+    responses={404: PROBLEM_404_METHOD_PACKAGE, 501: PROBLEM_501_METHOD_REF},
 )
 async def build_output(request_data: BuildOutputRequest) -> JSONResponse:
     """Generate an example output representation for a pipe (the output projection, per pipe).

@@ -1,5 +1,21 @@
 # Changelog
 
+## [v0.21.0] - 2026-08-29
+
+### Added
+
+- **`method_ref` on the wire — run a published method by address.** `POST /v1/execute` and `POST /v1/start` accept `method_ref` as a third run source, mutually exclusive with `mthds_contents` and with a `files`/`bundle_b64` bundle. An **address-form** reference — `github.com/<owner>/<repo>`, an optional package selector, an optional `@<tag>` (tags only; branch names are refused) — is fetched server-side, the package located by manifest identity, and its files materialized as the run's library. The entry pipe defaults to the manifest's `main_pipe`; `pipe_code` overrides it. The `/execute` response, the `/start` ack, and the run logs carry `method_provenance` — the resolved `{address, tag, commit_sha}` — so a run by reference is always attributable to an exact commit. See `docs/pipe-run.md` → "Running a method by address".
+- **`/v1/validate` accepts `method_ref` natively.** `mthds_contents` is now optional there: exactly one of `mthds_contents` or `method_ref` selects what is validated. A fetched package's real relative file names feed `mthds_sources`, so per-file attribution in `validation_errors[]` names the package's own files. Selector-resolution failures (parse, fetch, no package found) are non-2xx `problem+json` — never an `is_valid: false` verdict.
+- **Tooling routes resolve address-form `method_ref`.** `POST /v1/resolve`, `POST /v1/codegen`, and `POST /v1/build/{inputs,output,runner}` now resolve an address-form `method_ref` through the same fetch path (only `.mthds` data travels — a package's Python never loads on these routes). The **registry form** (any non-address reference) keeps the `501` `MethodRefNotSupported` until a method registry exists.
+- **SHA-keyed clone cache.** Fetched repositories are cached on disk per resolved commit SHA — a `git ls-remote` pre-resolution turns the reference into a SHA before any clone, so a cached commit is never re-cloned and a moved tag always fetches fresh (never cached by tag alone). The cache is bounded by count, total bytes, and age, tunable via `METHOD_CACHE_DIR`, `MAX_METHOD_CACHE_CLONES`, `MAX_METHOD_CACHE_TOTAL_KIB`, and `MAX_METHOD_CACHE_AGE_HOURS` (see `docs/configuration.md`).
+- **Execution-locus security gate for fetched packages.** On a deployment that is not sandbox-hosted, a fetched package shipping any `.py` is refused with `403` `CustomCodeRequiresSandbox`. On a sandbox-hosted deployment, PipeFunc `.py` is accepted (captured as text, executed in the sandbox), but a package declaring Python structure classes is always refused with `403` `MethodStructuresRefusedError` — structures would import into the runner's own process.
+- **Distinct error surface for `method_ref` failures.** `MethodRefParseError`, `MethodFetchError`, `MethodPackageAmbiguityError`, and `MethodPackageTooLargeError` map to `422`; `MethodPackageNotFoundError` to `404` (its detail lists the packages the repository does contain); `MethodStructuresRefusedError` to `403` — each an RFC 7807 `problem+json` document. Documented in `docs/error-responses.md`.
+
+### Changed
+
+- **Pinned `pipelex` 0.55.0** (up from `==0.54.0`, exactly). It brings the `pipelex.methods` package — the reference grammar, the git fetcher with its bounds, package location by manifest identity, and the structure-refusal gate — that this release's `method_ref` support is built on. The `.pipelex/` config schema did not move, so no migration is required.
+- **OpenAPI artifact regenerated** for the new surface: the `method_ref` request fields, the `method_provenance` response fields (including the new `PipelexApiStartResponse`), and the per-route `403`/`404`/`501` problem responses.
+
 ## [v0.20.0] - 2026-08-28
 
 ### Changed
