@@ -5,7 +5,7 @@ primary blueprint, so a package whose `METHODS.toml` names an entry pipe the clo
 default to validates with a report from which a consumer can only derive the WRONG entry pipe, or
 none. These tests pin the route's own field, which applies the run routes' precedence — the fetched
 manifest's `main_pipe`, else the closure's primary blueprint — so a by-address consumer projects a
-signature for the pipe `/execute` and `/build/*` actually default to.
+signature for the pipe `/execute` actually defaults to.
 """
 
 from collections.abc import Callable

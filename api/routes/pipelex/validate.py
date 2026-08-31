@@ -164,9 +164,10 @@ def _effective_default_pipe_ref(report: PipelexValidationReport, *, manifest_mai
     The run routes' precedence, minus the request selector `/validate` does not have
     (`pipeline.py`: `pipe_code or fetched.main_pipe`, then the batch's primary blueprint via
     `select_primary_blueprint`): a fetched package's manifest `main_pipe` wins, and only when there
-    is none does the closure's own declaration decide. That is the same chain the per-pipe tooling
-    routes apply in `crate_ops.resolve_requested_pipe`, so a caller reading this field and a caller
-    omitting `pipe_ref` on `/build/*` are told about the same pipe.
+    is none does the closure's own declaration decide. The per-pipe tooling routes apply that same
+    chain in `crate_ops.resolve_requested_pipe`, so a caller reading this field and a caller omitting
+    `pipe_ref` on `/build/*` are told about the same pipe wherever `/build/*` defaults at all — see
+    the one case below where it refuses to.
 
     It deliberately states the RUN default, not the build routes' stricter one: a closure whose
     domains each declare a `main_pipe` is refused by `/build/*` but runs happily — `execute` and
