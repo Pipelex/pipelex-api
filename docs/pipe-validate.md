@@ -28,7 +28,7 @@ Validate MTHDS content by parsing, loading, and dry-running pipes without execut
 
 The 200 body is one of two arms, discriminated on the mandatory `is_valid` field. A consumer pattern-matches `is_valid` to learn the verdict — it never inspects a status code or catches an exception body.
 
-**Valid arm (`is_valid: true`)** — the canonical Pipelex validation report (the exact same artifact shapes `PipelexMTHDSProtocol.validate` returns when the runtime is used locally) plus this server's wire-only extras (`mthds_contents` echo, `message`):
+**Valid arm (`is_valid: true`)** — the canonical Pipelex validation report (the exact same artifact shapes `PipelexMTHDSProtocol.validate` returns when the runtime is used locally) plus this server's wire-only extras (`mthds_contents` echo, `message`, `default_pipe_ref`):
 
 ```json
 {
@@ -53,7 +53,8 @@ The 200 body is one of two arms, discriminated on the mandatory `is_valid` field
   "pending_signatures": [],
   "is_runnable": true,
   "mthds_contents": ["..."],
-  "message": "MTHDS content validated successfully"
+  "message": "MTHDS content validated successfully",
+  "default_pipe_ref": "my_domain.my_pipe"
 }
 ```
 
@@ -71,6 +72,7 @@ The 200 body is one of two arms, discriminated on the mandatory `is_valid` field
 
 - `mthds_contents` (list[str]): echo of the validated request contents
 - `message` (string): status message
+- `default_pipe_ref` (string | null): the qualified `domain.pipe_code` a caller gets by **omitting** the pipe selector — the pipe a selector-less run of this same request would execute. See [The effective entry pipe](#the-effective-entry-pipe) below
 
 **Response Fields (opt-in, present only when requested):**
 
@@ -108,6 +110,21 @@ The 200 body is one of two arms, discriminated on the mandatory `is_valid` field
 **What This Endpoint Does:**
 
 The route wraps the runtime's protocol `validate`: parse → load → dry-run-sweep every pipe → build the per-pipe IO contracts → best-effort graph of the `main_pipe` → assemble the canonical report. The runner returns the verdict as a value — the canonical report on the valid arm, or a structured `ErrorReport` (a bundle the caller can fix) on the invalid arm — and the route maps the invalid verdict to the 200 invalid arm by matching the returned value, never by catching a transport error. A bundle that declares no `main_pipe` validates normally and simply carries `graph_spec: null` — there is no main-pipe precondition.
+
+**The effective entry pipe:**
+
+`default_pipe_ref` states which pipe this request's closure would run if the caller named none. It applies the run routes' own precedence, minus the request selector `/validate` does not have:
+
+1. a `method_ref`'s fetched package manifest (`METHODS.toml`) `main_pipe` — the package author's declared entry pipe, qualified against the closure;
+2. otherwise, and when the manifest declares none, the closure's primary blueprint's `main_pipe` (the first file declaring one), qualified by its domain.
+
+It is `null` when no entry pipe is determined — no blueprint declares `main_pipe`, or a manifest names a pipe the closure does not declare, or declares in several domains. In those last two cases a selector-less run by that address would fail to resolve the manifest's pipe too, so the field says nothing rather than naming the closure's pipe, which no such run would execute.
+
+The field exists because the canonical report is **manifest-blind**: `bundle_blueprint` is the batch's primary blueprint, so for a package whose `METHODS.toml` entry differs from — or exists without — a bundle-level `main_pipe`, a consumer deriving the entry pipe from `bundle_blueprint.main_pipe` alone gets the wrong pipe, or none. Reading `default_pipe_ref` is how a client projects an entry signature that matches what [`POST /v1/execute`](pipe-run.md#running-a-method-by-address-method_ref) and the [`/v1/build/*` projections](pipe-builder.md) actually default to.
+
+It states the **run** default, which is looser than the `/build/*` routes' rule on one point: a closure whose domains each declare a `main_pipe` cannot be defaulted on `/build/*` (a `422`), but `/execute` and `/start` run its first declaring blueprint happily — so this field names that pipe rather than reporting `null`.
+
+The field rides the valid arm only. The invalid arm assembles no library, so there is no entry pipe to name and the field is absent, like the other structural artifacts.
 
 **Opt-in extras (`render` and `views`):**
 

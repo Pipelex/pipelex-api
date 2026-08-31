@@ -4,6 +4,8 @@ from typing import Annotated, Literal, Self, Union
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pipelex.base_exceptions import ErrorReport, ValidationErrorItem
+from pipelex.core.qualified_ref import QualifiedRef
+from pipelex.pipe_machinery.pipe_factory import PipeFactory
 from pipelex.pipeline.input_form import PipeInputFormDescriptor
 from pipelex.pipeline.validation_render import format_validate_markdown, render_invalid_validation_markdown
 from pipelex.pipeline.validation_report import PipelexValidationReport
@@ -129,6 +131,64 @@ class ValidateRequest(MthdsContentsRequest):
         return self
 
 
+def _qualify_manifest_main_pipe(main_pipe: str, *, pipe_refs: list[str]) -> str | None:
+    """Qualify a manifest's bare `main_pipe` against the pipes the verdict actually saw.
+
+    A `METHODS.toml` `main_pipe` is a bare pipe code, and the runner resolves it exactly as it
+    resolves a human-supplied selector (`get_optional_entry_pipe`): an already-qualified ref matches
+    outright, a bare code is matched across the library's own domains, and an ambiguous bare code
+    resolves to nothing rather than picking a winner. That rule is mirrored here against
+    `pipe_io_contracts`' keys — the verdict's own complete, qualified pipe set — because the
+    validate path holds no loaded library to ask (the Temporal-dispatched arm never loaded one in
+    this process at all).
+
+    Cross-package keys (`alias->domain.code`) are excluded, as they are in the engine: an installed
+    dependency must never make a host package's own entry pipe ambiguous.
+
+    Returns:
+        The qualified ref, or None when the closure declares no such pipe or declares it in several
+        domains — both cases in which a selector-less run by this address would fail to resolve it.
+    """
+    own_refs = [ref for ref in pipe_refs if not QualifiedRef.has_cross_package_prefix(ref)]
+    if main_pipe in own_refs:
+        return main_pipe
+    matches = sorted({ref for ref in own_refs if ref.rpartition(".")[2] == main_pipe})
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def _effective_default_pipe_ref(report: PipelexValidationReport, *, manifest_main_pipe: str | None) -> str | None:
+    """The qualified ref of the pipe a selector-less run of THIS request would execute.
+
+    The run routes' precedence, minus the request selector `/validate` does not have
+    (`pipeline.py`: `pipe_code or fetched.main_pipe`, then the batch's primary blueprint via
+    `select_primary_blueprint`): a fetched package's manifest `main_pipe` wins, and only when there
+    is none does the closure's own declaration decide. That is the same chain the per-pipe tooling
+    routes apply in `crate_ops.resolve_requested_pipe`, so a caller reading this field and a caller
+    omitting `pipe_ref` on `/build/*` are told about the same pipe.
+
+    It deliberately states the RUN default, not the build routes' stricter one: a closure whose
+    domains each declare a `main_pipe` is refused by `/build/*` but runs happily — `execute` and
+    `start` take the first declaring blueprint — so reporting `null` for it would make a consumer
+    refuse to prepare a method the server would run. The report's `bundle_blueprint` IS that first
+    declaring blueprint (`build_validation_report` selects it through the same
+    `select_primary_blueprint`), so qualifying its `main_pipe` reproduces the run's own choice.
+
+    Inline `mthds_contents` carry no manifest, so for them the chain is exactly the closure's
+    declaration.
+    """
+    if manifest_main_pipe is not None:
+        # A manifest entry that does not resolve yields None rather than falling through to the
+        # closure's declaration: the run would pass the manifest's code and fail, so naming the
+        # closure's pipe here would report a pipe no selector-less run of this address executes.
+        return _qualify_manifest_main_pipe(manifest_main_pipe, pipe_refs=list(report.pipe_io_contracts))
+    blueprint = report.bundle_blueprint
+    if not blueprint.main_pipe:
+        return None
+    return PipeFactory.make_pipe_ref_with_domain(domain_code=blueprint.domain, pipe_code=blueprint.main_pipe)
+
+
 class ValidReport(PipelexValidationReport):
     """The 200 **valid** arm: the canonical `PipelexValidationReport` plus this server's wire-only extras.
 
@@ -146,6 +206,18 @@ class ValidReport(PipelexValidationReport):
 
     mthds_contents: list[str] = Field(..., description="The MTHDS contents that were validated (echo of the request)")
     message: str = Field(default="MTHDS content validated successfully", description="Status message")
+    default_pipe_ref: str | None = Field(
+        default=None,
+        description=(
+            "The qualified `domain.pipe_code` a caller gets by omitting the pipe selector — the pipe a "
+            "selector-less run of THIS request would execute. On a `method_ref` request it is the fetched "
+            "package manifest's `main_pipe` (the package author's declared entry pipe, qualified against the "
+            "closure); otherwise, and when the manifest declares none, it is the closure's primary blueprint's "
+            "`main_pipe` qualified by its domain. `null` when no entry pipe is determined: no blueprint declares "
+            "`main_pipe`, or a manifest names a pipe the closure does not declare (or declares ambiguously), in "
+            "which case a selector-less run by this address would fail to resolve it too."
+        ),
+    )
     input_form: dict[str, PipeInputFormDescriptor] = Field(
         default_factory=dict,
         description=(
@@ -232,9 +304,13 @@ async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSO
     - **Valid verdict (200, `is_valid: true`):** the `ValidReport` arm — the canonical report
       (primary `bundle_blueprint`, `pipe_io_contracts` keyed by namespaced `pipe_ref`, per-pipe
       `validated_pipes` sweep outcomes, `pending_signatures` + `is_runnable` runnability verdict,
-      best-effort `graph_spec`) plus the wire extras (`mthds_contents` echo, `message`). A bundle
-      that declares no `main_pipe` validates fine and carries `graph_spec=null`. Pending
-      signatures are reported as `pending_signatures` + `is_runnable: false`, never as an error.
+      best-effort `graph_spec`) plus the wire extras (`mthds_contents` echo, `message`,
+      `default_pipe_ref`). A bundle that declares no `main_pipe` validates fine and carries
+      `graph_spec=null`. Pending signatures are reported as `pending_signatures` +
+      `is_runnable: false`, never as an error. `default_pipe_ref` names the pipe a selector-less
+      run of this same request would execute — on a `method_ref` request that is the fetched
+      manifest's `main_pipe`, which the canonical report cannot see, so the field is the only
+      signal a consumer can project a by-address entry signature from.
       The opt-in `views` token `input_form` additionally attaches the per-pipe input-form
       descriptors as a same-named top-level field, keyed like `pipe_io_contracts`; without the
       token the field is absent and the body is byte-identical to a request that omits `views`.
@@ -275,6 +351,9 @@ async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSO
         # so it is never rendered as `is_valid: false` (that verdict is about MTHDS content).
         with fetched_method_source(request_data.method_ref) as fetched:
             validated_contents = fetched.mthds_contents
+            # The manifest's declared entry pipe outranks the closure's own in the run/build default
+            # chain, so it must reach `default_pipe_ref` — the report itself is manifest-blind.
+            manifest_main_pipe = fetched.main_pipe
             verdict = await ApiRunner(library_dirs=fetched.library_dirs).validate_verdict(
                 mthds_contents=fetched.mthds_contents,
                 mthds_sources=fetched.mthds_sources,
@@ -283,6 +362,8 @@ async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSO
             )
     elif request_data.mthds_contents is not None:
         validated_contents = request_data.mthds_contents
+        # Inline contents carry no manifest, so the closure's own declaration is the whole chain.
+        manifest_main_pipe = None
         verdict = await ApiRunner().validate_verdict(
             mthds_contents=request_data.mthds_contents,
             mthds_sources=request_data.mthds_sources,
@@ -302,7 +383,13 @@ async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSO
     # Splat the report's own field/value pairs so a future canonical field rides the wire
     # automatically — the wrapper never enumerates (and silently drops) report fields. `is_valid`
     # rides through from the report as the valid-arm discriminant (True).
-    response_data = ValidReport.model_validate({**dict(report), "mthds_contents": validated_contents})
+    response_data = ValidReport.model_validate(
+        {
+            **dict(report),
+            "mthds_contents": validated_contents,
+            "default_pipe_ref": _effective_default_pipe_ref(report, manifest_main_pipe=manifest_main_pipe),
+        }
+    )
     content = response_data.model_dump(mode="json", serialize_as_any=True, by_alias=True)
     # `rendered_markdown` is a presentation extra (D-D), not part of the report: attach it only when
     # `markdown` was requested, else pop it so the response stays byte-identical to a no-`render` call
