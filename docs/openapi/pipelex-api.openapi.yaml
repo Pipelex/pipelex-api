@@ -869,24 +869,27 @@ paths:
         \ could be produced*.\n\nResponse contract:\n\n- **Valid verdict (200, `is_valid: true`):** the `ValidReport` arm\
         \ — the canonical report\n  (primary `bundle_blueprint`, `pipe_io_contracts` keyed by namespaced `pipe_ref`, per-pipe\n\
         \  `validated_pipes` sweep outcomes, `pending_signatures` + `is_runnable` runnability verdict,\n  best-effort `graph_spec`)\
-        \ plus the wire extras (`mthds_contents` echo, `message`). A bundle\n  that declares no `main_pipe` validates fine\
-        \ and carries `graph_spec=null`. Pending\n  signatures are reported as `pending_signatures` + `is_runnable: false`,\
-        \ never as an error.\n  The opt-in `views` token `input_form` additionally attaches the per-pipe input-form\n  descriptors\
-        \ as a same-named top-level field, keyed like `pipe_io_contracts`; without the\n  token the field is absent and the\
-        \ body is byte-identical to a request that omits `views`.\n- **Invalid verdict (200, `is_valid: false`):** the `InvalidReport`\
-        \ arm — `validation_errors[]`\n  (the structured per-error diagnostics, built by pipelex's one shared builder, incl.\
-        \ the\n  `dry_run` residual item) + `message`, with the structural artifacts absent. The runner\n  returns this as\
-        \ a value (`ErrorReport` with `validation_errors`) regardless of backend — the\n  in-process arm from the bundle's\
-        \ `ValidateBundleError`, the dispatched arm recovered from the\n  worker — so the route maps it to a 200 by matching\
-        \ validation diagnostics, never by catching an\n  exception. Returned `ErrorReport`s without validation diagnostics\
-        \ are backend/config/runtime\n  faults and keep the global RFC 7807 problem response path.\n- **No verdict (non-2xx):**\
-        \ a malformed request body, an `mthds_sources` length mismatch, or\n  both/neither of `mthds_contents` / `method_ref`\
-        \ is a request-shape **422**; a forbidden\n  `orchestration_mode` override is a **403**; a host-wiring programmer\
-        \ error or a genuine\n  orchestrator fault is a **5xx**; auth is **401/403**. A `method_ref` **resolution failure**\n\
-        \  is also a no-verdict condition — never an `is_valid: false`: a malformed reference or a\n  failed fetch is a **422**,\
-        \ no matching package in the repository a **404**, and the\n  custom-Python policy (the sandbox gate, the structures\
-        \ refusal) a **403**, each with the\n  originating error class as `error_type`. All are RFC 7807 `application/problem+json`\n\
-        \  rendered by the global handler in `api.exception_handlers` — routes never shape them."
+        \ plus the wire extras (`mthds_contents` echo, `message`,\n  `default_pipe_ref`). A bundle that declares no `main_pipe`\
+        \ validates fine and carries\n  `graph_spec=null`. Pending signatures are reported as `pending_signatures` +\n  `is_runnable:\
+        \ false`, never as an error. `default_pipe_ref` names the pipe a selector-less\n  run of this same request would execute\
+        \ — on a `method_ref` request that is the fetched\n  manifest's `main_pipe`, which the canonical report cannot see,\
+        \ so the field is the only\n  signal a consumer can project a by-address entry signature from.\n  The opt-in `views`\
+        \ token `input_form` additionally attaches the per-pipe input-form\n  descriptors as a same-named top-level field,\
+        \ keyed like `pipe_io_contracts`; without the\n  token the field is absent and the body is byte-identical to a request\
+        \ that omits `views`.\n- **Invalid verdict (200, `is_valid: false`):** the `InvalidReport` arm — `validation_errors[]`\n\
+        \  (the structured per-error diagnostics, built by pipelex's one shared builder, incl. the\n  `dry_run` residual item)\
+        \ + `message`, with the structural artifacts absent. The runner\n  returns this as a value (`ErrorReport` with `validation_errors`)\
+        \ regardless of backend — the\n  in-process arm from the bundle's `ValidateBundleError`, the dispatched arm recovered\
+        \ from the\n  worker — so the route maps it to a 200 by matching validation diagnostics, never by catching an\n  exception.\
+        \ Returned `ErrorReport`s without validation diagnostics are backend/config/runtime\n  faults and keep the global\
+        \ RFC 7807 problem response path.\n- **No verdict (non-2xx):** a malformed request body, an `mthds_sources` length\
+        \ mismatch, or\n  both/neither of `mthds_contents` / `method_ref` is a request-shape **422**; a forbidden\n  `orchestration_mode`\
+        \ override is a **403**; a host-wiring programmer error or a genuine\n  orchestrator fault is a **5xx**; auth is **401/403**.\
+        \ A `method_ref` **resolution failure**\n  is also a no-verdict condition — never an `is_valid: false`: a malformed\
+        \ reference or a\n  failed fetch is a **422**, no matching package in the repository a **404**, and the\n  custom-Python\
+        \ policy (the sandbox gate, the structures refusal) a **403**, each with the\n  originating error class as `error_type`.\
+        \ All are RFC 7807 `application/problem+json`\n  rendered by the global handler in `api.exception_handlers` — routes\
+        \ never shape them."
       operationId: validate_mthds_v1_validate_post
       requestBody:
         content:
@@ -7270,6 +7273,17 @@ components:
           title: Message
           description: Status message
           default: MTHDS content validated successfully
+        default_pipe_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Default Pipe Ref
+          description: 'The qualified `domain.pipe_code` a caller gets by omitting the pipe selector — the pipe a selector-less
+            run of THIS request would execute. On a `method_ref` request it is the fetched package manifest''s `main_pipe`
+            (the package author''s declared entry pipe, qualified against the closure); otherwise, and when the manifest declares
+            none, it is the closure''s primary blueprint''s `main_pipe` qualified by its domain. `null` when no entry pipe
+            is determined: no blueprint declares `main_pipe`, or a manifest names a pipe the closure does not declare (or
+            declares ambiguously), in which case a selector-less run by this address would fail to resolve it too.'
         rendered_markdown:
           anyOf:
           - type: string

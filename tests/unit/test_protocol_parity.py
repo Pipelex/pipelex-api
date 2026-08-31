@@ -3,8 +3,8 @@
 The alignment's end-to-end claim: a client of the Pipelex family can write portable code
 across the local runtime and the hosted API. Each scenario here calls the local
 `PipelexMTHDSProtocol` directly AND the HTTP route with the same payload, then asserts the
-shared report keys are byte-identical and the wire extras (`mthds_contents`, `message`)
-appear on the HTTP envelope only. `is_valid` is a canonical report field on both backends (not a
+shared report keys are byte-identical and the wire extras (`mthds_contents`, `message`,
+`default_pipe_ref`) appear on the HTTP envelope only. `is_valid` is a canonical report field on both backends (not a
 wire extra — the `success` extra is retired). `graph_spec` is compared by presence/absence,
 not value: it carries run-specific identity (graph id, node timings, random dry-run data),
 so two runs never serialize identically.
@@ -31,7 +31,10 @@ from api.routes import router as api_router
 from tests.unit._constants import HEADER_AND_DEFINITION_BATCH, NO_MAIN_PIPE_MTHDS, SIGNATURE_ONLY_BATCH, VALID_MTHDS
 
 # The hosted /validate envelope = canonical report + exactly these wire-only extras.
-VALIDATE_WIRE_EXTRAS = {"mthds_contents", "message"}
+# `default_pipe_ref` is one of them by necessity, not omission: it states the pipe a selector-less
+# run of THIS request would execute, and on a `method_ref` request that comes from the fetched
+# package's manifest — a fact the local runtime never sees, so the canonical report cannot carry it.
+VALIDATE_WIRE_EXTRAS = {"mthds_contents", "message", "default_pipe_ref"}
 
 # Canonical report fields the route carries only when the request's `views` names them. They are
 # report fields (present in the local dump), so they are subtracted from the wire key set on a
