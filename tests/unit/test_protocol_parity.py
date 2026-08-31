@@ -9,11 +9,11 @@ wire extra — the `success` extra is retired). `graph_spec` is compared by pres
 not value: it carries run-specific identity (graph id, node timings, random dry-run data),
 so two runs never serialize identically.
 
-One report field is gated on the wire rather than dropped: `input_form` is an opt-in structured
-view the route attaches only when the request's `views` names it. So the parity call opts in — the
-claim is that the projection is byte-identical to the local report's, not that a default call
-carries it — and a second assertion pins the gate itself: a default call omits exactly the opt-in
-views and nothing else.
+Two report fields are gated on the wire rather than dropped: `input_form` and `output_form` are
+opt-in structured views the route attaches only when the request's `views` names them. So the parity
+call opts into both — the claim is that each projection is byte-identical to the local report's, not
+that a default call carries them — and a second assertion pins the gate itself: a default call omits
+exactly the opt-in views and nothing else.
 
 The validate fixtures mirror the protocol-alignment baseline scenarios: the lenient
 signature batch, the strict header+definition batch, the no-`main_pipe` batch (the D2
@@ -39,7 +39,7 @@ VALIDATE_WIRE_EXTRAS = {"mthds_contents", "message", "default_pipe_ref"}
 # Canonical report fields the route carries only when the request's `views` names them. They are
 # report fields (present in the local dump), so they are subtracted from the wire key set on a
 # default call rather than being extras added to it.
-VALIDATE_OPT_IN_VIEWS = {"input_form"}
+VALIDATE_OPT_IN_VIEWS = {"input_form", "output_form"}
 
 
 def _build_client() -> TestClient:
