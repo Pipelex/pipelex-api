@@ -77,6 +77,27 @@ packages = ["api"]
 [tool.uv]
 required-version = ">=0.7.2"
 
+# TEMPORARY: resolve `pipelex` from its merged `dev`, until the output-form change
+# is released.
+#
+# `dependencies` above pins `pipelex==0.55.0`, and no published pipelex builds
+# `output_form` or puts a `json_schema` on the output contract — both landed in
+# Pipelex/pipelex#1186, which is merged to `dev` and not yet cut as a release. A
+# resolver that believes the pin installs a runtime this repo's `/validate` view
+# gate cannot ask anything of, and the failure is a missing attribute at request
+# time rather than a version conflict anyone would read as one.
+#
+# `[tool.uv.sources]` is dev-and-CI metadata: it is not part of the published
+# dependency, so a `pip install pipelex-api` still resolves the pin above. That
+# means this makes CI honest and does NOT make a release correct — the pin must
+# move to the version pipelex publishes the change as, and THIS BLOCK MUST BE
+# DELETED in that same change.
+#
+# Pinned by SHA rather than by branch so the resolution cannot drift under a
+# force-push while the PR is open.
+[tool.uv.sources]
+pipelex = { git = "https://github.com/Pipelex/pipelex", rev = "0819388d10e4c17a4bf087c4c3c7778e63e1b177" }
+
 
 [tool.mypy]
 check_untyped_defs = true
