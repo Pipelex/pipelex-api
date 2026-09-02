@@ -874,22 +874,24 @@ paths:
         \ false`, never as an error. `default_pipe_ref` names the pipe a selector-less\n  run of this same request would execute\
         \ — on a `method_ref` request that is the fetched\n  manifest's `main_pipe`, which the canonical report cannot see,\
         \ so the field is the only\n  signal a consumer can project a by-address entry signature from.\n  The opt-in `views`\
-        \ token `input_form` additionally attaches the per-pipe input-form\n  descriptors as a same-named top-level field,\
-        \ keyed like `pipe_io_contracts`; without the\n  token the field is absent and the body is byte-identical to a request\
-        \ that omits `views`.\n- **Invalid verdict (200, `is_valid: false`):** the `InvalidReport` arm — `validation_errors[]`\n\
-        \  (the structured per-error diagnostics, built by pipelex's one shared builder, incl. the\n  `dry_run` residual item)\
-        \ + `message`, with the structural artifacts absent. The runner\n  returns this as a value (`ErrorReport` with `validation_errors`)\
-        \ regardless of backend — the\n  in-process arm from the bundle's `ValidateBundleError`, the dispatched arm recovered\
-        \ from the\n  worker — so the route maps it to a 200 by matching validation diagnostics, never by catching an\n  exception.\
-        \ Returned `ErrorReport`s without validation diagnostics are backend/config/runtime\n  faults and keep the global\
-        \ RFC 7807 problem response path.\n- **No verdict (non-2xx):** a malformed request body, an `mthds_sources` length\
-        \ mismatch, or\n  both/neither of `mthds_contents` / `method_ref` is a request-shape **422**; a forbidden\n  `orchestration_mode`\
-        \ override is a **403**; a host-wiring programmer error or a genuine\n  orchestrator fault is a **5xx**; auth is **401/403**.\
-        \ A `method_ref` **resolution failure**\n  is also a no-verdict condition — never an `is_valid: false`: a malformed\
-        \ reference or a\n  failed fetch is a **422**, no matching package in the repository a **404**, and the\n  custom-Python\
-        \ policy (the sandbox gate, the structures refusal) a **403**, each with the\n  originating error class as `error_type`.\
-        \ All are RFC 7807 `application/problem+json`\n  rendered by the global handler in `api.exception_handlers` — routes\
-        \ never shape them."
+        \ tokens `input_form` and `output_form` additionally attach the per-pipe\n  input-form and output-form descriptors\
+        \ as same-named top-level fields, keyed like\n  `pipe_io_contracts`; without a token the matching field is absent\
+        \ and the body is\n  byte-identical to a request that omits `views`. They are separate tokens because they answer\n\
+        \  separate questions — a caller building a fill-in form wants the inputs, a caller rendering a\n  result or registering\
+        \ a tool signature with a return type wants the output.\n- **Invalid verdict (200, `is_valid: false`):** the `InvalidReport`\
+        \ arm — `validation_errors[]`\n  (the structured per-error diagnostics, built by pipelex's one shared builder, incl.\
+        \ the\n  `dry_run` residual item) + `message`, with the structural artifacts absent. The runner\n  returns this as\
+        \ a value (`ErrorReport` with `validation_errors`) regardless of backend — the\n  in-process arm from the bundle's\
+        \ `ValidateBundleError`, the dispatched arm recovered from the\n  worker — so the route maps it to a 200 by matching\
+        \ validation diagnostics, never by catching an\n  exception. Returned `ErrorReport`s without validation diagnostics\
+        \ are backend/config/runtime\n  faults and keep the global RFC 7807 problem response path.\n- **No verdict (non-2xx):**\
+        \ a malformed request body, an `mthds_sources` length mismatch, or\n  both/neither of `mthds_contents` / `method_ref`\
+        \ is a request-shape **422**; a forbidden\n  `orchestration_mode` override is a **403**; a host-wiring programmer\
+        \ error or a genuine\n  orchestrator fault is a **5xx**; auth is **401/403**. A `method_ref` **resolution failure**\n\
+        \  is also a no-verdict condition — never an `is_valid: false`: a malformed reference or a\n  failed fetch is a **422**,\
+        \ no matching package in the repository a **404**, and the\n  custom-Python policy (the sandbox gate, the structures\
+        \ refusal) a **403**, each with the\n  originating error class as `error_type`. All are RFC 7807 `application/problem+json`\n\
+        \  rendered by the global handler in `api.exception_handlers` — routes never shape them."
       operationId: validate_mthds_v1_validate_post
       requestBody:
         content:
@@ -3619,9 +3621,9 @@ components:
 
         load/parse/wiring failed, so this arm omits them and carries only the per-error diagnostics
 
-        plus the runnability facts. The `input_form` view follows them into absence for the same reason
+        plus the runnability facts. The `input_form` and `output_form` views follow them into absence for
 
-        — it derives from a crate that was never assembled — so it is never declared here and `views`
+        the same reason — both derive from a crate that was never assembled — so neither is declared here and `views`
 
         has no effect on this arm (unlike `rendered_markdown`, which rides both arms because failure
 
@@ -5301,6 +5303,10 @@ components:
         optional:
           type: boolean
           title: Optional
+        json_schema:
+          additionalProperties: true
+          type: object
+          title: Json Schema
       additionalProperties: false
       type: object
       required:
@@ -5308,19 +5314,78 @@ components:
       - multiplicity
       - item_count
       - optional
+      - json_schema
       title: PipeOutputContract
-      description: 'What the pipe resolves to: the concept it produces, how many items that is, and whether it may be absent.
+      description: 'What the pipe resolves to: the concept it produces, how many items that is, whether it may be absent,
+        and the shape of its payload.
 
 
-        Deliberately asymmetric with the input side: an output carries a two-valued `optional` where
+        Deliberately asymmetric with the input side in exactly one place, and no longer in a second.
 
-        an input carries a three-valued `presence`, because `!` MUST NOT appear on an output — a force
+        An output carries a two-valued `optional` where an input carries a three-valued `presence`,
 
-        marker is a use-site assertion about an input, so a three-valued output slot would have an arm
+        because `!` MUST NOT appear on an output — a force marker is a use-site assertion about an
 
-        nothing can ever produce. No output member carries a schema: the payload a run produces is the
+        input, so a three-valued output slot would have an arm nothing can ever produce. That
 
-        run''s own result. Closed shape (`extra="forbid"`).'
+        asymmetry is a language fact and it stays.
+
+
+        The schema asymmetry was not. An output used to carry none, on the reasoning that "the payload
+
+        a run produces is the run''s own result" — which answers *what did this run produce?*, correctly
+
+        not a contract''s business, rather than the question a consumer actually asks: *what shape will
+
+        it be?* That is declared in the `.mthds` source and knowable before any run happens, exactly as
+
+        it is on the input side. Withholding it left every consumer inferring a payload''s shape by
+
+        inspecting it, which is guessing at the standard rather than reading it.
+
+
+        Closed shape (`extra="forbid"`).'
+    PipeOutputFormDescriptor:
+      properties:
+        field:
+          oneOf:
+          - $ref: '#/components/schemas/TextField'
+          - $ref: '#/components/schemas/ProseField'
+          - $ref: '#/components/schemas/DateField'
+          - $ref: '#/components/schemas/NumberField'
+          - $ref: '#/components/schemas/BooleanField'
+          - $ref: '#/components/schemas/EnumField'
+          - $ref: '#/components/schemas/DocumentField'
+          - $ref: '#/components/schemas/ImageField'
+          - $ref: '#/components/schemas/ObjectField'
+          - $ref: '#/components/schemas/ListField'
+          - $ref: '#/components/schemas/UnknownField'
+          title: Field
+          discriminator:
+            propertyName: kind
+            mapping:
+              boolean: '#/components/schemas/BooleanField'
+              date: '#/components/schemas/DateField'
+              document: '#/components/schemas/DocumentField'
+              enum: '#/components/schemas/EnumField'
+              image: '#/components/schemas/ImageField'
+              list: '#/components/schemas/ListField'
+              number: '#/components/schemas/NumberField'
+              object: '#/components/schemas/ObjectField'
+              prose: '#/components/schemas/ProseField'
+              text: '#/components/schemas/TextField'
+              unknown: '#/components/schemas/UnknownField'
+      additionalProperties: false
+      type: object
+      required:
+      - field
+      title: PipeOutputFormDescriptor
+      description: 'The output form of one pipe — one `output_form` entry, carrying the single output node.
+
+
+        Closed shape (`extra="forbid"`). The node itself is an `InputFormField`, so it is parsed by
+
+        the same discriminated union every input node is, and a consumer narrows it the same way.'
     PipeOutputWire:
       properties:
         working_memory:
@@ -7234,6 +7299,14 @@ components:
           description: 'Opt-in Pipelex-API structured view: per-pipe input-form descriptors keyed exactly like `pipe_io_contracts`,
             present only when the request''s `views` includes `input_form`. Absent by default — the structured contract fields
             remain the verdict; this is a projection of them.'
+        output_form:
+          additionalProperties:
+            $ref: '#/components/schemas/PipeOutputFormDescriptor'
+          type: object
+          title: Output Form
+          description: 'Opt-in Pipelex-API structured view: per-pipe output-form descriptors keyed exactly like `pipe_io_contracts`,
+            present only when the request''s `views` includes `output_form`. Absent by default. Read with the output contract''s
+            `json_schema`, which states the shape of the payload this descriptor describes.'
         liftable_pipes:
           items:
             $ref: '#/components/schemas/LiftablePipeEntry'
@@ -7310,15 +7383,21 @@ components:
         they are NOT part of the canonical report and no in-process consumer should depend on them.
 
 
-        One inherited field is deliberately re-declared: `input_form`. The canonical report requires it
+        Two inherited fields are deliberately re-declared: `input_form` and `output_form`. The canonical
 
-        (a backend that forgets to derive it must fail loudly rather than ship an empty view), but on the
+        report requires both (a backend that forgets to derive one must fail loudly rather than ship an
 
-        wire it is an opt-in structured view gated by the request''s `views` — so it is re-declared with a
+        empty view), but on the wire each is an opt-in structured view gated by the request''s `views` —
 
-        default here, keeping it out of the published schema''s `required` set. The value still always
+        so both are re-declared with defaults here, keeping them out of the published schema''s `required`
 
-        arrives from the report; the route pops it when its token was not requested.'
+        set. The values still always arrive from the report; the route pops each when its token was not
+
+        requested. They are separate tokens rather than one because they answer separate questions: a
+
+        caller building a fill-in form wants the inputs, a caller rendering a result or registering a
+
+        tool signature wants the output, and neither should pay for the other.'
     ValidateRequest:
       properties:
         mthds_contents:
@@ -7376,10 +7455,10 @@ components:
           type: array
           title: Views
           description: 'Opt-in Pipelex-API structured views: extra projections to attach to the 200 verdict. A supported token
-            (`input_form`) adds a **same-named** top-level field to the valid arm only. Unknown/unsupported tokens are silently
-            ignored (a view is a projection of facts the verdict already determined, not part of the verdict contract); the
-            default empty list attaches nothing and the response is byte-identical to a request that omits the field. Independent
-            of `render`: a request may carry both, each resolving its own tokens.'
+            (`input_form`, `output_form`) adds a **same-named** top-level field to the valid arm only. Unknown/unsupported
+            tokens are silently ignored (a view is a projection of facts the verdict already determined, not part of the verdict
+            contract); the default empty list attaches nothing and the response is byte-identical to a request that omits
+            the field. Independent of `render`: a request may carry both, each resolving its own tokens.'
         orchestration_mode:
           anyOf:
           - type: string
