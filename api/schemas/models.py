@@ -479,10 +479,12 @@ class MthdsPipeRequest(MthdsFilesRequest):
     """Shared base for the per-pipe `/build/*` projections: the closure selector plus a pipe selector.
 
     The pipe selector is the **qualified** ref `domain.pipe_code`, mirroring `pipelex codegen inputs
-    --pipe`. It is optional: omitted, it resolves to the closure's declared `main_pipe`, which is
-    what a single-bundle caller almost always wants. A closure that declares no `main_pipe` — or
-    several, across domains — cannot be defaulted, so an omitted selector is a request-shape 422
-    there (the same two arms the CLI rejects on).
+    --pipe`. It is optional, and an omitted selector defaults with the run routes' precedence: on a
+    `method_ref` request, to the fetched package manifest's `main_pipe` (the package author's declared
+    entry pipe); otherwise to the closure's declared `main_pipe`, which is what a single-bundle caller
+    almost always wants. A closure that declares no `main_pipe` — or several, across domains — cannot
+    be defaulted from its own declarations, so an omitted selector is a request-shape 422 there when
+    no manifest `main_pipe` settles it (the same two arms the CLI rejects on).
     """
 
     pipe_ref: str | None = Field(
@@ -490,8 +492,9 @@ class MthdsPipeRequest(MthdsFilesRequest):
         min_length=1,
         max_length=MAX_PIPE_CODE_LEN,
         description=(
-            "Qualified pipe ref (`domain.pipe_code`) to project. Optional — defaults to the closure's declared "
-            "`main_pipe`; a closure declaring none, or several, requires it explicitly."
+            "Qualified pipe ref (`domain.pipe_code`) to project. Optional — defaults to the fetched package manifest's "
+            "`main_pipe` on a `method_ref` request, else to the closure's declared `main_pipe`; a closure declaring none, "
+            "or several, with no manifest `main_pipe` to settle it, requires it explicitly."
         ),
     )
 

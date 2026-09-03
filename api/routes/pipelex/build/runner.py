@@ -72,7 +72,10 @@ class BuildRunnerValidReport(BaseModel):
     pipe_ref: str = Field(..., description="The qualified pipe the runner was generated for — the resolved selector.")
     requested_pipe_ref: str | None = Field(
         default=None,
-        description="The `pipe_ref` as submitted. Absent when it was omitted and defaulted to the closure's `main_pipe`.",
+        description=(
+            "The `pipe_ref` as submitted. Absent when it was omitted and defaulted — to the fetched package manifest's "
+            "`main_pipe` on a `method_ref` request, else to the closure's declared `main_pipe`."
+        ),
     )
     python_code: str = Field(..., description="Generated Python script for running the pipeline, imports spelled with the emitted class names.")
     structures: RunnerStructures = Field(..., description="The typed-structures projection the script imports from.")
@@ -142,25 +145,27 @@ async def build_runner(request_data: BuildRunnerRequest) -> JSONResponse:
     **emitted** class names — the same flow as a local `pipelex build runner`.
 
     The sweep is scoped to the requested pipe, so unrelated broken siblings do not block a good pipe.
-    When `pipe_ref` is omitted the scope cannot be known before the closure loads, so the whole closure
-    is swept and the pipe then defaults to its `main_pipe` — a stricter verdict, and the honest one for
-    a caller who did not say which pipe they meant.
+    When `pipe_ref` is omitted the scope is not settled before the closure loads, so the whole closure
+    is swept and the pipe then defaults the way a run by address does — to the fetched package
+    manifest's `main_pipe` on a `method_ref` request, else to the closure's own declared `main_pipe` —
+    a stricter verdict, and the honest one for a caller who did not say which pipe they meant.
 
     Response contract (the `/validate` discipline): an invalid closure — including a failed dry-run of
     the requested pipe — is a produced verdict: a **200** `is_valid: false` with the structured
     `validation_errors[]`. Non-2xx is reserved for no-verdict conditions: a request-shape 422 (an
-    unknown pipe ref, an omitted `pipe_ref` on a closure with no — or several — `main_pipe`, or a
-    requested pipe whose cross-package dependencies are absent from the request), a 501 for
-    `method_ref`, auth, server fault — RFC 7807 via the global handlers.
+    unknown pipe ref, an omitted `pipe_ref` that nothing defaults — no fetched-manifest `main_pipe`,
+    and a closure declaring no, or several, `main_pipe` — or a requested pipe whose cross-package
+    dependencies are absent from the request), a 501 for a registry-form `method_ref`, auth, server
+    fault — RFC 7807 via the global handlers.
     """
     library_manager = get_library_manager()
-    files = selected_files(request_data)
+    selection = selected_files(request_data)
 
     try:
         # If this raises, validate_bundle has already torn down its own library — nothing to clean up here.
         validate_result = await validate_bundle(
-            mthds_contents=[item.content for item in files],
-            mthds_sources=[item.source for item in files],
+            mthds_contents=[item.content for item in selection.files],
+            mthds_sources=[item.source for item in selection.files],
             allow_signatures=request_data.allow_signatures,
             dry_run_pipe_codes=[request_data.pipe_ref] if request_data.pipe_ref else None,
         )
@@ -183,7 +188,11 @@ async def build_runner(request_data: BuildRunnerRequest) -> JSONResponse:
             msg = "library crate unavailable after a successful bundle load"
             raise PipelexUnexpectedError(msg)
         normalized_crate = normalize_crate(crate, mthds_version=MTHDS_STANDARD_VERSION)
-        requested_pipe = resolve_requested_pipe(normalized_crate, pipe_ref=request_data.pipe_ref)
+        requested_pipe = resolve_requested_pipe(
+            normalized_crate,
+            pipe_ref=request_data.pipe_ref,
+            manifest_main_pipe=selection.manifest_main_pipe,
+        )
 
         # The sweep tolerates a cross-package unresolved dependency by recording the pipe SKIPPED
         # instead of failing. Don't hand back runner code for the *requested* pipe in that state.
