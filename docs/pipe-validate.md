@@ -77,6 +77,7 @@ The 200 body is one of two arms, discriminated on the mandatory `is_valid` field
 **Response Fields (opt-in, present only when requested):**
 
 - `input_form` (object, valid arm only, requires `views: ["input_form"]`): per-pipe input-form descriptors, keyed by the same namespaced `pipe_ref` as `pipe_io_contracts`. Each entry carries an ordered `fields` list describing what a caller must collect to run that pipe — a field's `kind` (drawn from a closed vocabulary), its `name`, whether it is `required`, whether an empty value should `gate` the run, and the per-kind detail (`choices`, `item_count`, `default_value`, nested `concept_ref`, …). It is a **projection of facts the verdict already states**, derived from what the bundle authored rather than from the emitted JSON Schema, so a client can render a run form from the verdict alone
+- `output_form` (object, valid arm only, requires `views: ["output_form"]`): per-pipe output-form descriptors, keyed by the same namespaced `pipe_ref` as `pipe_io_contracts`. Each entry carries a single `field`, drawn from the same closed field vocabulary `input_form` uses, describing what that pipe produces — so a caller rendering a result, or registering a tool signature with a return type, reads the output's shape without inferring it from a value. Its JSON Schema is not here: that rides `pipe_io_contracts[…].output.json_schema`, and the pairing is the point — the descriptor states what the output IS, the schema names the property its payload arrives under
 - `rendered_markdown` (string, both arms, requires `render: ["markdown"]`): a server-rendered Markdown view of the verdict, produced by the same renderers the local CLI uses
 
 **Invalid arm (`is_valid: false`)** — the per-error diagnostics plus the runnability facts; the structural artifacts (`bundle_blueprint`, `pipe_io_contracts`, `graph_spec`, `validated_pipes`) and `mthds_contents` are **absent**, because they do not exist when load/parse/wiring failed:
@@ -133,7 +134,7 @@ The verdict body is lean by default: a request that sends neither list gets exac
 Two independent opt-in axes attach more:
 
 - **`render`** produces *rendered text*, attached under a mechanical `rendered_<format>` key. The supported token is `markdown`, which attaches `rendered_markdown` on **both** 200 arms — failure text is exactly what a human-facing surface wants.
-- **`views`** attaches a *structured* artifact under a **same-named** top-level field. The supported token is `input_form`, which attaches `input_form` on the **valid arm only**: the descriptor derives from a library that was never assembled when load/parse/wiring failed, so it follows `bundle_blueprint`, `pipe_io_contracts` and `graph_spec` into absence on the invalid arm.
+- **`views`** attaches a *structured* artifact under a **same-named** top-level field. The supported tokens are `input_form` and `output_form`, each attaching a field of its own name on the **valid arm only**: the descriptors derive from a library that was never assembled when load/parse/wiring failed, so they follow `bundle_blueprint`, `pipe_io_contracts` and `graph_spec` into absence on the invalid arm.
 
 Both lists share the same mechanics, and both are deliberately typed as plain `list[str]` rather than closed enums at the request boundary:
 
