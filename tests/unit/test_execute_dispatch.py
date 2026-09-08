@@ -62,11 +62,13 @@ class _StubOrchestrator:
         *,
         graph_spec: GraphSpec | None = None,
         pipe_io_artifacts: PipeIOArtifacts | None = None,
+        pipe_io_artifacts_error: str | None = None,
         supports_fire_and_forget: bool = False,
     ) -> None:
         self.calls: list[dict[str, Any]] = []
         self._graph_spec = graph_spec
         self._pipe_io_artifacts = pipe_io_artifacts
+        self._pipe_io_artifacts_error = pipe_io_artifacts_error
         self.supports_fire_and_forget = supports_fire_and_forget
 
     async def execute(self, *, pipe_job: PipeJob, delivery_assignment: DeliveryAssignment | None) -> PipelexPipeRunOutput:
@@ -83,6 +85,7 @@ class _StubOrchestrator:
                 pipeline_run_id=pipe_job.job_metadata.run_metadata.pipeline_run_id,
                 graph_spec=self._graph_spec,
                 pipe_io_artifacts=self._pipe_io_artifacts,
+                pipe_io_artifacts_error=self._pipe_io_artifacts_error,
             ),
             workflow_id=None,
         )
@@ -197,9 +200,10 @@ class TestExecuteDispatch:
         The rule the design ratified is "wherever the graph travels, its description travels with
         it": the runtime fills `pipe_io_artifacts_dump` on the SPI payload exactly as it fills
         `graph_spec_dump`, and this repo is the only reader that puts it back on the public wire.
-        Pins both halves of that read-back — the carrier under its own key, and the
-        `pipe_io_artifacts_error` slot that mirrors `graph_assembly_error` — so a dropped or
-        misnamed key cannot stay green while the OpenAPI artifact still advertises the fields.
+        Pins the carrier under its own key, so a dropped or misnamed key cannot stay green while
+        the OpenAPI artifact still advertises the field. The error slot is `null` here only
+        because the build succeeded; what pins *that* key is the failed-build test below, since a
+        `null` assertion alone is also satisfied by the field's own default.
         """
         stub = _StubOrchestrator(pipe_io_artifacts=_echo_pipe_io_artifacts())
         _register_stub(mocker, mode="direct", stub=stub)
@@ -221,8 +225,35 @@ class TestExecuteDispatch:
         # from "the build failed", exactly as it does for the graph).
         assert pipe_output["pipe_io_artifacts_error"] is None
 
+    def test_pipe_io_artifacts_error_reaches_the_wire(self, mocker: MockerFixture) -> None:
+        """A failed artifact build is reported on the wire, and does not cost the run its result.
+
+        Upstream builds the artifacts best-effort in a `finally` ahead of delivery and swallows
+        whatever the builders raise onto `pipe_io_artifacts_error`, so the only way a caller can
+        tell "the build failed" from "no artifacts were requested" is that field arriving non-null
+        beside a `null` carrier. This is what actually pins the key through the SPI round-trip:
+        asserting it is `null` on a successful run would pass just as well if the route stopped
+        mapping it altogether.
+        """
+        message = "Failed to build the I/O artifacts for pipeline_run_id=run-1: contract will not render"
+        stub = _StubOrchestrator(pipe_io_artifacts_error=message)
+        _register_stub(mocker, mode="direct", stub=stub)
+
+        client = _build_client()
+        response = client.post(
+            "/v1/execute",
+            json={"pipe_code": "echo", "mthds_contents": [VALID_MTHDS], "inputs": {"text": "hello"}},
+        )
+
+        assert response.status_code == 200, response.text
+        pipe_output = response.json()["pipe_output"]
+        assert pipe_output["pipe_io_artifacts_error"] == message
+        # A failed description never invalidates the run: the carrier is null and the result stands.
+        assert pipe_output["pipe_io_artifacts"] is None
+        assert response.json()["state"] == "COMPLETED"
+
     def test_pipe_io_artifacts_absent_when_the_run_carried_none(self, mocker: MockerFixture) -> None:
-        """Graph tracing off means a null carrier, not a missing key or a fabricated empty one."""
+        """A run that built no artifacts yields a null carrier, not a missing key or a fabricated empty one."""
         stub = _StubOrchestrator()
         _register_stub(mocker, mode="direct", stub=stub)
 
