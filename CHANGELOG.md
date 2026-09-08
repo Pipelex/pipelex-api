@@ -1,5 +1,23 @@
 # Changelog
 
+## [v0.23.0] - 2026-09-08
+
+### Added
+
+- **`POST /v1/execute` carries the run's I/O artifacts beside its execution graph**: `pipe_output.pipe_io_artifacts` groups the `pipe_io_contracts`, `input_form` and `output_form` that `/validate` produces, keyed by namespaced `pipe_ref` over the run library's own pipes, so a consumer rendering a run's graph can describe a data node from the run itself rather than pairing that graph with a validation of some other bundle text. It is `null` unless the run generated a graph with `graphs_inclusion.graphspec_json` on, and `pipe_io_artifacts_error` carries the message when the build ran and failed.
+
+### Changed
+
+- **Pinned `pipelex` 0.57.0**: up from `==0.56.0`, exactly, for the `PipeIOArtifacts` carrier and its SPI transport that the `/v1/execute` addition above reads back onto the public wire. The `.pipelex/` config schema did not move, so no migration is required.
+- **The normalized crate is stamped `mthds_version: "2.0.0"` (Breaking)**: `pipelex` 0.57.0 moves to `mthds` 0.14.0, whose `MTHDS_STANDARD_VERSION` was cut from `1.0.0`, so every crate `POST /v1/resolve` emits and `POST /v1/build/runner` normalizes carries the new stamp and a consumer comparing against `1.0.0` has to move. Crate fingerprints are unaffected — `mthds_version` is excluded from the hashed payload by design — but a `METHODS.toml` pinning the old major, such as `^1.0.0`, now warns where it did not before. The MTHDS Protocol version is unchanged at `0.6.0`.
+- **`POST /v1/codegen` stamps `engine_version` `0.57.0`**: the stamp is the pinned `pipelex` version, so every generated artifact header and every `codegen.lock` this release emits differs from the previous one, and a lock committed against `0.56.0` no longer matches until it is regenerated.
+- **OpenAPI artifact regenerated** for the new `PipeIOArtifacts` schema and the `pipe_io_artifacts` / `pipe_io_artifacts_error` fields it brings to `PipeOutputWire`, both inherited from pipelex's `PipeOutput` rather than declared here. Nothing was removed and no type loosened, but `PipeOutputWire` publishes `additionalProperties: false`, so a strictly-validating client generated from the previous artifact rejects the added fields until it is regenerated.
+
+### Fixed
+
+- **The `/execute` response reference documents its execution graph**: `docs/pipe-run.md` listed `tokens_usages` and `usage_assembly_error` under `pipe_output` but never `graph_spec` or `graph_assembly_error`, so a caller reading the reference had no way to learn the graph was on the wire at all. Both are documented now, beside the `pipe_io_artifacts` pair added above, each with the configuration setting that actually gates it.
+- **The `/validate` reference documents the `output_form` view**: `docs/pipe-validate.md` still described `input_form` as the only supported `views` token and carried no field reference for `output_form`, which has been wrong since that view shipped in v0.22.0.
+
 ## [v0.22.0] - 2026-09-03
 
 ### Added

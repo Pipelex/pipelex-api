@@ -5,7 +5,7 @@ runner resolves the deployment's orchestration_mode, dispatches the locally-buil
 orchestrator the registry holds for it with `DeliveryMode.BLOCKING`, and rehydrates the orchestrator's
 JSON-safe output back into the full PipeOutput the `/execute` response wraps — exercising the real
 serialize -> rehydrate round-trip (`serialize_completed_output` -> `hydrate_working_memory`), including
-the `graph_spec` `strict=False` re-validation branch. Also pins the policy-gated per-request override
+the `graph_spec` and `pipe_io_artifacts` `strict=False` re-validation branches. Also pins the policy-gated per-request override
 (symmetric with `/start`) and the no-orchestrator case (`MissingOrchestratorError`). The boot slot is
 never used — every mode dispatches through the per-call registry. (Delivery is endpoint-set, never
 requestable, so `/execute` has no fire-and-forget refusal — that axis is `/start`'s.)
@@ -17,7 +17,17 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from mthds.protocol.input_form import PipeInputFormDescriptor, TextField
+from mthds.protocol.output_form import PipeOutputFormDescriptor
+from mthds.protocol.pipe_io_contracts import (
+    IOMultiplicity,
+    PipeInputContract,
+    PipeIOContract,
+    PipeOutputContract,
+    PresenceMarker,
+)
 from pipelex.core.memory.working_memory import MAIN_STUFF_NAME
+from pipelex.core.pipes.pipe_io_artifacts import PipeIOArtifacts
 from pipelex.core.pipes.pipe_output import PipeOutput
 from pipelex.graph.graphspec import GraphSpec
 from pipelex.pipe_run.delivery_assignment import DeliveryAssignment
@@ -47,9 +57,18 @@ class _StubOrchestrator:
     fire-and-forget arm) is present only to satisfy the protocol — `/execute` never calls it.
     """
 
-    def __init__(self, *, graph_spec: GraphSpec | None = None, supports_fire_and_forget: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        graph_spec: GraphSpec | None = None,
+        pipe_io_artifacts: PipeIOArtifacts | None = None,
+        pipe_io_artifacts_error: str | None = None,
+        supports_fire_and_forget: bool = False,
+    ) -> None:
         self.calls: list[dict[str, Any]] = []
         self._graph_spec = graph_spec
+        self._pipe_io_artifacts = pipe_io_artifacts
+        self._pipe_io_artifacts_error = pipe_io_artifacts_error
         self.supports_fire_and_forget = supports_fire_and_forget
 
     async def execute(self, *, pipe_job: PipeJob, delivery_assignment: DeliveryAssignment | None) -> PipelexPipeRunOutput:
@@ -65,6 +84,8 @@ class _StubOrchestrator:
                 working_memory=working_memory,
                 pipeline_run_id=pipe_job.job_metadata.run_metadata.pipeline_run_id,
                 graph_spec=self._graph_spec,
+                pipe_io_artifacts=self._pipe_io_artifacts,
+                pipe_io_artifacts_error=self._pipe_io_artifacts_error,
             ),
             workflow_id=None,
         )
@@ -72,6 +93,40 @@ class _StubOrchestrator:
     async def start(self, *, pipe_job: PipeJob, delivery_assignment: DeliveryAssignment | None) -> PipelexPipeDispatchAck:
         msg = "/execute drives the blocking `execute` arm; `start` must not be reached."
         raise NotImplementedError(msg)
+
+
+def _echo_pipe_io_artifacts() -> PipeIOArtifacts:
+    """The I/O artifacts a run of the echo bundle would carry, keyed by its `pipe_ref`.
+
+    Minimal but real: each of the carrier's members is the standard's own artifact type, so the
+    dump the orchestrator produces is the shape a live run produces, not a stand-in dict.
+    """
+    return PipeIOArtifacts(
+        pipe_io_contracts={
+            "echo.echo": PipeIOContract(
+                inputs={
+                    "text": PipeInputContract(
+                        concept_ref="native.Text",
+                        presence=PresenceMarker.PLAIN,
+                        multiplicity=IOMultiplicity.SINGLE,
+                        item_count=None,
+                        json_schema={"type": "string"},
+                    )
+                },
+                output=PipeOutputContract(
+                    concept_ref="native.Text",
+                    multiplicity=IOMultiplicity.SINGLE,
+                    item_count=None,
+                    optional=False,
+                    json_schema={"type": "string"},
+                ),
+            )
+        },
+        input_form={
+            "echo.echo": PipeInputFormDescriptor(fields=[TextField(name="text", required=True, presence=PresenceMarker.PLAIN, gating=False)])
+        },
+        output_form={"echo.echo": PipeOutputFormDescriptor(field=TextField(name="result", required=True))},
+    )
 
 
 def _build_client() -> TestClient:
@@ -138,6 +193,80 @@ class TestExecuteDispatch:
         assert response.status_code == 200, response.text
         # The graph_spec survived the dump -> strict=False re-validation: it is present in the response.
         assert response.json()["pipe_output"]["graph_spec"]["graph_id"] == "g-1"
+
+    def test_pipe_io_artifacts_survive_strict_false_rehydration(self, mocker: MockerFixture) -> None:
+        """A non-None `pipe_io_artifacts` reaches the `/execute` response beside `graph_spec`.
+
+        The rule the design ratified is "wherever the graph travels, its description travels with
+        it": the runtime fills `pipe_io_artifacts_dump` on the SPI payload exactly as it fills
+        `graph_spec_dump`, and this repo is the only reader that puts it back on the public wire.
+        Pins the carrier under its own key, so a dropped or misnamed key cannot stay green while
+        the OpenAPI artifact still advertises the field. The error slot is `null` here only
+        because the build succeeded; what pins *that* key is the failed-build test below, since a
+        `null` assertion alone is also satisfied by the field's own default.
+        """
+        stub = _StubOrchestrator(pipe_io_artifacts=_echo_pipe_io_artifacts())
+        _register_stub(mocker, mode="direct", stub=stub)
+
+        client = _build_client()
+        response = client.post(
+            "/v1/execute",
+            json={"pipe_code": "echo", "mthds_contents": [VALID_MTHDS], "inputs": {"text": "hello"}},
+        )
+
+        assert response.status_code == 200, response.text
+        pipe_output = response.json()["pipe_output"]
+        artifacts = pipe_output["pipe_io_artifacts"]
+        # All three members survived the dump -> strict=False re-validation, under the standard's names.
+        assert artifacts["pipe_io_contracts"]["echo.echo"]["output"]["concept_ref"] == "native.Text"
+        assert artifacts["input_form"]["echo.echo"]["fields"][0]["name"] == "text"
+        assert artifacts["output_form"]["echo.echo"]["field"]["name"] == "result"
+        # The error slot rides along, null when the build succeeded (a host must tell that apart
+        # from "the build failed", exactly as it does for the graph).
+        assert pipe_output["pipe_io_artifacts_error"] is None
+
+    def test_pipe_io_artifacts_error_reaches_the_wire(self, mocker: MockerFixture) -> None:
+        """A failed artifact build is reported on the wire, and does not cost the run its result.
+
+        Upstream builds the artifacts best-effort in a `finally` ahead of delivery and swallows
+        whatever the builders raise onto `pipe_io_artifacts_error`, so the only way a caller can
+        tell "the build failed" from "no artifacts were requested" is that field arriving non-null
+        beside a `null` carrier. This is what actually pins the key through the SPI round-trip:
+        asserting it is `null` on a successful run would pass just as well if the route stopped
+        mapping it altogether.
+        """
+        message = "Failed to build the I/O artifacts for pipeline_run_id=run-1: contract will not render"
+        stub = _StubOrchestrator(pipe_io_artifacts_error=message)
+        _register_stub(mocker, mode="direct", stub=stub)
+
+        client = _build_client()
+        response = client.post(
+            "/v1/execute",
+            json={"pipe_code": "echo", "mthds_contents": [VALID_MTHDS], "inputs": {"text": "hello"}},
+        )
+
+        assert response.status_code == 200, response.text
+        pipe_output = response.json()["pipe_output"]
+        assert pipe_output["pipe_io_artifacts_error"] == message
+        # A failed description never invalidates the run: the carrier is null and the result stands.
+        assert pipe_output["pipe_io_artifacts"] is None
+        assert response.json()["state"] == "COMPLETED"
+
+    def test_pipe_io_artifacts_absent_when_the_run_carried_none(self, mocker: MockerFixture) -> None:
+        """A run that built no artifacts yields a null carrier, not a missing key or a fabricated empty one."""
+        stub = _StubOrchestrator()
+        _register_stub(mocker, mode="direct", stub=stub)
+
+        client = _build_client()
+        response = client.post(
+            "/v1/execute",
+            json={"pipe_code": "echo", "mthds_contents": [VALID_MTHDS], "inputs": {"text": "hello"}},
+        )
+
+        assert response.status_code == 200, response.text
+        pipe_output = response.json()["pipe_output"]
+        assert pipe_output["pipe_io_artifacts"] is None
+        assert pipe_output["pipe_io_artifacts_error"] is None
 
     def test_per_request_override_honored_when_policy_allows(self, mocker: MockerFixture) -> None:
         """With override ON, a per-request orchestration_mode is resolved and dispatched (symmetric with /start)."""

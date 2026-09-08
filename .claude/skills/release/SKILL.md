@@ -1,184 +1,77 @@
 ---
 name: release
 description: >
-  Automates the Pipelex API release workflow: bumps the version in
-  pyproject.toml, finalizes the CHANGELOG.md Unreleased section, runs quality
-  checks, creates a release/vX.Y.Z branch, commits, pushes, and opens a PR to
-  main. Use when user says "release", "cut a release", "bump version", "prepare
-  a release", "make a release", "ship it", "create release branch", or any
-  variation of shipping a new version of pipelex-api. The user can optionally
-  provide changelog content inline when invoking the skill (e.g. "/release
-  Added new auth backend"), which will be used as the changelog entry for this
-  version.
+  Cut a release of pipelex-api, the open-source Pipelex runner published as the
+  pipelex/pipelex-api image on Docker Hub: the release/vX.Y.Z worktree, the
+  pyproject.toml bump with the uv.lock and the OpenAPI artifact that follow, the
+  changelog entry, the quality gates, one commit, and a pull request to main. Use
+  when the user says "release", "cut a release", "bump version", "prepare a
+  release", "make a release", "ship it", "create release branch", "promote dev to
+  main", "tag a version", or any variation of shipping a new version of
+  pipelex-api. Changelog content passed inline ("/release Added a build route")
+  becomes the entry. The merge is landed by /ledger-land, never by this skill.
 ---
 
-# Pipelex API Release Workflow
+# Releasing pipelex-api
 
-This skill handles the full release cycle for the `pipelex-api` Python package.
+The procedure is the workspace release play, [`docs/releasing.md`](../../../../docs/releasing.md) at the workspace root — `../docs/releasing.md` from this repo's own root, which resolves the same from the main checkout and from any worktree. Read it first, then run it with what follows. The repo key is `pipelex-api`, the base is `dev`, and the pull request targets `main`: `guard-branches.yml`'s `gate-main` job refuses any head branch into `main` that is not `release/vX.Y.Z`, so there is no other way in. The release worktree is `_pipelex-api--release`, made with `wt add pipelex-api release --branch release/vX.Y.Z`. The repo declares neither `.worktree.toml` nor `.worktreeinclude`, so `wt` resolves the base from `origin/dev`, copies `.env` alone, and provisions with the Makefile's `install` target, which is what creates the `.venv` every gate below runs out of.
 
-## Files touched
+## What ships
 
-- **`pyproject.toml`** — the `version` field (line 3)
-- **`CHANGELOG.md`** — add `[vX.Y.Z] - YYYY-MM-DD` entry (remove `[Unreleased]` if present)
-- **`uv.lock`** — regenerated via `make li` (lock + install)
-- **`docs/openapi/pipelex-api.openapi.yaml`** — regenerated via `make openapi-export`. The artifact embeds the app version in `info.version`, so bumping `pyproject.toml` **always** makes it stale. This must be regenerated after the bump or CI's `make openapi-check` fails.
+The merge to `main` publishes through a chain: `auto-release.yml` fires on the push and dispatches the two workflows that publish the artifacts, while `deploy-docs.yml` fires on the same push on its own.
 
-## Workflow
+- **`auto-release.yml`** fires on `push` to `main`. It reads the version out of `pyproject.toml`, and stops silently when `gh release view "v$VERSION"` already answers — so a push to `main` carrying no bump is a green no-op rather than a failure. Otherwise it refuses to go on unless `CHANGELOG.md` carries a `^## \[v$VERSION\] - ` line ("No changelog entry for v$VERSION in CHANGELOG.md — refusing to publish"), then dispatches the other two with `gh workflow run <workflow> --ref main -f version="$VERSION"`.
+- **The Docker Hub image**, by `deploy.yml` — `make deploy-docker-hub` builds for `linux/amd64` and pushes `pipelex/pipelex-api:X.Y.Z` and `pipelex/pipelex-api:latest`. It re-reads `pyproject.toml` and errors out when the version it was handed disagrees with it. Besides the dispatch, both publishing workflows carry a `push: tags: 'v*'` trigger, so a hand-pushed `vX.Y.Z` tag fires the image build and the GitHub Release together — the one way into them that does not go through `auto-release.yml`.
+- **The GitHub Release and the `vX.Y.Z` tag**, by `github-release.yml` — the notes are the changelog section for that version, blank lines dropped and every line's leading whitespace stripped; with no matching heading it warns, leaves the notes empty and creates the Release carrying the bare line `Release vX.Y.Z`, which on the normal path is unreachable because `auto-release.yml` already failed on the missing entry. No workflow anywhere in this repo runs `git tag`, so the tag exists only as a side effect of `gh release create` — it is lightweight, and it is created with no `--target`, so it names the head of the default branch. Read tags with `git tag --list`, and pass `--tags` to `git describe`.
+- **The documentation site**, by `deploy-docs.yml`, which fires on the push to `main` and runs `uv run mkdocs gh-deploy --force --clean` onto `gh-pages`, served at <https://pipelex.github.io/pipelex-api/>. `docs/changelog.md` snippet-includes `CHANGELOG.md`, so the entry written for this release is what the site publishes as its changelog.
 
-### 1. Pre-flight checks
+The landing verifies the publish — the runs, the registry's answer, the tag:
 
-- Read the current version from `pyproject.toml`.
-- Read `CHANGELOG.md` to understand the current state.
-- Run `git status` and `git log origin/main..HEAD` to assess the working tree:
-  - If there are **uncommitted changes** (staged or unstaged), warn the user and
-    ask whether to commit them as part of the release, stash them, or abort.
-  - If there are **unpushed commits** on the current branch, list them so the
-    user is aware — these will be included in the release branch.
-
-### 2. Determine the bump type
-
-Ask the user which kind of version bump they want — **patch**, **minor**, or
-**major** — unless they already specified it. Show the current version and what
-the new version would be for each option so the choice is concrete.
-
-### 3. Run quality checks (pre-bump gate)
-
-Run `make check`. This is the entry gate — if it fails, stop and report the
-errors so they can be fixed before retrying. Do not proceed past this step on
-failure.
-
-**This runs before the version bump, so it validates the _current_ version, not
-the release version.** In particular it does NOT catch the OpenAPI artifact
-going stale from the bump itself — `docs/openapi/pipelex-api.openapi.yaml`
-embeds `info.version`, so the bump always invalidates it. That is what the
-**post-bump regeneration + re-check in step 7.5** exists to catch. Do not rely
-on this step alone. (Note: `make agent-check` / `make c` / `make cc` skip
-`openapi-check` entirely — only full `make check` and CI run the drift gate, so
-always use `make check` here, never a lighter variant.)
-
-### 4. Ensure we're on the right branch
-
-The release branch must be named `release/vX.Y.Z` where X.Y.Z is the **new**
-version. All file modifications (changelog, version bump, lock) must happen on
-this branch.
-
-- If already on `release/vX.Y.Z` matching the new version, stay on it.
-- If on `dev`, `main`, or any other branch, create and switch to
-  `release/vX.Y.Z` from the current HEAD.
-- If on a `release/` branch for a **different** version, warn the user and ask
-  how to proceed.
-
-### 5. Finalize the changelog
-
-Add a new version entry at the top of the changelog for the release.
-
-1. If there is an `## [Unreleased]` section, **remove it** (including any blank
-   lines that follow it) and replace it with the new version heading. Any
-   content that was under `[Unreleased]` becomes the content of the new version.
-2. If there is no `[Unreleased]` section, insert the new version heading
-   directly after the `# Changelog` title.
-3. **Never add an `[Unreleased]` heading.** The changelog should only contain
-   concrete version entries.
-4. If the user provided changelog content when invoking the skill (e.g.
-   `/release Added new auth backend`), **merge** that content with any
-   existing `[Unreleased]` content (do not discard either source). Format the
-   combined content properly under the appropriate headings (e.g. `### Added`,
-   `### Changed`, `### Fixed`), inferring headings from the content when
-   possible.
-5. If the release has no changelog content yet (neither from an `[Unreleased]`
-   section nor from inline user input), ask the user what to include before
-   proceeding.
-6. The result should look like:
-
-```markdown
-# Changelog
-
-## [vX.Y.Z] - YYYY-MM-DD
-
-### Changed
-- ...
-
-## [vPREVIOUS] - PREVIOUS-DATE
-...
+```bash
+gh run list --workflow=auto-release.yml --branch main --limit 3 --json conclusion,headSha,url  # the run whose headSha is the merge SHA: success
+gh run list --workflow=deploy.yml --limit 3 --json conclusion,event,url                        # the workflow_dispatch run it triggered
+gh run list --workflow=github-release.yml --limit 3 --json conclusion,event,url
+curl -s https://hub.docker.com/v2/repositories/pipelex/pipelex-api/tags/X.Y.Z | jq -r .name    # the registry's answer
+git fetch --tags --prune origin && git tag --list vX.Y.Z                                       # the tag
+gh release view vX.Y.Z                                                                          # the Release and its notes
 ```
 
-### 6. Bump the version in pyproject.toml
+`docker manifest inspect pipelex/pipelex-api:X.Y.Z` reads the registry without pulling the image, where a Docker daemon is available. The two publishing runs list under `main` with event `workflow_dispatch`, not under the release branch, because that is how `auto-release.yml` starts them.
 
-Edit `pyproject.toml` line 3 to the new version string. Only change the version
-field — don't touch anything else.
+**Recovery is by hand, not by re-pushing.** Once the GitHub Release exists, `auto-release.yml` skips everything on any later push to `main`, so a run that created the Release but failed to push the image cannot be repaired by another push. Dispatch the failed workflow yourself with the same version — `gh workflow run deploy.yml --ref main -f version=X.Y.Z` — or re-run its failed jobs.
 
-### 7. Lock dependencies
+## Version files and the lock
 
-Run `make li` to regenerate `uv.lock` and reinstall. This ensures the lockfile
-reflects the new version in `pyproject.toml`. If this step fails, stop and
-report the error.
+- **`pyproject.toml`** — the `[project]` table's `version`, and nothing else in the file. Keep it the file's **first** `version = ` line: `version-check.yml` and the root Makefile both read it with `grep '^version'`, and `auto-release.yml` and `deploy.yml` with `sed -n 's/^[[:space:]]*version = "\(.*\)"/\1/p'`.
+- **The lock** — `make li` (`lock` then `install`) regenerates `uv.lock` and syncs the venv. Stop and report if it fails rather than committing a stale lock: `lint-check.yml` runs `uv lock --check` and fails the pull request over one.
+- **Also stamped:** `docs/openapi/pipelex-api.openapi.yaml`, regenerated by `make openapi-export`. The artifact embeds the app version in `info.version`, so bumping `pyproject.toml` **always** makes it stale. That is why the export is a gate marked after the bump below, and why a release that skips it opens a pull request that `make openapi-check` fails in CI.
 
-### 7.5. Regenerate the OpenAPI artifact and re-run the full check
+## Gates
 
-The version bump in step 6 makes the committed OpenAPI artifact stale (its
-`info.version` still reads the old version). Regenerate and re-validate against
-the **final** release state — this is the step that the pre-bump gate (step 3)
-structurally cannot cover:
+Run in the worktree, in this order:
 
-1. Run `make openapi-export` to regenerate `docs/openapi/pipelex-api.openapi.yaml`
-   from the bumped app. Confirm the diff is the expected `info.version` change
-   (and any genuine schema changes from the release); anything unexpected means
-   the artifact had already drifted and should be investigated.
-2. Run `make check` again as the final gate on the committed state. It must pass
-   — `openapi-check` here is exactly what CI runs, so a green `make check` now
-   means CI's OpenAPI drift gate will pass. If it fails, stop and fix before
-   committing.
+1. **`make check`** — `cleanderived`, ruff format, `ruff check --fix`, pyright, mypy, then `check-unused-imports`, `pylint` and `openapi-check`. **Use this target and no lighter one.** `make agent-check`, `make c` and `make cc` all stop short of it: none of them runs `openapi-check`, which is the drift gate CI runs, so a green shorthand says nothing about the artifact. It **rewrites files** (ruff format and `ruff check --fix`), so whatever it touches joins the release commit. Red blocks the release: fix the code, never loosen the target.
+2. **`make agent-test`** — the pytest suite over the usual marker set, quiet unless it fails. `tests-check.yml` runs `make gha-tests` on the pull request across its Python matrix, and the two marker sets are not nested in either direction: CI additionally excludes `gha_disabled`, the local set additionally excludes `needs_output` and every non-`dry_runnable` test marked `llm`, `img_gen` or `ocr`, and CI adds `--disable-inference` and `--exitfirst`. A green here is a strong signal rather than a promise — `make gha-tests` is the target that reproduces the CI leg exactly.
+3. **After the bump: `make openapi-export`, then `make check` again.** The bump in the play's step 7 is what invalidates the committed artifact, and this is the only place that is caught — the pre-bump `make check` structurally cannot see version-driven drift. Confirm the diff is the expected `info.version` change plus any genuine schema change this release carries; anything else means the artifact had already drifted before the release and wants investigating. Both `openapi-export` and `openapi-check` depend on the Makefile's `install` rather than `env`, on purpose: the schema is generated from what is actually installed in `.venv`, and syncing first is what makes the local result match CI, which installs from the lock.
+4. **`make docs-check`** — `mkdocs build --strict`. It is unconditional for a release here, unlike in most repos: `doc-check.yml` filters on `docs/**` and `mkdocs.yml`, and the regenerated OpenAPI artifact lives under `docs/`, so a release pull request always trips that workflow. The changelog is in the same build, through `docs/changelog.md`'s snippet include of `CHANGELOG.md`.
 
-Do not skip this even if step 3 was green: step 3 ran before the bump and cannot
-see version-driven drift.
+## The release commit
 
-### 8. Commit and push
+`pyproject.toml`, `CHANGELOG.md`, `uv.lock`, `docs/openapi/pipelex-api.openapi.yaml`, and each file `make check` rewrote — staged by name.
 
-Stage all release-related changes. This includes at minimum `pyproject.toml`,
-`CHANGELOG.md`, `uv.lock`, and `docs/openapi/pipelex-api.openapi.yaml`, plus any
-other files the user chose to include in step 1 (e.g. previously uncommitted
-work that belongs in this release).
+## CI on the release pull request
 
-Commit with the message:
+- **`guard-branches.yml`** (`pull_request_target`) — `gate-main` refuses any head into `main` that does not match `^release/v[0-9]+\.[0-9]+\.[0-9]+$`, so the release branch name is the only way in. Its `protect-workflows` job additionally blocks workflow-file changes from authors whose association is `CONTRIBUTOR`.
+- **`version-check.yml`** — on every pull request to `main`: the `pyproject.toml` version equals the version in the branch name. A head that is not a release branch does not slip past it — the first step's `exit 0` ends that step alone, and the comparison that follows then fails against an empty branch version.
+- **`changelog-check.yml`** — gated on `startsWith(github.head_ref, 'release/v')`: `CHANGELOG.md` carries a `## [vX.Y.Z] -` heading for the version in the branch name. It asserts nothing about `[Unreleased]`; leaving none behind is the play's rule, not CI's.
+- **`lint-check.yml`** — on every pull request, a matrix of Python versions: `uv lock --check`, the merge-checks (ruff format, ruff lint, pyright, mypy) and `make openapi-check`. The aggregator job `Lint (all versions)` is the single required status.
+- **`tests-check.yml`** — on every pull request, `make gha-tests` across the same matrix.
+- **`doc-check.yml`** — `mkdocs build --strict` whenever `docs/**` or `mkdocs.yml` changed, which a release always does.
+- **`cla.yml`** — the CLA assistant, allowlisted for maintainers.
 
-```
-Release vX.Y.Z
-```
+## Particulars
 
-Push the branch to origin with `-u` to set up tracking.
-
-### 9. Open a PR
-
-Create a pull request targeting `main` with:
-
-- **Title:** `Release vX.Y.Z`
-- **Body:** Include:
-  - The changelog entries for this version (copied from CHANGELOG.md)
-  - A note about the version bump from old to new
-
-Use this format for the PR body:
-
-```markdown
-## Release vX.Y.Z
-
-Bumps version from `A.B.C` to `X.Y.Z`.
-
-### Changelog
-
-<paste the changelog entries for this version here>
-```
-
-Report the PR URL back to the user.
-
-## Important details
-
-- The version follows semver: `MAJOR.MINOR.PATCH`.
-- Always confirm the bump type with the user before making changes.
-- If `make check` fails, the release is blocked — help the user fix the issues
-  rather than skipping the checks.
-- **The OpenAPI artifact tracks the version.** `docs/openapi/pipelex-api.openapi.yaml`
-  embeds `info.version`, so every bump makes it stale and CI's `make openapi-check`
-  will fail unless it is regenerated (step 7.5) and committed. The pre-bump
-  `make check` (step 3) cannot catch this because it runs before the bump.
-- Today's date for the changelog entry: use the current date in `YYYY-MM-DD`
-  format.
+- **No pre-release form.** `changelog-check.yml` fires on any head starting with `release/v` and then demands `^release/v([0-9]+\.[0-9]+\.[0-9]+)$`, so `release/v0.23.0-rc.1` does not skip the check the way it would elsewhere — it fails it. `guard-branches.yml` refuses such a head into `main` outright. The root Makefile also defines `check-version-format`, which holds the same line on the number itself — `^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$` against the `pyproject.toml` version — but nothing invokes it: no target depends on it and no workflow calls it, so it is a helper to run by hand rather than a gate the release passes through. Ship a plain `X.Y.Z`.
+- **The changelog heading carries the `v`** — `## [vX.Y.Z] - YYYY-MM-DD`, which is exactly what `changelog-check.yml` greps for, what `auto-release.yml` refuses to publish without, and what `github-release.yml` slices the Release notes out of. No `[Unreleased]` heading is left behind; the next change re-creates one.
+- **`pipelex` is pinned exactly.** `pyproject.toml` carries `pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==A.B.C`, not a floor, so the published image ships that one runtime version and a `pipelex` release reaches this server only when the pin moves. Moving it is the **`bump-pipelex`** skill, which re-locks, migrates `.pipelex/` config when the schema moved and can legitimately move the OpenAPI artifact — never a hand edit inside the release. A release that carries a pin move says so in its changelog entry.
+- **The back-merge is a merge commit.** `dev` carries a `Merge branch 'main' into dev` after each release rather than a fast-forward; `/ledger-land` makes it, and the changelog is the one conflict it expects.
