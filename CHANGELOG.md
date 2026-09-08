@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **`POST /v1/execute` carries the run's I/O artifacts beside its execution graph.** The response's `pipe_output` gains `pipe_io_artifacts` — the validation report's `pipe_io_contracts`, `input_form` and `output_form`, each keyed by namespaced `pipe_ref` — next to the `graph_spec` it already carried, so a consumer rendering a run's graph can show a data node's value from the run itself instead of pairing that graph with a validation of some other bundle text. The runtime fills the artifacts inside the run's own library window and hands them across the SPI beside the graph dump; this server reverses that serialization onto the public wire, which is the whole of the change here.
+
+  Additive and optional, mirroring the graph exactly: the field is `null` when the run assembled no graph, and `pipe_io_artifacts_error` carries the message when the build failed, so a caller can tell a failed build apart from tracing having been off. A run that already ignored `graph_spec` sees no difference.
+
+### Fixed
+
+- **The `/execute` response reference documents its execution graph.** `docs/pipe-run.md` listed `tokens_usages` and `usage_assembly_error` under `pipe_output` but never `graph_spec` or `graph_assembly_error`, so a caller reading the reference had no way to learn the graph was on the wire at all, nor how to tell a failed assembly from tracing having been off. Both are documented now, beside the `pipe_io_artifacts` pair added above.
+
+### Changed
+
+- **Pinned `pipelex` 0.57.0.** Up from `==0.56.0`, exactly. It brings the `PipeIOArtifacts` carrier and its SPI transport — the runtime half of the `/v1/execute` change above, which is why the two land together. The `.pipelex/` config schema did not move, so no migration is required.
+
+- **The normalized crate is stamped `mthds_version: "2.0.0"` (Breaking).** `pipelex` 0.57.0 moves to `mthds` 0.14.0, whose `MTHDS_STANDARD_VERSION` was cut from `1.0.0` to `2.0.0` — the standard's first cut under its own versioning rule, accounting for breaking changes to the native set and to the manifest, lock and resolution rules that had already shipped unversioned. Every crate `POST /v1/resolve` emits, and every crate `POST /v1/build/runner` normalizes, now carries the new stamp, so a consumer that compares `mthds_version` against `1.0.0` has to move. Crate **fingerprints are unaffected** — `mthds_version` is excluded from the hashed payload by design — so an artifact cached by fingerprint stays valid across this bump. Separately, a `METHODS.toml` whose `mthds_version` pins the old major, such as `^1.0.0`, now warns where it did not before, while a plain floor like `>=1.0.0` is still satisfied. The MTHDS Protocol version is unchanged at `0.6.0`, so `GET /v1/version` moves only its `runtime_version`.
+
+- **OpenAPI artifact regenerated**, additively: the new `PipeIOArtifacts` schema, and the `pipe_io_artifacts` and `pipe_io_artifacts_error` fields it arrives with on `PipeOutputWire`, both inherited from pipelex's `PipeOutput` rather than declared here. Nothing was removed and no type loosened, so a client regenerated from `docs/openapi/pipelex-api.openapi.yaml` gains type names and loses none.
+
 ## [v0.22.0] - 2026-09-03
 
 ### Added

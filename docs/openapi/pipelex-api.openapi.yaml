@@ -5024,6 +5024,34 @@ components:
       - output
       - function_name
       title: PipeFuncBlueprint
+    PipeIOArtifacts:
+      properties:
+        pipe_io_contracts:
+          additionalProperties:
+            $ref: '#/components/schemas/PipeIOContract'
+          type: object
+          title: Pipe Io Contracts
+        input_form:
+          additionalProperties:
+            $ref: '#/components/schemas/PipeInputFormDescriptor'
+          type: object
+          title: Input Form
+        output_form:
+          additionalProperties:
+            $ref: '#/components/schemas/PipeOutputFormDescriptor'
+          type: object
+          title: Output Form
+      additionalProperties: false
+      type: object
+      required:
+      - pipe_io_contracts
+      - input_form
+      - output_form
+      title: PipeIOArtifacts
+      description: 'The validate report''s three I/O artifacts, under the report''s names and types.
+
+
+        A grouping, not a new shape: each field is the standard''s artifact, keyed by `pipe_ref`.'
     PipeIOContract:
       properties:
         inputs:
@@ -5409,6 +5437,15 @@ components:
           - type: string
           - type: 'null'
           title: Graph Assembly Error
+        pipe_io_artifacts:
+          anyOf:
+          - $ref: '#/components/schemas/PipeIOArtifacts'
+          - type: 'null'
+        pipe_io_artifacts_error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pipe Io Artifacts Error
         tokens_usages:
           anyOf:
           - items:

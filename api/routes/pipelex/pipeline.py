@@ -144,8 +144,8 @@ def _pipe_output_from_run_output(run_output: PipelexPipeRunOutput) -> PipeOutput
         Temporal workers use — so it must run while the run library (hence the scoped
         `ClassRegistry`) is still open; the base `execute` keeps it open until after the run
         returns, which is exactly this call site.
-      - `graph_spec` / `tokens_usages` are validated back from their `model_dump(mode="json")`
-        dumps with `strict=False`: the orchestrator dumped them in JSON mode (e.g.
+      - `graph_spec` / `pipe_io_artifacts` / `tokens_usages` are validated back from their
+        `model_dump(mode="json")` dumps with `strict=False`: the orchestrator dumped them in JSON mode (e.g.
         `GraphSpec.created_at` became an ISO string), and those models are `strict=True`, so a
         strict re-validation would reject the string. `strict=False` is the correct tool for
         reversing our own trusted JSON dump — it is a round-trip, not untrusted ingest.
@@ -160,6 +160,8 @@ def _pipe_output_from_run_output(run_output: PipelexPipeRunOutput) -> PipeOutput
             "pipeline_run_id": run_output.pipeline_run_id,
             "graph_spec": run_output.graph_spec_dump,
             "graph_assembly_error": run_output.graph_assembly_error,
+            "pipe_io_artifacts": run_output.pipe_io_artifacts_dump,
+            "pipe_io_artifacts_error": run_output.pipe_io_artifacts_error,
             "tokens_usages": run_output.tokens_usages_dump,
             "usage_assembly_error": run_output.usage_assembly_error,
         },
