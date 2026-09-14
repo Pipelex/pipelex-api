@@ -2,7 +2,7 @@
 
 The runner is orchestrator-agnostic. WHICH orchestrator a top-level run dispatches
 to — ``direct`` in-process (the base default), ``temporal``, ``mistral-workflows``,
-… — is a *deployment* choice, never a property of this open-source base.
+… — is a *deployment* choice, never a property of this source-available base.
 ``orchestration_mode`` is an open string token (core owns ``"direct"``; each plugin
 owns its own); the *delivery* axis (blocking vs fire-and-forget) is endpoint-set, not
 configured here. It is read from a packaged ``api.toml`` (keys at the file root — no

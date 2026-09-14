@@ -3,7 +3,7 @@
 # Keys live at the file root (no `[api]` wrapper) — `load_plugin_config` validates the whole merged
 # document against the schema, exactly like `pipelex-temporal`'s `temporal.toml`. The packaged
 # default here is deep-merged with an optional `api_{env}.toml` / `api_override.toml` at `~/.pipelex`
-# then the project `.pipelex` (env selected by `PIPELEX_ENV`). This open-source base names NO
+# then the project `.pipelex` (env selected by `PIPELEX_ENV`). This source-available base names NO
 # orchestrator: it ships the in-process `direct` mode and refuses per-request override. A deployment
 # flavor bakes its own `.pipelex/api_{env}.toml` to flip this (e.g. `pipelex-api-hosted` sets
 # `orchestration_mode = "temporal"`).

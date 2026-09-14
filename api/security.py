@@ -263,7 +263,7 @@ async def get_request_user(request: Request) -> RequestUser | None:
 def get_auth_dependency() -> Any:
     """Select authentication dependency based on AUTH_MODE env var.
 
-    - none: No authentication (open source default, or behind API Gateway)
+    - none: No authentication (self-hosted default, or behind API Gateway)
     - jwt: Validate JWT tokens
     - api_key: Validate static API key
     """

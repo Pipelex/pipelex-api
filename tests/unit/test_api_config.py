@@ -31,7 +31,7 @@ def _temporal_locked_config() -> ApiConfig:
 
 class TestApiConfigDefault:
     def test_packaged_default_is_direct_no_override(self):
-        # The open-source base names no orchestrator: it ships `direct` and refuses overrides.
+        # The source-available base names no orchestrator: it ships `direct` and refuses overrides.
         config = get_api_config()
         assert config.orchestration_mode == "direct"
         assert config.allow_request_orchestration_mode_override is False

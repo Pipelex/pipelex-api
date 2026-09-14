@@ -63,4 +63,4 @@ The first time you open a PR, the CLA-assistant bot will guide you through signi
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE). By submitting a PR you confirm that your contribution is licensed under the same terms.
+This project is licensed under the Elastic License 2.0 (ELv2); see [LICENSE](LICENSE) for the terms. By submitting a PR you confirm that your contribution is licensed under the same terms.

@@ -13,7 +13,7 @@ The official REST API server for building and executing Pipelex pipelines. Deplo
   <br/>
 
   <p align="center">
-    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-Elastic--2.0-blue.svg" alt="Elastic License 2.0"></a>
     <a href="https://go.pipelex.com/discord"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
     <a href="https://docs.pipelex.com/"><img src="https://img.shields.io/badge/Docs-03bb95?logo=read-the-docs&logoColor=white&style=flat" alt="Documentation"></a>
   </p>
@@ -35,7 +35,7 @@ The official REST API server for building and executing Pipelex pipelines. Deplo
 
 The **Pipelex API Server** is a FastAPI-based REST API that allows you to execute [Pipelex](https://github.com/Pipelex/pipelex) pipelines via HTTP requests. Deploy your pipelines as HTTP endpoints and integrate them into any application or workflow.
 
-It is the open-source reference implementation of the **[MTHDS Protocol](https://mthds.ai)** — the minimal HTTP contract every MTHDS runner implements (`POST /execute`, `POST /start`, `POST /validate`, `GET /models`, `GET /version`). The contracts nest: **MTHDS Protocol ⊂ Pipelex API (this server) ⊂ Pipelex hosted API**. This server adds the build tooling extensions (`/build/*`) on top of the protocol; the hosted API at `api.pipelex.com/v1` adds durable runs, the method catalog, and account management on top of this server — same shapes throughout. All routes live under the `/v1` base path; the committed contract is [`docs/openapi/pipelex-api.openapi.yaml`](docs/openapi/pipelex-api.openapi.yaml).
+It is the source-available reference implementation of the **[MTHDS Protocol](https://mthds.ai)** — the minimal HTTP contract every MTHDS runner implements (`POST /execute`, `POST /start`, `POST /validate`, `GET /models`, `GET /version`). The contracts nest: **MTHDS Protocol ⊂ Pipelex API (this server) ⊂ Pipelex hosted API**. This server adds the build tooling extensions (`/build/*`) on top of the protocol; the hosted API at `api.pipelex.com/v1` adds durable runs, the method catalog, and account management on top of this server — same shapes throughout. All routes live under the `/v1` base path; the committed contract is [`docs/openapi/pipelex-api.openapi.yaml`](docs/openapi/pipelex-api.openapi.yaml).
 
 # 🚀 Quick Start with Docker
 
@@ -131,7 +131,7 @@ For broader Pipelex documentation (MTHDS language, concepts, pipe types, the Gat
 
 # 📝 License
 
-This project is licensed under the [MIT license](LICENSE). Runtime dependencies are distributed under their own licenses via PyPI.
+This project is licensed under the Elastic License 2.0 (ELv2); see [LICENSE](LICENSE) for the terms, and the [license page](https://docs.pipelex.com/latest/license/) for how Pipelex reads them. Runtime dependencies are distributed under their own licenses via PyPI.
 
 ---
 

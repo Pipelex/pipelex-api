@@ -4,7 +4,7 @@ Welcome to the Pipelex API documentation. The API provides programmatic access t
 
 ## The three-layer contract
 
-This server is the open-source reference implementation of the **[MTHDS Protocol](https://mthds.ai)** — the minimal HTTP contract every MTHDS runner implements. The contracts nest:
+This server is the source-available reference implementation of the **[MTHDS Protocol](https://mthds.ai)** — the minimal HTTP contract every MTHDS runner implements. The contracts nest:
 
 ```
 MTHDS Protocol  ⊂  Pipelex API (this server)  ⊂  Pipelex hosted API
@@ -89,7 +89,7 @@ The API supports three authentication modes via the `AUTH_MODE` environment vari
 
 ### No Authentication (Default)
 
-By default (`AUTH_MODE=none`), the API requires no authentication. This is the default for open-source deployments and for running behind an API Gateway that handles auth.
+By default (`AUTH_MODE=none`), the API requires no authentication. This is the default for self-hosted deployments and for running behind an API Gateway that handles auth.
 
 If you sit this API behind a trusted reverse proxy that authenticates users and forwards the caller identity via the `X-User-Id` header, set `TRUST_FORWARDED_IDENTITY_HEADERS=true` to honor it. The runner is a generic execution engine — it does not own user metadata (email, OAuth subject, auth method), so a single opaque caller id is the entire trusted surface. The value must be a single path-safe segment (`is_safe_user_id`). **Default is off** — without this flag the API ignores `X-User-Id` entirely and the deployment is treated as single-tenant. With it on, a request arriving *without* the header is rejected with `401`: turning the flag on asserts that a proxy authenticates every caller, so a missing id means that proxy is absent, misconfigured or bypassed. Only enable it when your proxy strips any inbound copy of the header before adding its own; otherwise, any external client can spoof user identity by sending it directly.
 

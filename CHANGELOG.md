@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.24.0] - 2026-09-14
+
+### Changed
+
+- **License (Breaking)**: `pipelex-api` is now licensed under the Elastic License 2.0 (ELv2) instead of MIT: `LICENSE` names Evotis S.A.S. as the copyright holder, the package metadata declares the SPDX expression `Elastic-2.0` in place of the MIT license classifier, which makes hatchling 1.27 or later a requirement for building from source, the OpenAPI contract the server publishes carries `info.license` `Elastic-2.0` (the committed `docs/openapi/pipelex-api.openapi.yaml` is regenerated to match, its summary now calling the runner source-available), and the Docker image's `org.opencontainers.image.licenses` label reads `Elastic-2.0`; every earlier version and Docker image tag, up to and including v0.23.0, stays under MIT. ELv2 is source-available: you may run `pipelex-api` for your own team or company, on your own infrastructure or in your own cloud account, while its main limitation rules out offering others a hosted API or runner that executes methods, whether they send the methods themselves or pick them from a catalog you make available. `LICENSE` carries the full terms, including its conditions on notices and redistribution, and the [license page](https://docs.pipelex.com/latest/license/) explains how Pipelex reads them.
+- **Pinned `pipelex` 0.58.0**: up from `==0.57.0`, exactly, for the relicense of `pipelex` to the Elastic License 2.0, which this server now depends on under that license. The runtime did not change and neither did the `.pipelex/` config schema, so no migration is required.
+- **`POST /v1/codegen` stamps `engine_version` `0.58.0`**: the stamp is the pinned `pipelex` version, so every generated artifact header and every `codegen.lock` this release emits differs from the previous one, and a lock committed against `0.57.0` no longer matches until it is regenerated.
+
 ## [v0.23.0] - 2026-09-08
 
 ### Added

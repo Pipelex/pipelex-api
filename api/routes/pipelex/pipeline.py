@@ -297,7 +297,7 @@ class ApiRunner(PipelexMTHDSProtocol):
         orchestrator fails loud with `MissingOrchestratorError` (carrying the install hint), also
         before any library load.
 
-        `pipeline_run_id` is the client-supplied run identifier — this open-source runner
+        `pipeline_run_id` is the client-supplied run identifier — this source-available runner
         honors it (protocol: implementations MAY decline it, but then MUST 422;
         we accept it, and `StartAck.pipeline_run_id` echoes it back as authoritative).
         `callback_urls` is THIS server's extension (completion webhooks) — the wire

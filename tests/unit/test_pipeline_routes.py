@@ -213,7 +213,7 @@ class TestPipelineRoutes:
         assert kwargs["callback_urls"] == ["https://example.com/done"]
 
     def test_start_forwards_client_pipeline_run_id(self, mocker: MockerFixture):
-        # D11: the open-source runner ACCEPTS a client-supplied pipeline_run_id and
+        # D11: the source-available runner ACCEPTS a client-supplied pipeline_run_id and
         # forwards it to the runner's `start` as the `pipeline_run_id` kwarg.
         client, _, start_mock = _build_client(mocker)
         response = client.post(

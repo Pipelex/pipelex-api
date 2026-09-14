@@ -5,7 +5,7 @@ Pins the layered extension policy's Rule 4 (the Pipelex workspace spec
 extension key never waives the requirement that a run request carry a source
 this server understands, and a source-less body whose keys this deployment does
 not handle gets a message that NAMES them — so "a hosted client was pointed at
-an open-source runner" reads as that, instead of as a generic precondition
+a source-available runner" reads as that, instead of as a generic precondition
 failure.
 
 The runner is mocked as in `test_pipeline_routes`; nothing here reaches inference,
