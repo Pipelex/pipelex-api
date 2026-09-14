@@ -230,7 +230,7 @@ class RunRequest(BaseModel):
 class StartRequest(RunRequest):
     """Body of `POST /start` — `RunRequest` plus the optional `pipeline_run_id`.
 
-    `pipeline_run_id` is the client-supplied run identifier; this open-source
+    `pipeline_run_id` is the client-supplied run identifier; this source-available
     runner accepts it (the server-generated id echoed in the start ack is always
     authoritative). Extension args pass through `extra="allow"` exactly as on
     `RunRequest`.

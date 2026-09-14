@@ -1,7 +1,7 @@
 ---
 name: release
 description: >
-  Cut a release of pipelex-api, the open-source Pipelex runner published as the
+  Cut a release of pipelex-api, the source-available Pipelex runner published as the
   pipelex/pipelex-api image on Docker Hub: the release/vX.Y.Z worktree, the
   pyproject.toml bump with the uv.lock and the OpenAPI artifact that follow, the
   changelog entry, the quality gates, one commit, and a pull request to main. Use

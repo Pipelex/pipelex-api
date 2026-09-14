@@ -10,7 +10,7 @@ mechanism that prevents first-party spec drift (master plan, eng review):
   is rejected with 422.
 - `GET /version` is public (no auth) and returns the `VersionInfo` shape.
 - A client-supplied `pipeline_run_id` on `/start` is honored (master D11 — this
-  open-source runner accepts it; `StartAck.pipeline_run_id` echoes it back).
+  source-available runner accepts it; `StartAck.pipeline_run_id` echoes it back).
 - The completion-callback E2E (eng-review 5A): `/start` with `callback_urls`
   delivers a signed POST to a local in-test receiver. The orchestrator is replaced
   by a fake whose `start` performs the real `DeliveryExecutor` delivery in-process, so

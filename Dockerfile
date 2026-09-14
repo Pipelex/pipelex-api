@@ -41,7 +41,7 @@ RUN apt-get update \
 LABEL org.opencontainers.image.title="pipelex-api" \
       org.opencontainers.image.description="Official Pipelex REST API server" \
       org.opencontainers.image.source="https://github.com/Pipelex/pipelex-api" \
-      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.licenses="Elastic-2.0" \
       org.opencontainers.image.vendor="Evotis S.A.S."
 
 EXPOSE 8081
