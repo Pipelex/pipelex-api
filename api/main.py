@@ -145,7 +145,7 @@ fastapi_app = PipelexFastAPI(
     lifespan=lifespan,
     title="Pipelex API",
     version=_own_version(),
-    summary=f"The open-source Pipelex runner — implements MTHDS Protocol v{PROTOCOL_VERSION}.",
+    summary=f"The source-available Pipelex runner — implements MTHDS Protocol v{PROTOCOL_VERSION}.",
     description=(
         f"This server implements the [MTHDS Protocol](https://mthds.ai) v{PROTOCOL_VERSION} "
         "(`POST /execute`, `POST /start`, `POST /validate`, `GET /models`, `GET /version` — "
@@ -156,7 +156,7 @@ fastapi_app = PipelexFastAPI(
         "every error is an RFC 7807 `application/problem+json` problem document, documented per "
         "operation as a `ProblemDocument`."
     ),
-    license_info={"name": "MIT", "identifier": "MIT"},
+    license_info={"name": "Elastic License 2.0", "identifier": "Elastic-2.0"},
 )
 
 # Order matters: Starlette's `add_middleware` PREPENDS (see
