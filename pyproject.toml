@@ -365,3 +365,6 @@ enable = [
   "W0101", # Unreachable code: Used when there is some code behind a "return" or "raise" statement, which will never be accessed.
 ]
 ignore = [".venv", "__pycache__", "build", "dist", ".git"]
+
+[tool.uv.sources]
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "81be71bb0224e4d7bc8b2543693b8836fa129242" }
