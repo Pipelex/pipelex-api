@@ -3307,16 +3307,6 @@ components:
             type: array
           - type: 'null'
           title: Data
-        data_text:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Data Text
-        data_html:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Data Html
         extra:
           additionalProperties: true
           type: object
