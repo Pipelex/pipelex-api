@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **`make pylint` lints `api/`**: the target, which `make check` runs, linted the installed `pipelex` package in `.venv` instead of this repository's own code, so `api/` was never checked by pylint. It now lints `api` and `tests`.
+
 ## [v0.25.0] - 2026-09-16
 
 ### Changed
