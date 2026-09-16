@@ -1,5 +1,14 @@
 # Changelog
 
+## [v0.25.0] - 2026-09-16
+
+### Changed
+
+- **Pinned `pipelex` 0.59.0**: up from `==0.58.0`, exactly, so a run no longer renders every traced input and output to Rich text and HTML on the execution path, which on the hosted runner happened on the Temporal worker's workflow thread. The release also fixes the "Output of pipe" panels hanging a run in `poor` pretty-print mode on a narrow headless console, and escapes every `<` in the graph and stuff viewer pages. It adds `pretty_print_mode` (`rich`, `poor` or `silent`) under `[runtime.log]`, which this server leaves at its `rich` default.
+- **The graph spec's `IOSpec` no longer carries `data_text` or `data_html` (Breaking)**: `pipelex` 0.59.0 removes the text and HTML renderings of traced data, so both fields are gone from every graph spec the run routes return, and the committed `docs/openapi/pipelex-api.openapi.yaml` is regenerated to match. A graph spec saved by an earlier version is refused when read back. The settings that asked for those renderings, `stuff_text_content` and `stuff_html_content` under `[interpreter.pipeline_execution.graph.data_inclusion]`, no longer exist and boot rejects them, so they are removed from this server's `.pipelex/pipelex.toml`; an operator running it against their own `.pipelex/` must run `pipelex migrate` or delete the two keys by hand.
+- **A remote input is checked for syntax only (Breaking)**: an http(s) URL on a `Document` or `Image` input is refused before the run with `PipelineInputUrlInvalidError`, answered as a 422, only when it does not parse. Whether the resource exists is no longer checked up front: the operator that fetches it raises `RemoteFileFetchError`, an `INPUT`-domain error naming the URL and the answer it got, in place of a raw `httpx` error. Those fetches now identify themselves as `Pipelex/0.59.0`, without the `(https://pipelex.com)` suffix. A local file path must still exist before the run starts.
+- **`POST /v1/codegen` stamps `engine_version` `0.59.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.58.0` no longer matches until it is regenerated.
+
 ## [v0.24.0] - 2026-09-14
 
 ### Changed

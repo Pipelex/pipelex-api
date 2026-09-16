@@ -11,7 +11,7 @@ info:
   license:
     name: Elastic License 2.0
     identifier: Elastic-2.0
-  version: 0.24.0
+  version: 0.25.0
 paths:
   /health:
     get:
@@ -3307,16 +3307,6 @@ components:
             type: array
           - type: 'null'
           title: Data
-        data_text:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Data Text
-        data_html:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Data Html
         extra:
           additionalProperties: true
           type: object
