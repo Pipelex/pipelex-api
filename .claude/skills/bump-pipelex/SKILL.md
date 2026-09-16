@@ -65,14 +65,24 @@ removing that block — see step 3.
 If the user named a version, use it. Otherwise ask PyPI:
 
 ```bash
-curl -s https://pypi.org/pypi/pipelex/json \
-  | python3 -c "import json,sys; print(json.load(sys.stdin)['info']['version'])"
+python3 .claude/skills/bump-pipelex/scripts/latest_release.py
 ```
 
-`info.version` is the latest non-prerelease, which is what "latest" should mean
-here — a server that other people deploy has no business riding an rc by
-accident. If the user explicitly wants a prerelease, list the candidates from
-`releases` in that same JSON and let them pick.
+It prints the newest final release that still has a file that is not yanked,
+which is what "latest" should mean here — a server that other people deploy has
+no business riding an rc by accident. It uses only the standard library, so run
+it with `python3`: this step comes before `make li`, and a fresh worktree has no
+`.venv` yet.
+
+Do not read `info.version` from PyPI's JSON instead. In the minutes after an
+upload, that summary field has been seen still naming the previous release while
+`releases`, in the same response, already listed the new one — so a bump run
+right after a publish reported "already current" when the pin was one release
+behind. The script ranks the release files, which are what `uv` installs from,
+and says on stderr when `info.version` disagrees with them.
+
+If the user explicitly wants a prerelease, run it with `--pre`, which lists every
+installable version newer than the latest final release, and let them pick.
 
 If the resolved version equals the current pin, say so and stop. There is nothing
 to do, and manufacturing a no-op lock churn is worse than reporting "already
@@ -122,7 +132,7 @@ pipelex in `.venv`, which everything downstream depends on.
 
 If it reports the requirements are unsatisfiable, the usual cause is that the
 version is not on PyPI yet — publication and the announcement do not always land
-together. Check with the PyPI query from step 2, and if it genuinely isn't
+together. Check with the script from step 2, and if it genuinely isn't
 published, stop and tell the user rather than inventing a git pin: adding one is a
 deliberate decision with a cost (see step 3), not a workaround to apply silently.
 
@@ -276,6 +286,9 @@ blanket add sweeps someone's in-flight work into a bump commit. Stage
 
 ## Traps worth remembering
 
+- **PyPI's `info.version` lags a fresh upload.** Right after a publish it can
+  still name the previous release, and a bump that trusts it stops at "already
+  current" one release short. Resolve "latest" with `scripts/latest_release.py`.
 - **A `[tool.uv.sources]` git pin silently outranks the version specifier.** The
   bump looks successful and changes nothing. Always check for it, always remove it
   when returning to PyPI.
