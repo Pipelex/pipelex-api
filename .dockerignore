@@ -63,7 +63,15 @@ playground
 # the image: its storage backend, its log level, its telemetry credentials. The image would then
 # behave differently from the published one, and nothing in the diff would say so. An operator
 # supplies overrides to a container by mounting them at /root/.pipelex, the documented path.
-.pipelex/*_override.toml
+#
+# The runtime layers more than the `_override` tier over a base file: `_local`, `_{environment}`
+# selected by PIPELEX_ENV, and `_temporary_override`, for every configuration family in the
+# directory rather than for `pipelex` alone. Environment names are open-ended, so the exclusion is
+# by shape — any suffixed variant of a base file — and the one tracked variant is named back in.
+# The nested inference overrides need their own line because a pattern's `*` does not cross a `/`.
+.pipelex/*_*.toml
+!.pipelex/pipelex_service.toml
+.pipelex/inference/*_override.toml
 
 # OS / system files
 .DS_Store

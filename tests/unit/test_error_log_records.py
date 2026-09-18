@@ -9,23 +9,25 @@ output takes in production, minus the process stream it is written to.
 
 import json
 import logging
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
-from pipelex import log
 from pipelex.base_exceptions import PipelexConfigError
-from pipelex.config import get_config
 from pipelex.system.console_target import ConsoleTarget
-from pipelex.tools.log.json_log_sink import JsonLogFormatter, JsonLogSink
+from pipelex.tools.log.json_log_sink import JsonLogFormatter
 from pipelex.tools.log.log_sink import LogSinkMethod
 from pipelex.tools.misc.pretty import PrettyPrintMode
+from pipelex.tools.misc.toml_utils import load_toml_from_path
 
 from api.error_types import ErrorType
 from api.errors import raise_validation_error
 from api.exception_handlers import API_ERROR_EVENT, register_exception_handlers
 from api.middleware import REQUEST_ID_HEADER, RequestIdMiddleware
+
+_SHIPPED_PIPELEX_CONFIG = Path(__file__).parents[2] / ".pipelex" / "pipelex.toml"
 
 _router = APIRouter()
 
@@ -70,17 +72,21 @@ def _rendered_json(record: logging.LogRecord) -> dict[str, Any]:
 
 
 class TestErrorLogRecords:
-    def test_the_runner_is_configured_onto_the_json_sink(self):
-        # Pins the `.pipelex/pipelex.toml` this server ships, not a runtime default. The image
-        # installs pipelex without the `cli` extra, so the Rich console sink and the "rich"
-        # pretty-print mode are not available to it — a boot that selected either would refuse at
-        # startup, naming the extra. The json sink writes to stderr so stdout stays the data
-        # channel.
-        log_config = get_config().runtime.log
-        assert log_config.sink == LogSinkMethod.JSON
-        assert log_config.console_log_target == ConsoleTarget.STDERR
-        assert log_config.pretty_print_mode == PrettyPrintMode.SILENT
-        assert isinstance(log.sink, JsonLogSink)
+    def test_the_runner_ships_a_configuration_that_selects_the_json_sink(self):
+        # Reads the shipped file rather than `get_config()`, deliberately. The runtime layers
+        # `_local`, `_{environment}` and `_override` files over a base, so the merged config is
+        # partly this machine's: a developer who sets `sink = "console"` locally for a readable
+        # `make run` would red this test while CI, which has no such file, stayed green. What the
+        # image boots on is this file, because nothing mounts an override into it.
+        #
+        # The json sink writes to stderr so stdout stays the data channel, and the pretty-print
+        # mode is silent because a server has no terminal and must not render on the request
+        # thread. Neither is a claim that Rich is absent: `typer` and `instructor` require it
+        # unconditionally, so it is installed and reachable — these keys are what keeps it unused.
+        log_section = load_toml_from_path(_SHIPPED_PIPELEX_CONFIG)["runtime"]["log"]
+        assert log_section["sink"] == LogSinkMethod.JSON
+        assert log_section["console_log_target"] == ConsoleTarget.STDERR
+        assert log_section["pretty_print_mode"] == PrettyPrintMode.SILENT
 
     def test_request_id_and_route_ride_the_error_record(self, caplog: pytest.LogCaptureFixture):
         # The two identifiers an operator starts from. `request_id` arrives from the log context

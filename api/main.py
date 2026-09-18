@@ -33,11 +33,20 @@ from api.openapi_schema import PipelexFastAPI
 from api.routes import router as api_router
 from api.routes.health import router as health_router
 from api.routes.version import router as version_router
+from api.runtime_contract import assert_the_runtime_carries_the_structured_log_seam
 from api.security import get_auth_dependency
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
+    # First, before anything reads a config or builds a singleton: check that the `pipelex` this
+    # process resolved is one whose logs this server can use. While the structured-log seam is
+    # unreleased the pin is a git source only `uv` reads, and the branch declares the same version
+    # as the published release — so a `pip install .` gets the wrong one and nothing about the
+    # version says so. Left unchecked, the first symptom is the error handler raising on the first
+    # failure it tries to report. See api/runtime_contract.py; it goes with the pin.
+    assert_the_runtime_carries_the_structured_log_seam()
+
     # Resolve the deployment's orchestration mode BEFORE booting, so the process can boot
     # under the matching orchestrator. `orchestration_mode` selects the dispatch arm; a
     # non-`direct` (async/boot) orchestrator — e.g. "temporal" — must additionally claim the

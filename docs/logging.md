@@ -39,13 +39,17 @@ The remaining keys are what the error handlers attach to an `event: "api_error"`
 | `error_domain` | `input`, `config`, `runtime`, … — who fixes it |
 | `error_category` | A Pipelex classification, on the failures it classifies; `unknown` on the catch-all 500 |
 | `retryable` | Whether a blind retry can help, when the failure says |
-| `detail` | The operator-facing explanation, the same text the response body carries |
+| `detail` | The operator-facing explanation, the same text the response body carries — on an API-authored failure only, see below |
 | `user_id` | The authenticated caller, when auth bound one |
 | `pipe_code` | The pipe the request named, on a run route whose body parsed |
 | `pipeline_run_id` | The run the request named, on a run route whose body parsed |
 | `provider`, `model`, `provider_status_code`, `provider_request_id` | The inference provider's own identifiers, on a failure that reached one |
 
 A key whose value is not set for this request is **absent** from the line rather than written as `null`, so a query filtering on presence gets an honest answer.
+
+`detail` is the one field whose absence follows the failure's origin rather than the request's shape, and it is worth knowing which way round. A failure this API authored itself — a validation error, an unknown model category — carries `detail` on the record. A failure that arrives as a Pipelex `ErrorReport`, which is most `5xx` and every domain error, does not: the response body still carries a `detail`, but the record does not, because the body's text has been through disclosure redaction and the cause has not. So a `4xx` from that path logs as `API error 422: SomeError` with no explanation and no traceback, and the response is where the explanation is. Build an operator query on `error_type` and `route`, which every line carries, rather than on `detail`.
+
+Every field in that table is a **record attribute**, which is a different thing from the message. A structured sink — `json` here, and the OTLP sink — writes them beside the message as keys. The Rich console sink renders the message alone and ignores them entirely, so a deployment that switches the sink to `"console"` does not get a more readable version of these lines: it gets `API error 500: PipelexConfigError` and nothing else. That is a reason to keep `sink = "json"` wherever the lines are being read by anything other than a person at a terminal.
 
 Disposition follows the HTTP status, not the error domain: a `4xx` is a caller mistake and logs at `WARNING` without a traceback; a `5xx` is a server fault and logs at `ERROR` with one. See [Error Responses](error-responses.md) for the response side of the same failure.
 
@@ -64,12 +68,12 @@ pretty_print_mode = "silent"
 pipelex = "INFO"
 ```
 
-- `sink = "json"` selects the one-object-per-line renderer. The alternative, `"console"`, is the Rich renderer meant for a terminal; it needs Pipelex's `cli` extra, which this server does not install, and a boot that selected it without Rich would refuse at startup rather than fail later.
+- `sink = "json"` selects the one-object-per-line renderer. The alternative, `"console"`, is the Rich renderer meant for a terminal. This server does not ask for Pipelex's `cli` extra, but that does not put the renderer out of reach: `typer` and `instructor` are core Pipelex dependencies that require Rich unconditionally, so Rich is installed in the image and an `import pipelex` loads it. Selecting `"console"` here would therefore give you a working console sink, not a refusal. This key is what keeps the renderer unused, and it is the only thing that does.
 - `console_log_target = "stderr"` keeps logs off the data channel.
 - `pretty_print_mode = "silent"` suppresses the "Output of pipe" panel an operator pipe would otherwise draw: there is no terminal to draw into, and a server should not spend time rendering on the thread serving a request.
 - `[runtime.log.package_log_levels]` raises or lowers one package's level independently of `default_log_level`.
 
-To change any of this for a deployment, mount a `pipelex_override.toml` into `/root/.pipelex/` with just the keys you want different — see [Configuration](configuration.md#providing-your-own-configuration-to-docker).
+To change any of this for a deployment, mount a `pipelex_override.toml` into `/root/.pipelex/` with just the keys you want different — see [Configuration](configuration.md#providing-your-own-configuration-to-docker). Note that replacing the whole config directory, which that page documents as Option 2, drops the shipped `pipelex.toml` along with the three keys above and silently returns the server to Pipelex's terminal-facing defaults; a layered override does not.
 
 ## Uvicorn's own lines
 

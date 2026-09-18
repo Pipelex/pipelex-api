@@ -158,7 +158,8 @@ default_log_level = "INFO"
 # The registered log sink this server installs. "json" writes one JSON object per line, with every
 # field, the bound run identifiers and the message flat beside each other — the shape a log agent
 # in front of a container ingests without a parser. The alternative, "console", is the Rich
-# renderer meant for a terminal and needs the `cli` extra, which this server does not install.
+# renderer meant for a terminal; this server does not ask for the `cli` extra that declares Rich,
+# which is what makes the renderer unused here rather than unavailable — see pretty_print_mode.
 sink = "json"
 # The stream the json sink writes to: "stdout" or "stderr". Logs are diagnostics and belong off
 # the data channel.
@@ -166,8 +167,11 @@ console_log_target = "stderr"
 console_print_target = "stdout"
 # The panels `pretty_print(...)` draws, the "Output of pipe" one after every operator pipe among
 # them. A server has no terminal to draw into and must not spend time rendering on the thread
-# serving a request, so nothing is printed and no renderable is built. This also keeps the boot
-# Rich-free: "rich" needs the `cli` extra and refuses at startup without it.
+# serving a request, so nothing is printed and no renderable is built. This is what keeps Rich off
+# the request path, and it is not the same as keeping it out of the image: `typer` and `instructor`
+# are core pipelex dependencies that require Rich unconditionally, so an `import pipelex` loads it
+# whatever this file says. Selecting "rich" here, or the "console" sink above, would therefore work
+# rather than refuse — these two keys are the whole of what keeps the renderer unused.
 pretty_print_mode = "silent"
 
 [runtime.log.package_log_levels]
