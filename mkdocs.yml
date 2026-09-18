@@ -109,6 +109,7 @@ nav:
     - MTHDS Tools: mthds-tools.md
     - Storage Transport: storage-transport.md
     - Error Responses: error-responses.md
+    - Logging: logging.md
     - Contribute:
       - Contributing: contributing.md
       - Code of Conduct: CODE_OF_CONDUCT.md

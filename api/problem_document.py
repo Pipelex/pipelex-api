@@ -115,3 +115,20 @@ def build_problem_document_from_api_error(
         document["error_domain"] = error_domain
     document["retryable"] = retryable
     return document
+
+
+def with_request_context(document: dict[str, Any], *, instance: str | None, request_id: str | None) -> dict[str, Any]:
+    """Return a copy of a problem document carrying the two request-scoped members.
+
+    The `api.errors` helpers build their document where no `Request` is in hand — a validation
+    check deep inside a route, an auth refusal — so `instance` and `request_id` are stamped later,
+    by the handler that renders the response and does hold the request. A copy rather than an
+    in-place edit, because the `ApiError` a caller catches and inspects must read exactly as it was
+    raised. `None` is dropped rather than emitted as `null`, the rule every builder here follows.
+    """
+    stamped = dict(document)
+    if instance is not None:
+        stamped["instance"] = instance
+    if request_id is not None:
+        stamped["request_id"] = request_id
+    return stamped

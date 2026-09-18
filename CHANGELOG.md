@@ -2,9 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **The server's logs are structured, one JSON object per line on stderr (Breaking for anything parsing them)**: `[runtime.log] sink = "json"` replaces the Rich console renderer, `console_log_target` moves to `stderr`, and `pretty_print_mode = "silent"` stops an operator pipe drawing its "Output of pipe" panel on the thread serving a request. Every value an error line carries — `route`, `status`, `error_type`, `error_domain`, `retryable`, `detail`, and `user_id` / `pipe_code` / `pipeline_run_id` when the request bound them — is a key of its own now rather than part of a `key=value` run inside the message, and `request_id` rides the runtime's request-scoped log context, so it lands on every record emitted during a request, including the ones Pipelex emits from inside a run. The message is a short sentence built only from the status and the error type, so no caller-supplied string reaches it and the API's own escaping is gone: the sink is what serializes a value now. A log query matching `event=api_error` as text has to move to the `event` field. The new `docs/logging.md` documents the line and every field on it. Uvicorn's own banner and access log are unchanged and still plain text.
+- **`pipelex` resolves from a git source, temporarily**: the structured-log seam above is in no published release, so `pyproject.toml` points `pipelex` at a branch of the runtime repository through `[tool.uv.sources]` instead of the exact PyPI pin. Only `uv` reads that entry, so it steers `uv lock`, `uv sync` and the Docker build and nothing else; the repository is public, so no credentials are involved. It collapses back to an exact published version before the next release.
+
 ### Fixed
 
 - **`make pylint` lints `api/`**: the target, which `make check` runs, linted the installed `pipelex` package in `.venv` instead of this repository's own code, so `api/` was never checked by pylint. It now lints `api` and `tests`.
+- **A local image build no longer bakes the builder's own Pipelex overrides in**: `.pipelex/pipelex_override.toml` and `.pipelex/telemetry_override.toml` are untracked per-developer files, so CI never had them, but `make docker-build` copied whatever the developer had into the image — their storage backend, their log level, their telemetry credentials. A locally built image then behaved differently from the published one, with nothing in the diff to say so. `.dockerignore` excludes them; an operator still supplies overrides to a container by mounting them at `/root/.pipelex`.
 
 ## [v0.25.0] - 2026-09-16
 

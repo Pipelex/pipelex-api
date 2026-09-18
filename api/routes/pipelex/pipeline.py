@@ -30,8 +30,8 @@ from api.api_config import get_api_config, resolve_orchestration_mode
 from api.bundle import ParsedBundle, materialize_parsed, parse_bundle
 from api.error_types import ErrorType
 from api.errors import raise_bad_request, raise_forbidden, raise_validation_error
-from api.logging_context import get_request_id
 from api.method_source import fetched_method_source
+from api.middleware import request_id_of
 from api.openapi_responses import (
     PROBLEM_400_START_REQUIRES_ASYNC,
     PROBLEM_403_RUN_POLICY,
@@ -510,7 +510,7 @@ def _validate_extras(request_data: dict[str, Any]) -> PipelineApiExtras:
 
 
 # Per-field bound applied at the request.state binding site so an oversized
-# caller-supplied `pipe_code` cannot blow up downstream log-line size.
+# caller-supplied `pipe_code` cannot blow up the size of every record the request emits.
 # `RunRequest.pipe_code` carries no Pydantic `max_length`; this is the
 # narrow cap that protects the structured error log without changing the
 # upstream type contract. 256 covers any realistic pipe code (kebab-case
@@ -523,12 +523,11 @@ def _coerce_correlation_field(value: Any) -> str | None:
 
     Returns `None` when the value is missing, empty, or non-string — so the
     handler's `_pipe_code_of` / `_pipeline_run_id_of` getters see a uniform
-    `None` and `emit_error_log` drops the field rather than rendering a bare
-    `pipe_code=` token (the empty-string case would otherwise pass the
-    `is not None` filter in `emit_error_log` and look like a logfmt parse
-    error to downstream sinks). Truncates oversized strings to
-    `_MAX_CORRELATION_FIELD_LEN` so a caller cannot inflate every error log
-    line for the request by sending a megabyte-long pipe_code.
+    `None` and the error record carries no attribute at all, rather than an
+    empty string a downstream query would read as a real value. Truncates
+    oversized strings to `_MAX_CORRELATION_FIELD_LEN` so a caller cannot
+    inflate every error record the request emits by sending a megabyte-long
+    pipe_code.
     """
     if not isinstance(value, str) or not value:
         return None
@@ -803,7 +802,7 @@ async def start(
             dynamic_output_concept_ref=run_request.dynamic_output_concept_ref,
             pipeline_run_id=extras.pipeline_run_id,
             callback_urls=extras.callback_urls,
-            request_id=get_request_id(),
+            request_id=request_id_of(request),
             requested_orchestration_mode=extras.orchestration_mode,
         )
     # The ack plus this server's provenance extension: `(address, tag, commit_sha)` for a

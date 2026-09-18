@@ -1,0 +1,76 @@
+# Logging
+
+The server writes structured logs: one JSON object per line, on **stderr**, with every value the line carries sitting as a key of its own. That is the shape a log agent in front of a container ingests without a parser — the CloudWatch agent, the Google Cloud Logging agent, an OTLP collector — so a query filters on a field rather than matching a substring of a message.
+
+## What a line looks like
+
+An error response produces exactly one line. A caller mistake:
+
+```json
+{"time": "2026-09-18T13:53:17.919Z", "severity": "WARNING", "logger": "api.exception_handlers", "message": "API error 422: InvalidModelCategory", "request_id": "01M2TCP02W04RZG6DTM8AR508C", "event": "api_error", "route": "/v1/models", "error_type": "InvalidModelCategory", "error_domain": "input", "retryable": false, "status": 422, "detail": "Invalid model category. Valid values: extract, img_gen, llm, search"}
+```
+
+A server fault looks the same at `ERROR`, and carries the traceback under an `exception` key.
+
+The `message` is a short, stable sentence built from the HTTP status and the error type — both of them values the server chose. Nothing a caller supplied ever reaches it: the caller-facing explanation rides the `detail` field instead, so a body crafted with newlines or quotes cannot break the line or forge a key. The sink escapes what it writes.
+
+## The fields a line carries
+
+These keys come from the sink itself and are on every line written by the process, this server's and the Pipelex runtime's alike:
+
+| Key | What it is |
+| --- | --- |
+| `time` | When the record was created — ISO 8601, UTC, milliseconds, `Z` |
+| `severity` | The level name: `WARNING`, `ERROR`, … |
+| `logger` | The module that emitted it |
+| `message` | The human-readable summary |
+| `exception` | The traceback, when the record carries one |
+
+`request_id` comes from the request-scoped context the request-id middleware binds, so **every** record emitted while a request is in flight carries it. The example above is one of the server's own lines, but a line the Pipelex runtime emits from inside a pipeline run carries the same id, which is what ties the two together without any call site passing it along. The value is the one echoed in the response's `X-Request-ID` header and in the problem document's `request_id` member, so a caller reporting a failure hands you the key to its log lines.
+
+The remaining keys are what the error handlers attach to an `event: "api_error"` record:
+
+| Key | What it is |
+| --- | --- |
+| `event` | Always `api_error` on an error line — the one key a query filters this server's error stream on |
+| `route` | The request's URL path |
+| `status` | The HTTP status actually sent, including any API-level override |
+| `error_type` | The class or `ErrorType` name the response reports |
+| `error_domain` | `input`, `config`, `runtime`, … — who fixes it |
+| `error_category` | A Pipelex classification, on the failures it classifies; `unknown` on the catch-all 500 |
+| `retryable` | Whether a blind retry can help, when the failure says |
+| `detail` | The operator-facing explanation, the same text the response body carries |
+| `user_id` | The authenticated caller, when auth bound one |
+| `pipe_code` | The pipe the request named, on a run route whose body parsed |
+| `pipeline_run_id` | The run the request named, on a run route whose body parsed |
+| `provider`, `model`, `provider_status_code`, `provider_request_id` | The inference provider's own identifiers, on a failure that reached one |
+
+A key whose value is not set for this request is **absent** from the line rather than written as `null`, so a query filtering on presence gets an honest answer.
+
+Disposition follows the HTTP status, not the error domain: a `4xx` is a caller mistake and logs at `WARNING` without a traceback; a `5xx` is a server fault and logs at `ERROR` with one. See [Error Responses](error-responses.md) for the response side of the same failure.
+
+## Configuration
+
+The keys live in `[runtime.log]` of the `.pipelex/pipelex.toml` this repository ships, which the image copies to `/root/.pipelex/`:
+
+```toml
+[runtime.log]
+default_log_level = "INFO"
+sink = "json"
+console_log_target = "stderr"
+pretty_print_mode = "silent"
+
+[runtime.log.package_log_levels]
+pipelex = "INFO"
+```
+
+- `sink = "json"` selects the one-object-per-line renderer. The alternative, `"console"`, is the Rich renderer meant for a terminal; it needs Pipelex's `cli` extra, which this server does not install, and a boot that selected it without Rich would refuse at startup rather than fail later.
+- `console_log_target = "stderr"` keeps logs off the data channel.
+- `pretty_print_mode = "silent"` suppresses the "Output of pipe" panel an operator pipe would otherwise draw: there is no terminal to draw into, and a server should not spend time rendering on the thread serving a request.
+- `[runtime.log.package_log_levels]` raises or lowers one package's level independently of `default_log_level`.
+
+To change any of this for a deployment, mount a `pipelex_override.toml` into `/root/.pipelex/` with just the keys you want different — see [Configuration](configuration.md#providing-your-own-configuration-to-docker).
+
+## Uvicorn's own lines
+
+Uvicorn logs through its own handlers, not through the sink above, so its startup banner and its access log are plain text rather than JSON: the banner on stderr, the access log on stdout. Pass `--no-access-log` to turn the access log off, which is what the hosted deployment does; configure uvicorn's `--log-config` if you want its lines structured too.

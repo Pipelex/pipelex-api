@@ -236,11 +236,9 @@ class TestPipelineRoutes:
         # is logged with both fields. The unit-level tests pin the
         # handler->getter->log path; this one pins that `_parse_request` itself
         # actually writes to `request.state` against the production route.
-        # Both values are kept free of logfmt-active characters (whitespace,
-        # `=`, `"`) so the substring assertions below match the unquoted
-        # rendering. Future test additions that exercise quoted values should
-        # parse the logfmt line via the `_parse_logfmt` helper in
-        # `test_exception_handlers.py` instead of substring matching.
+        # The two values reach the record as attributes of their own, so nothing about their
+        # spelling matters here any more — the assertions read the `fields=` mapping the handler
+        # handed the runtime, not a rendered line.
         client, _, start_mock = _build_client(mocker)
         body_pipe_code = "echo"
         body_pipeline_run_id = "run-end-to-end-0001"
@@ -257,16 +255,15 @@ class TestPipelineRoutes:
         )
         assert response.status_code == 500
         log_spy.error.assert_called_once()
-        rendered = log_spy.error.call_args.args[0]
-        assert f"pipe_code={body_pipe_code}" in rendered
-        assert f"pipeline_run_id={body_pipeline_run_id}" in rendered
+        fields = log_spy.error.call_args.kwargs["fields"]
+        assert fields["pipe_code"] == body_pipe_code
+        assert fields["pipeline_run_id"] == body_pipeline_run_id
 
     def test_parse_request_drops_empty_correlation_fields(self, mocker: MockerFixture):
-        # An empty-string `pipe_code` / `pipeline_run_id` in the body must NOT
-        # render as a bare `pipe_code=` token in the operator log — the bare
-        # token reads as a logfmt parse error to downstream sinks and defeats
-        # grep-by-value. `_coerce_correlation_field` normalizes empty strings
-        # to `None`, and `emit_error_log` drops `None`-valued fields.
+        # An empty-string `pipe_code` / `pipeline_run_id` in the body must NOT reach the record
+        # as an empty attribute, which a downstream query filtering on presence would read as a
+        # real value. `_coerce_correlation_field` normalizes empty strings to `None`, and
+        # `_emit_api_error` drops those.
         client, _, start_mock = _build_client(mocker)
         start_mock.side_effect = PipelexConfigError("simulated config fault")
         log_spy = mocker.patch("api.exception_handlers.log")
@@ -281,19 +278,17 @@ class TestPipelineRoutes:
         )
         assert response.status_code == 500
         log_spy.error.assert_called_once()
-        rendered = log_spy.error.call_args.args[0]
-        # No bare token of either kind — neither `pipe_code= ` nor at end-of-line.
-        assert "pipe_code=" not in rendered
-        assert "pipeline_run_id=" not in rendered
+        fields = log_spy.error.call_args.kwargs["fields"]
+        assert "pipe_code" not in fields
+        assert "pipeline_run_id" not in fields
 
     def test_parse_request_caps_oversized_pipe_code(self, mocker: MockerFixture):
         # `RunRequest.pipe_code` carries no Pydantic max_length, so a
         # caller can in principle send a megabyte-long string. The binding
-        # site caps the value rendered into operator logs so a single failed
-        # request cannot blow per-line log-sink budgets. 256 is the limit;
-        # anything longer is silently truncated for the log surface (the
-        # actual `run_request.pipe_code` passed to the runner is
-        # unchanged — only the `request.state` mirror is capped).
+        # site caps the value that reaches the operator record, so a single failed request cannot
+        # blow a log sink's per-record budget. 256 is the limit; anything longer is silently
+        # truncated for the log surface (the actual `run_request.pipe_code` passed to the runner
+        # is unchanged — only the `request.state` mirror is capped).
         client, _, start_mock = _build_client(mocker)
         start_mock.side_effect = PipelexConfigError("simulated config fault")
         log_spy = mocker.patch("api.exception_handlers.log")
@@ -308,16 +303,15 @@ class TestPipelineRoutes:
         )
         assert response.status_code == 500
         log_spy.error.assert_called_once()
-        rendered = log_spy.error.call_args.args[0]
-        # The capped value (256 x's) appears in the log; the original 5000-x
-        # string does NOT — proves the cap fires and bounds the per-line cost.
-        assert f"pipe_code={'x' * 256}" in rendered
-        assert "x" * 5000 not in rendered
+        fields = log_spy.error.call_args.kwargs["fields"]
+        # The capped value carries; the original oversized string does not — proof the cap fires
+        # and bounds what one request costs a sink.
+        assert fields["pipe_code"] == "x" * 256
 
     def test_parse_request_binds_pipe_code_before_extras_validation(self, mocker: MockerFixture):
         # The binding must run BEFORE `_validate_extras` so an SSRF-rejected
         # callback URL (or any other extras-validation 422) still rides the
-        # caller's `pipe_code` into the operator log. The unit-level tests
+        # caller's `pipe_code` onto the operator record. The unit-level tests
         # cannot exercise this ordering — only an end-to-end POST does.
         client, _, _ = _build_client(mocker)
         log_spy = mocker.patch("api.exception_handlers.log")
@@ -334,12 +328,11 @@ class TestPipelineRoutes:
         assert response.status_code == 422
         # An INPUT-domain 422 logs at `warning`, not `error`.
         log_spy.warning.assert_called_once()
-        rendered = log_spy.warning.call_args.args[0]
-        assert f"pipe_code={body_pipe_code}" in rendered
+        assert log_spy.warning.call_args.kwargs["fields"]["pipe_code"] == body_pipe_code
 
     def test_start_propagates_request_id_to_runner(self, mocker: MockerFixture):
-        # The middleware binds the inbound `X-Request-ID` onto the request-scoped
-        # contextvar; the route reads it via `get_request_id()` and passes it as
+        # The middleware stores the inbound `X-Request-ID` on `request.state`; the route reads it
+        # back via `request_id_of(request)` and passes it as
         # `request_id=` to `ApiRunner.start`, which forwards it to
         # `pipeline_run_setup(...)` so it lands on `JobMetadata.request_id`.
         # Without this hop the worker's `WorkflowLog` would carry `None`.

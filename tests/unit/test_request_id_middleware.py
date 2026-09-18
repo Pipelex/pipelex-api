@@ -1,28 +1,41 @@
 """Unit tests for RequestIdMiddleware and request-id propagation."""
 
+import logging
 import re
 import time
 
+import pytest
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
+from pipelex import log
+from pipelex.tools.log.log_context import get_log_context
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from api.logging_context import get_request_id, get_route_path
-from api.middleware import REQUEST_ID_HEADER, RequestIdMiddleware, generate_request_id, request_body_size_middleware
+from api.middleware import REQUEST_ID_HEADER, RequestIdMiddleware, generate_request_id, request_body_size_middleware, request_id_of
 
 # Crockford Base32, 26 chars — the ULID alphabet (no I, L, O, U).
 _ULID_RE = re.compile(r"\A[0-9A-HJKMNP-TV-Z]{26}\Z")
+
+# The message the `/emits-a-log-line` route logs, matched back out of the captured records.
+_ROUTE_LOG_MESSAGE = "a line emitted from inside the request"
 
 _router = APIRouter()
 
 
 @_router.get("/probe")
 async def probe(request: Request) -> dict[str, str | None]:
+    bound = get_log_context()
     return {
-        "ctx_request_id": get_request_id(),
-        "ctx_route_path": get_route_path(),
+        "ctx_request_id": bound.request_id if bound is not None else None,
         "state_request_id": request.state.request_id,
+        "helper_request_id": request_id_of(request),
     }
+
+
+@_router.get("/emits-a-log-line")
+async def emits_a_log_line() -> dict[str, str]:
+    log.warning(_ROUTE_LOG_MESSAGE)
+    return {"status": "logged"}
 
 
 @_router.get("/boom")
@@ -59,7 +72,33 @@ class TestRequestIdMiddleware:
         body = response.json()
         assert body["ctx_request_id"] == request_id
         assert body["state_request_id"] == request_id
-        assert body["ctx_route_path"] == "/probe"
+        assert body["helper_request_id"] == request_id
+
+    def test_bound_context_puts_the_request_id_on_every_record(self, caplog: pytest.LogCaptureFixture):
+        # The middleware binds the runtime's own log context for the request, so a record emitted
+        # anywhere underneath — a route's own line here, but equally one from deep inside pipelex —
+        # carries `request_id` as a record attribute. The runner no longer interpolates the id into
+        # a message, which is what makes the id a field a structured sink indexes.
+        with caplog.at_level(logging.WARNING):
+            response = _build_client().get("/emits-a-log-line")
+        assert response.status_code == 200
+        request_id = response.headers[REQUEST_ID_HEADER]
+        emitted = [record for record in caplog.records if record.getMessage() == _ROUTE_LOG_MESSAGE]
+        assert len(emitted) == 1, f"expected exactly one captured record, got {[record.getMessage() for record in caplog.records]}"
+        assert getattr(emitted[0], "request_id", None) == request_id
+        # The id rides the record, never the message — a sink indexes the field, and an operator
+        # grepping the text of a line is not the contract any more.
+        assert request_id not in emitted[0].getMessage()
+
+    def test_bound_context_is_released_when_the_request_ends(self, caplog: pytest.LogCaptureFixture):
+        # The binding is per-request: a record emitted after the response has been returned must not
+        # inherit the finished request's id, or a shared worker would attribute later work to it.
+        with caplog.at_level(logging.WARNING):
+            _build_client().get("/emits-a-log-line")
+            log.warning("a line emitted outside any request")
+        outside = [record for record in caplog.records if record.getMessage() == "a line emitted outside any request"]
+        assert len(outside) == 1
+        assert not hasattr(outside[0], "request_id")
 
     def test_echoes_valid_inbound_id(self):
         response = _build_client().get("/probe", headers={REQUEST_ID_HEADER: "client-supplied-123"})

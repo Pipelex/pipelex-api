@@ -1,0 +1,157 @@
+"""What an error record actually carries, and what it looks like once the `json` sink has written it.
+
+The tests in `test_exception_handlers.py` read the `fields=` mapping the handlers hand the runtime,
+with the runtime's `log` replaced by a spy. These ones let the real thing run end to end: a request
+goes through `RequestIdMiddleware`, the handler emits, `caplog` catches the record the runtime built,
+and the runner's configured sink formatter renders it. That is the whole path this server's operator
+output takes in production, minus the process stream it is written to.
+"""
+
+import json
+import logging
+from typing import Any, cast
+
+import pytest
+from fastapi import APIRouter, FastAPI
+from fastapi.testclient import TestClient
+from pipelex import log
+from pipelex.base_exceptions import PipelexConfigError
+from pipelex.config import get_config
+from pipelex.system.console_target import ConsoleTarget
+from pipelex.tools.log.json_log_sink import JsonLogFormatter, JsonLogSink
+from pipelex.tools.log.log_sink import LogSinkMethod
+from pipelex.tools.misc.pretty import PrettyPrintMode
+
+from api.error_types import ErrorType
+from api.errors import raise_validation_error
+from api.exception_handlers import API_ERROR_EVENT, register_exception_handlers
+from api.middleware import REQUEST_ID_HEADER, RequestIdMiddleware
+
+_router = APIRouter()
+
+
+@_router.get("/pipelex-failure")
+async def pipelex_failure_route() -> None:
+    # An operator-actionable 500 — the `error`-level branch, with a traceback on the record.
+    msg = "the gateway config is missing"
+    raise PipelexConfigError(msg)
+
+
+@_router.get("/caller-mistake")
+async def caller_mistake_route(detail: str) -> None:
+    # A caller-input 422 whose `detail` is exactly what the caller sent — the `warning`-level
+    # branch, and the one field on the record that a caller controls.
+    raise_validation_error(detail, ErrorType.VALIDATION_ERROR)
+
+
+def _build_client() -> TestClient:
+    """Wire a throwaway app with the production handlers and the request-id middleware."""
+    app = FastAPI()
+    register_exception_handlers(app)
+    app.include_router(_router)
+    return TestClient(RequestIdMiddleware(app))
+
+
+def _api_error_record(caplog: pytest.LogCaptureFixture) -> logging.LogRecord:
+    """The one `api_error` record the request emitted."""
+    records = [record for record in caplog.records if getattr(record, "event", None) == API_ERROR_EVENT]
+    assert len(records) == 1, f"expected exactly one api_error record, got {len(records)}"
+    return records[0]
+
+
+def _rendered_json(record: logging.LogRecord) -> dict[str, Any]:
+    """The record as the `json` sink writes it: one line, parsed back."""
+    line = JsonLogFormatter().format(record)
+    assert "\n" not in line, f"the sink wrote more than one line: {line!r}"
+    assert "\r" not in line, f"the sink wrote a carriage return: {line!r}"
+    payload = json.loads(line)
+    assert isinstance(payload, dict)
+    return cast("dict[str, Any]", payload)
+
+
+class TestErrorLogRecords:
+    def test_the_runner_is_configured_onto_the_json_sink(self):
+        # Pins the `.pipelex/pipelex.toml` this server ships, not a runtime default. The image
+        # installs pipelex without the `cli` extra, so the Rich console sink and the "rich"
+        # pretty-print mode are not available to it — a boot that selected either would refuse at
+        # startup, naming the extra. The json sink writes to stderr so stdout stays the data
+        # channel.
+        log_config = get_config().runtime.log
+        assert log_config.sink == LogSinkMethod.JSON
+        assert log_config.console_log_target == ConsoleTarget.STDERR
+        assert log_config.pretty_print_mode == PrettyPrintMode.SILENT
+        assert isinstance(log.sink, JsonLogSink)
+
+    def test_request_id_and_route_ride_the_error_record(self, caplog: pytest.LogCaptureFixture):
+        # The two identifiers an operator starts from. `request_id` arrives from the log context
+        # the middleware bound for the request; `route` from the field set the handler ships.
+        # Neither is interpolated into the message, which is the whole point of the change.
+        with caplog.at_level(logging.WARNING):
+            response = _build_client().get("/pipelex-failure")
+        assert response.status_code == 500
+        record = _api_error_record(caplog)
+        assert record.levelno == logging.ERROR
+        assert getattr(record, "request_id", None) == response.headers[REQUEST_ID_HEADER]
+        assert getattr(record, "route", None) == "/pipelex-failure"
+        assert getattr(record, "error_type", None) == "PipelexConfigError"
+        assert record.getMessage() == "API error 500: PipelexConfigError"
+
+    def test_a_caller_mistake_records_a_warning_carrying_the_same_identifiers(self, caplog: pytest.LogCaptureFixture):
+        # A 4xx is a caller mistake, so it lands at `warning` — but it carries the same two
+        # identifiers, so one query over `event` returns the whole error stream of a request.
+        with caplog.at_level(logging.WARNING):
+            response = _build_client().get("/caller-mistake", params={"detail": "the input is malformed"})
+        assert response.status_code == 422
+        record = _api_error_record(caplog)
+        assert record.levelno == logging.WARNING
+        assert getattr(record, "request_id", None) == response.headers[REQUEST_ID_HEADER]
+        assert getattr(record, "route", None) == "/caller-mistake"
+        assert getattr(record, "status", None) == 422
+
+    def test_the_json_sink_writes_one_object_per_line_with_the_fields_flat(self, caplog: pytest.LogCaptureFixture):
+        # The shape the runner's configured sink puts on stderr: the sink's own keys, then every
+        # field and the bound context identifiers flat beside them, one JSON object on one line.
+        with caplog.at_level(logging.WARNING):
+            response = _build_client().get("/pipelex-failure")
+        payload = _rendered_json(_api_error_record(caplog))
+        assert payload["severity"] == "ERROR"
+        assert payload["message"] == "API error 500: PipelexConfigError"
+        assert payload["event"] == API_ERROR_EVENT
+        assert payload["request_id"] == response.headers[REQUEST_ID_HEADER]
+        assert payload["route"] == "/pipelex-failure"
+        assert payload["status"] == 500
+        assert payload["error_type"] == "PipelexConfigError"
+        assert payload["error_domain"] == "config"
+        # `retryable` is absent rather than false: pipelex populates it only on a classifiable
+        # failure, and a field with no value is dropped rather than written as a null a query
+        # filtering on presence would read as an answer.
+        assert "retryable" not in payload
+        # `time` and `logger` come from the sink itself; an operator-actionable failure carries
+        # its traceback under `exception` rather than spilling it across the line.
+        assert payload["time"].endswith("Z")
+        assert "PipelexConfigError" in payload["exception"]
+
+    @pytest.mark.parametrize(
+        "crafted_detail",
+        [
+            # Back when the API flattened its own fields into a `key=value` run, each of these
+            # forged either a sibling field or a whole second line. The API renders nothing now,
+            # and the sink escapes what it writes, so each must survive as one field's value.
+            "legit\nstatus=200 event=auth_success",
+            "hijack status=200 event=fake",
+            "legit\rstatus=200",
+            'has " a quote = inside',
+        ],
+    )
+    def test_a_crafted_detail_survives_as_one_value_and_forges_nothing(self, caplog: pytest.LogCaptureFixture, crafted_detail: str):
+        # The escaping the API used to do itself is the sink's job now: `json.dumps` writes a
+        # control character inside the string, so the line stays one object and the value comes
+        # back out of the parser exactly as the caller sent it.
+        with caplog.at_level(logging.WARNING):
+            response = _build_client().get("/caller-mistake", params={"detail": crafted_detail})
+        assert response.status_code == 422
+        payload = _rendered_json(_api_error_record(caplog))
+        assert payload["detail"] == crafted_detail
+        assert payload["event"] == API_ERROR_EVENT, "a crafted detail forged or overwrote a field"
+        assert payload["status"] == 422, "a crafted detail forged or overwrote a field"
+        assert crafted_detail not in payload["message"], "caller input reached the message"

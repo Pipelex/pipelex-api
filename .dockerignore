@@ -58,6 +58,13 @@ Makefiles
 dev_context
 playground
 
+# Per-developer Pipelex overrides. These files are untracked, so CI builds the published image
+# without them — but a local `make docker-build` would otherwise bake one machine's settings into
+# the image: its storage backend, its log level, its telemetry credentials. The image would then
+# behave differently from the published one, and nothing in the diff would say so. An operator
+# supplies overrides to a container by mounting them at /root/.pipelex, the documented path.
+.pipelex/*_override.toml
+
 # OS / system files
 .DS_Store
 Thumbs.db

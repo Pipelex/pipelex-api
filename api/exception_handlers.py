@@ -27,8 +27,7 @@ every module that imports a handler at once.
 """
 
 import math
-import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import FastAPI, Request, Response
@@ -40,7 +39,13 @@ from pipelex.plugins.registrar import HttpErrorMapperFn
 
 from api.error_types import ErrorType
 from api.errors import ApiError
-from api.problem_document import PROBLEM_JSON_MEDIA_TYPE, build_problem_document, build_problem_document_from_api_error
+from api.middleware import request_id_of
+from api.problem_document import (
+    PROBLEM_JSON_MEDIA_TYPE,
+    build_problem_document,
+    build_problem_document_from_api_error,
+    with_request_context,
+)
 
 if TYPE_CHECKING:
     from api.security import RequestUser
@@ -48,14 +53,9 @@ if TYPE_CHECKING:
 # A Starlette/FastAPI async exception handler: `(request, exc) -> response`.
 _ExceptionHandler = Callable[[Request, Exception], Awaitable[Response]]
 
-
-def _request_id_of(request: Request) -> str | None:
-    """Return the correlation id `RequestIdMiddleware` stored on the request.
-
-    Read defensively with `getattr`: a request that never went through the
-    middleware (a unit test, a non-HTTP scope) simply has no id.
-    """
-    return getattr(request.state, "request_id", None)
+# The value of the `event` field every error record carries: the one key a log sink filters this
+# server's error stream on, whichever of the three handlers below produced the record.
+API_ERROR_EVENT = "api_error"
 
 
 def _user_id_of(request: Request) -> str | None:
@@ -68,9 +68,9 @@ def _user_id_of(request: Request) -> str | None:
     multiple log lines by `request_id` — and without each route having to log
     `user=<id>` itself before raising (which Phase 3 removed). Returns `None`
     pre-auth, on the static-API-key surface (no per-caller identity), or for
-    `AUTH_MODE=none` without the forwarded-identity opt-in: `emit_error_log`
-    drops `None`-valued fields, so the field is absent from the rendered line
-    rather than `user_id=None`.
+    `AUTH_MODE=none` without the forwarded-identity opt-in: `_emit_api_error`
+    drops `None`-valued fields, so the attribute is absent from the record
+    rather than carried as `user_id: null`.
     """
     user: RequestUser | None = getattr(request.state, "user", None)
     return user.user_id if user is not None else None
@@ -83,11 +83,11 @@ def _pipe_code_of(request: Request) -> str | None:
     `request.state` right after the body decodes (before
     `_validate_extras` / `from_body`), normalized through
     `_coerce_correlation_field` — empty / non-string / oversized inputs become
-    `None` so a caller cannot inject a bare `pipe_code=` token or inflate the
-    log line. Returns `None` for routes that don't use `_parse_request`, for
-    requests whose body never decoded (`_decode_body` raised 422), and for
-    bodies that legitimately omitted `pipe_code` (the `mthds_contents`-only
-    invocation). `emit_error_log` drops `None`-valued fields.
+    `None`, so a caller cannot inflate every record the request emits. Returns
+    `None` for routes that don't use `_parse_request`, for requests whose body
+    never decoded (`_decode_body` raised 422), and for bodies that legitimately
+    omitted `pipe_code` (the `mthds_contents`-only invocation).
+    `_emit_api_error` drops `None`-valued fields.
     """
     return getattr(request.state, "pipe_code", None)
 
@@ -106,17 +106,27 @@ def _pipeline_run_id_of(request: Request) -> str | None:
     return getattr(request.state, "pipeline_run_id", None)
 
 
-def _request_correlation_fields(request: Request) -> dict[str, str | None]:
-    """Return the request-scoped correlation fields every error log carries.
+def _request_fields(request: Request) -> dict[str, Any]:
+    """Return the request-scoped attributes every error record carries.
 
-    Single source of truth for the `user_id` / `pipe_code` / `pipeline_run_id`
-    field set so the three log paths (`_log_error_report`,
-    `_log_api_authored_error`, `handle_unexpected_error`) cannot drift. Each
-    value is `None` when the corresponding state is not bound on this request;
-    `emit_error_log` drops `None`-valued fields, so unbound identifiers are
-    absent from the rendered line rather than appearing as `pipe_code=None`.
+    Single source of truth for the `route` / `user_id` / `pipe_code` /
+    `pipeline_run_id` set, so the three log paths (`_log_error_report`,
+    `_log_api_authored_error`, `handle_unexpected_error`) cannot drift.
+
+    `request_id` is deliberately NOT here. `RequestIdMiddleware` binds it on the
+    runtime's log context for the whole request, so it is already an attribute of
+    every record emitted underneath — including the ones pipelex emits from inside
+    a run, which this module never sees. Repeating it would give one value two
+    sources. `route` is here rather than on that context because the runtime
+    reserves the context for its three run identifiers, and a route path is not
+    one of them; a field is the seam it offers for everything else.
+
+    Each value is `None` when the corresponding state is not bound on this request;
+    `_emit_api_error` drops those, so an unbound identifier is absent from the
+    record rather than carried as `pipe_code: null`.
     """
     return {
+        "route": request.url.path,
         "user_id": _user_id_of(request),
         "pipe_code": _pipe_code_of(request),
         "pipeline_run_id": _pipeline_run_id_of(request),
@@ -145,52 +155,42 @@ def _retry_after_header(report: ErrorReport) -> dict[str, str]:
     return {"Retry-After": str(max(0, math.ceil(seconds)))}
 
 
-_LOGFMT_NEEDS_QUOTING = re.compile(r'[\s"=]')
+def _error_summary(attributes: Mapping[str, Any]) -> str:
+    """Return the human-readable message an `api_error` record carries.
 
-
-def _logfmt_value(value: Any) -> str:
-    """Render a value for the ``key=value`` log format, escaping caller input.
-
-    Several `emit_error_log` callers ship caller-controlled strings into the
-    field map — `_log_api_authored_error` forwards `document["detail"]`
-    (a validation message, a callback-URL rejection reason, etc.) and the
-    catch-all handler ships `type(exc).__name__` which can be anything pipelex
-    raised. Without escaping, a crafted body with a newline or whitespace
-    inside `detail` would break the field separator (`key=value key2=value2`)
-    or forge extra log fields (`detail=ok status=200 event=fake`) — both are
-    log-injection vectors.
-
-    Non-string values (`int`, `bool`, `StrEnum` instances) have no injection
-    surface and render bare. Strings get logfmt-style treatment: control chars
-    are backslash-escaped first, then values containing whitespace, `=`, or
-    `"` are wrapped in double quotes with embedded `"` doubled. The shape
-    survives both grep (the line stays single-line and the keys remain at the
-    same offsets) and a future JSON log sink (each field is recoverable).
+    Built from server-authored values only — the HTTP status and the error type,
+    both of which the API or pipelex chose. Nothing a caller supplied ever reaches
+    the message: `detail` is caller-controlled on several routes, and the route
+    path is percent-decoded from the request line, so both ride fields instead,
+    where a structured sink serializes them as values and a crafted newline stays
+    inside one. The message says which failure it is; the fields say everything
+    about it.
     """
-    if not isinstance(value, str):
-        return str(value)
-    escaped = value.encode("unicode_escape").decode("ascii")
-    if _LOGFMT_NEEDS_QUOTING.search(escaped):
-        return '"' + escaped.replace('"', '""') + '"'
-    return escaped
+    status = attributes.get("status")
+    error_type = attributes.get("error_type")
+    return f"API error {status}: {error_type}" if error_type else f"API error {status}"
 
 
-def emit_error_log(*, fields: dict[str, Any], as_error: bool) -> None:
-    """Emit one structured error-log line from a flat field map.
+def _emit_api_error(*, fields: dict[str, Any], as_error: bool) -> None:
+    """Emit one `event=api_error` record: a summary message, everything else a record attribute.
 
-    The pipelex `log` object renders a single message string rather than
-    indexed key/value fields, so the fields are flattened to a `key=value`
-    run: greppable today, and a clean migration target once a JSON log sink
-    lands. `None`-valued fields are dropped. `as_error` picks the level —
-    `error` (with traceback) for operator-actionable failures, `warning` for
-    `INPUT`-domain caller mistakes. Caller-controlled values go through
-    `_logfmt_value` so a crafted `detail` can't forge log fields.
+    The fields are handed to the runtime's log call as `fields=`, so each one
+    becomes an attribute of the record and the selected sink decides how it goes
+    on the wire — a key of its own on the JSON sink's line, an OTLP attribute on
+    the collector's. Nothing is flattened into the message here any more, which
+    is what retires the API's own `key=value` rendering and its escaping with it.
+
+    `None`-valued fields are dropped, so an identifier this request never bound is
+    absent rather than carried as a null. `as_error` picks the level — `error`
+    (with the traceback) for operator-actionable failures, `warning` for
+    `INPUT`-domain caller mistakes.
     """
-    rendered = " ".join(f"{key}={_logfmt_value(value)}" for key, value in fields.items() if value is not None)
+    attributes = {key: value for key, value in fields.items() if value is not None}
+    summary = _error_summary(attributes)
     if as_error:
-        log.error(rendered, include_exception=True)
+        log.error(summary, fields=attributes, include_exception=True)
     else:
-        log.warning(rendered)
+        log.warning(summary, fields=attributes)
 
 
 def _emit_at_error_level(status: int) -> bool:
@@ -207,31 +207,29 @@ def _emit_at_error_level(status: int) -> bool:
     return status >= 500
 
 
-def _log_error_report(report: ErrorReport, *, request: Request, request_id: str | None, status: int | None = None) -> None:
-    """Emit the structured log entry for a handled `ErrorReport`.
+def _log_error_report(report: ErrorReport, *, request: Request, status: int | None = None) -> None:
+    """Emit the structured error record for a handled `ErrorReport`.
 
     Disposition follows the final HTTP status (see ``_emit_at_error_level``):
     a 4xx is client-facing and logs at `warning` without a traceback (caller
     mistakes, the provider-429 passthrough, and API-level 4xx overrides like
     the 409 conflict), a 5xx logs at `error` with the traceback. The fields
     mirror the response so the two never drift.
-    `user_id` rides every line when auth bound a caller — without it, the
+    `user_id` rides every record when auth bound a caller — without it, the
     storage / pipeline-backend leg of a failure carries only `request_id` and
     `route`, and tying the failure to the caller requires correlating the
-    request id across unrelated log lines (Phase 3 deleted the per-route
+    request id across unrelated records (Phase 3 deleted the per-route
     `log.error(... user=...)` lines those failures used to emit).
 
     ``status`` defaults to ``report.http_status`` and exists so the caller can
     pass the post-override value (see ``_ERROR_TYPE_STATUS_OVERRIDES``) — the
-    log line then agrees with the HTTP status actually sent rather than the
+    record then agrees with the HTTP status actually sent rather than the
     domain default.
     """
     effective_status = status if status is not None else report.http_status
     fields: dict[str, Any] = {
-        "event": "api_error",
-        "request_id": request_id,
-        "route": request.url.path,
-        **_request_correlation_fields(request),
+        "event": API_ERROR_EVENT,
+        **_request_fields(request),
         "error_type": report.error_type,
         "error_category": report.error_category,
         "error_domain": report.error_domain,
@@ -244,16 +242,16 @@ def _log_error_report(report: ErrorReport, *, request: Request, request_id: str 
     if metadata is not None:
         fields["provider_status_code"] = metadata.status_code
         fields["provider_request_id"] = metadata.request_id
-    emit_error_log(fields=fields, as_error=_emit_at_error_level(effective_status))
+    _emit_api_error(fields=fields, as_error=_emit_at_error_level(effective_status))
 
 
-def _log_api_authored_error(*, document: dict[str, Any], status: int, request: Request, request_id: str | None) -> None:
-    """Emit the structured log entry for an API-authored error response.
+def _log_api_authored_error(*, document: dict[str, Any], status: int, request: Request) -> None:
+    """Emit the structured error record for an API-authored error response.
 
     Shares the disposition rule and the common-key set of `_log_error_report`
     so every error response — a pipelex `ErrorReport` translated to RFC 7807
     *or* an API-authored 4xx/5xx raised by an `api.errors` helper — produces
-    one `event=api_error` line a downstream sink can grep uniformly on
+    one `event=api_error` record a downstream sink can filter uniformly on
     `event`, `request_id`, `route`, `error_type`, `error_domain`, `retryable`,
     and `status`. Without this, an API-owned 500 (a `raise_internal_server_error`
     site — `/version`'s missing-package case is the canonical example)
@@ -265,7 +263,7 @@ def _log_api_authored_error(*, document: dict[str, Any], status: int, request: R
     - API-authored docs add `detail`, always safe because
       `build_problem_document_from_api_error` does not apply strict-disclosure
       redaction (only `build_problem_document` does for pipelex domain errors).
-      Carrying the message preserves the operator-facing cause in the log line.
+      Carrying the message preserves the operator-facing cause in the record.
     - API-authored docs omit `error_category`, `provider`, `model`, and
       `provider_metadata.*` — those are inference-domain classifiers pipelex
       sets only on classifiable failures and the API never authors itself.
@@ -275,19 +273,16 @@ def _log_api_authored_error(*, document: dict[str, Any], status: int, request: R
     uses (see ``_emit_at_error_level``), so a sink dedup'ing by level sees one
     shape.
     """
-    error_domain = document.get("error_domain")
     fields: dict[str, Any] = {
-        "event": "api_error",
-        "request_id": request_id,
-        "route": request.url.path,
-        **_request_correlation_fields(request),
+        "event": API_ERROR_EVENT,
+        **_request_fields(request),
         "error_type": document.get("error_type"),
-        "error_domain": error_domain,
+        "error_domain": document.get("error_domain"),
         "retryable": document.get("retryable"),
         "status": status,
         "detail": document.get("detail"),
     }
-    emit_error_log(fields=fields, as_error=_emit_at_error_level(status))
+    _emit_api_error(fields=fields, as_error=_emit_at_error_level(status))
 
 
 def _json_safe_report(report: ErrorReport) -> ErrorReport:
@@ -376,7 +371,7 @@ def _problem_response(report: ErrorReport, *, request: Request, disclosure_mode:
     mode into the handlers it registers).
     """
     report = _json_safe_report(report)
-    request_id = _request_id_of(request)
+    request_id = request_id_of(request)
     status = _http_status_for(report)
     document = build_problem_document(
         report,
@@ -388,7 +383,7 @@ def _problem_response(report: ErrorReport, *, request: Request, disclosure_mode:
     # when an API-layer override has bumped it away from ``report.http_status``;
     # otherwise the two surfaces (header vs body) would silently disagree.
     document["status"] = status
-    _log_error_report(report, request=request, request_id=request_id, status=status)
+    _log_error_report(report, request=request, status=status)
     return JSONResponse(
         status_code=status,
         content=document,
@@ -481,13 +476,11 @@ async def handle_unexpected_error(request: Request, exc: Exception) -> Response:
     `to_error_report()`): Starlette's `ServerErrorMiddleware` wraps the others,
     so such a failure still lands here rather than a bodyless default.
     """
-    request_id = _request_id_of(request)
-    emit_error_log(
+    request_id = request_id_of(request)
+    _emit_api_error(
         fields={
-            "event": "api_error",
-            "request_id": request_id,
-            "route": request.url.path,
-            **_request_correlation_fields(request),
+            "event": API_ERROR_EVENT,
+            **_request_fields(request),
             "error_type": type(exc).__name__,
             "error_category": "unknown",
             "error_domain": ErrorDomain.RUNTIME,
@@ -522,25 +515,27 @@ async def handle_api_error(request: Request, exc: Exception) -> Response:
 
     `ApiError` is raised by the `raise_*` helpers in `api.errors` for the API's
     own 4xx/5xx — request validation, auth, payload limits, misconfiguration.
-    The problem document is built at raise time (under the request-scoped
-    logging contextvars); this handler serializes it, re-attaches any
-    `WWW-Authenticate` challenge header, and emits the structured `event=api_error`
-    log line so an API-owned 500 from any route is observable (a
-    `raise_internal_server_error` site like `version.py`'s missing-package case
-    is the canonical example — it has no preceding `log.error` at the call
-    site). `exc` is typed `Exception` to match Starlette's handler contract;
-    FastAPI only routes an `ApiError` here, so the cast is sound.
+    The helper builds the problem document at raise time, where it holds no
+    `Request`, so this handler stamps the two request-scoped members (`instance`
+    and `request_id`) onto a copy of it — the same two values, read from the same
+    place, as the pipelex-error and request-validation paths use. It then
+    serializes that document, re-attaches any `WWW-Authenticate` challenge header,
+    and emits the structured `event=api_error` record so an API-owned 500 from any
+    route is observable (a `raise_internal_server_error` site like `version.py`'s
+    missing-package case is the canonical example — it has no preceding
+    `log.error` at the call site). `exc` is typed `Exception` to match Starlette's
+    handler contract; FastAPI only routes an `ApiError` here, so the cast is sound.
     """
     api_error = cast("ApiError", exc)
-    _log_api_authored_error(
-        document=api_error.document,
-        status=api_error.status_code,
-        request=request,
-        request_id=_request_id_of(request),
+    document = with_request_context(
+        api_error.document,
+        instance=request.url.path,
+        request_id=request_id_of(request),
     )
+    _log_api_authored_error(document=document, status=api_error.status_code, request=request)
     return JSONResponse(
         status_code=api_error.status_code,
-        content=api_error.document,
+        content=document,
         media_type=PROBLEM_JSON_MEDIA_TYPE,
         headers=api_error.headers,
     )
@@ -579,18 +574,17 @@ async def handle_request_validation_error(request: Request, exc: Exception) -> R
     is sound.
     """
     validation_error = cast("RequestValidationError", exc)
-    request_id = _request_id_of(request)
     document = build_problem_document_from_api_error(
         ErrorType.VALIDATION_ERROR,
         _summarize_request_validation_error(validation_error),
         422,
         instance=request.url.path,
-        request_id=request_id,
+        request_id=request_id_of(request),
         error_domain=ErrorDomain.INPUT,
     )
-    # Same `event=api_error` line as an explicit `raise_validation_error`,
+    # Same `event=api_error` record as an explicit `raise_validation_error`,
     # so FastAPI's automatic-validation 422s aren't silent in operator logs.
-    _log_api_authored_error(document=document, status=422, request=request, request_id=request_id)
+    _log_api_authored_error(document=document, status=422, request=request)
     return JSONResponse(status_code=422, content=document, media_type=PROBLEM_JSON_MEDIA_TYPE)
 
 
