@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from pipelex import log
 from pipelex.tools.log.log_context import get_log_context
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import Message, Receive, Scope, Send
 
 from api.middleware import REQUEST_ID_HEADER, RequestIdMiddleware, generate_request_id, request_body_size_middleware, request_id_of
 
@@ -90,15 +91,33 @@ class TestRequestIdMiddleware:
         # grepping the text of a line is not the contract any more.
         assert request_id not in emitted[0].getMessage()
 
-    def test_bound_context_is_released_when_the_request_ends(self, caplog: pytest.LogCaptureFixture):
-        # The binding is per-request: a record emitted after the response has been returned must not
-        # inherit the finished request's id, or a shared worker would attribute later work to it.
-        with caplog.at_level(logging.WARNING):
-            _build_client().get("/emits-a-log-line")
-            log.warning("a line emitted outside any request")
-        outside = [record for record in caplog.records if record.getMessage() == "a line emitted outside any request"]
-        assert len(outside) == 1
-        assert not hasattr(outside[0], "request_id")
+    @pytest.mark.asyncio
+    async def test_bound_context_is_released_when_the_request_ends(self):
+        # The binding is per-request: once the request is over, nothing emitted afterwards may inherit
+        # its id, or a shared worker would attribute later work to it. The middleware is driven on this
+        # test's own event loop rather than through `TestClient`, which runs the app in a portal thread
+        # whose context never reaches the test's — through it, a binding that leaked would look released.
+        bound_while_running: list[str | None] = []
+
+        async def inner(_scope: Scope, _receive: Receive, send: Send) -> None:
+            bound = get_log_context()
+            bound_while_running.append(bound.request_id if bound is not None else None)
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b""})
+
+        async def receive() -> Message:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message: Message) -> None:
+            pass
+
+        scope: Scope = {"type": "http", "method": "GET", "path": "/", "headers": []}
+        assert get_log_context() is None
+        await RequestIdMiddleware(inner)(scope, receive, send)
+
+        assert len(bound_while_running) == 1
+        assert bound_while_running[0] is not None, "the id must be bound while the request runs"
+        assert get_log_context() is None, "the binding outlived the request"
 
     def test_echoes_valid_inbound_id(self):
         response = _build_client().get("/probe", headers={REQUEST_ID_HEADER: "client-supplied-123"})
