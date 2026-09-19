@@ -1,17 +1,20 @@
-"""What this server needs from the `pipelex` it resolved, asserted once at boot.
+"""What this server needs from the `pipelex` it resolved, asserted once, at import of `api.main`.
 
 This exists because of a gap the packaging cannot close on its own. While the structured-log seam is
 unreleased, `pyproject.toml` resolves `pipelex` from a git source declared in `[tool.uv.sources]`.
 Every install path this repository has goes through `uv`, which honours that entry — `make install`,
 CI's `uv lock --check`, and the Docker build's `uv sync --frozen`. A plain `pip install .` does not
-read it, and the branch build declares the same version number as the published release, so **no
-version specifier can distinguish them**: such an install silently resolves the published `pipelex`,
-which has none of this.
+read it, and the branch build declares a version number the published releases already carry, so **no
+version specifier can select it**: such an install silently resolves a published `pipelex`, which has
+none of this.
 
-Without a check, the first symptom is a `TypeError` raised from inside the error handler, on the
-first request that fails — the worst place to learn about it, because the failure being reported is
-lost behind the failure to report it. One assertion at boot turns that into a refusal that names the
-cause.
+Without a check, what such an install meets first depends on the configuration it reads. With this
+server's own `.pipelex/pipelex.toml` on the config path, the published runtime refuses the
+`[runtime.log] sink` key while `api.main` is still being imported, naming the key but not why it is
+unknown. Without it, the process starts, and the first symptom is a `TypeError` raised from inside the
+error handler on the first request that fails — the worst place to learn about it, because the failure
+being reported is lost behind the failure to report it. `api.main` calls this check at import, above
+the first config read, so both cases become one refusal that names the cause.
 
 The check goes away with the pin: once `pipelex` is an exact published version again, the version
 specifier does the work and this module is deleted with the `[tool.uv.sources]` section.
@@ -53,8 +56,8 @@ def assert_the_runtime_carries_the_structured_log_seam(*, log_facade: Any = log)
     msg = (
         f"the installed {_RUNTIME_PACKAGE} ({installed}) has no `log.context`, so it predates the structured-log seam "
         "this server is built on: its error handler would raise on the first failure it tried to report. "
-        f"The version number cannot tell you which build you have — the branch this server pins declares the same one "
-        f"as the published release. Most likely a `pip install .` resolved {_RUNTIME_PACKAGE} from PyPI: `pip` does not "
+        "The version number cannot tell you which build you have — the branch this server pins declares one the "
+        f"published releases already carry. Most likely a `pip install .` resolved {_RUNTIME_PACKAGE} from PyPI: `pip` does not "
         "read the `[tool.uv.sources]` entry in pyproject.toml that points at the branch, and `uv` does. "
         "Install with `make install`, or with `uv sync`, until that pin collapses to a published version."
     )
