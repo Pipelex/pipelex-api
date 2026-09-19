@@ -26,3 +26,9 @@ Two reviewers ran against `origin/dev`: cubic and `code-review` at level medium;
 ### What the round fixed, for the record
 
 The middleware test meant to prove the per-request log binding is released could not fail: `TestClient` runs the app in a portal thread whose context never reaches the test's, and a mutation that never released the binding left the whole unit suite green. It now drives the middleware on the test's own event loop and goes red under that mutation. The runtime-contract check was unreachable on the install it exists for: `api.main` validates the config at import, and a published `pipelex` refuses this server's `sink` key there, before `lifespan` ever ran the check. The check now runs at import, above the first config read, a structural test pins its place, and the docstrings, the comment and the changelog entry say what actually happens.
+
+## L-260916-b7759f, round 3 (bar `necessity`)
+
+cubic and `code-review` at level medium ran against `origin/dev`; code-review returned no findings. One finding, deferred at this bar because the previous pass did not introduce it and shipping without it loses no data.
+
+- **The body-size middleware's 413 writes no `api_error` record** (*unverified*, cubic). `api/middleware.py::_too_large_response` builds the problem document and returns it without going through `api.exception_handlers._emit_api_error`, so an oversized-body rejection never reaches the structured error stream, while `docs/logging.md` says an error response produces exactly one line. The cure is either to emit the record from the middleware — it holds the `Request` for `route`, and `request_id` comes from the bound context — or to qualify the doc so an operator does not query for a line that is never written.
