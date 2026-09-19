@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.26.0] - 2026-09-19
+
+### Changed
+
+- **Pinned `pipelex` 0.60.0**: up from `==0.59.0`, exactly, so a stuff on the wire names its concept instead of carrying its definition. The release also corrects `PINNED_NATIVES_MTHDS_VERSION`, which labelled the engine's pinned native set `1.0.0` where the standard pins it at `2.0.0`. It brings `mthds` 0.15.0 in with it, and the `.pipelex/` config schema did not move, so no migration is required.
+- **A returned stuff names its concept by ref (Breaking)**: every working memory `POST /v1/execute` returns now spells each stuff as `{"concept": "<domain>.<Code>", "content": …}` instead of carrying the whole `Concept` object with its `description`, `structure_class_name` and `refines`, which is what the standard's I/O contract asks for — a stuff names its concept and the definition stays in the library the method loads. The committed `docs/openapi/pipelex-api.openapi.yaml` is regenerated to match: `Stuff.concept` is now a `string` where it was a `$ref` to `Concept`. A caller that read `concept.code`, `concept.domain_code` or `concept.structure_class_name` off a returned stuff must read the ref string and resolve it against the method's own definitions, and a caller that validated a response back into a typed `Stuff` can no longer do so, because the definition no longer travels with the data.
+- **`POST /v1/codegen` stamps `engine_version` `0.60.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.59.0` no longer matches until it is regenerated.
+
+### Fixed
+
+- **`make pylint` lints `api/`**: the target, which `make check` runs, linted the installed `pipelex` package in `.venv` instead of this repository's own code, so `api/` was never checked by pylint. It now lints `api` and `tests`.
+
 ## [v0.25.0] - 2026-09-16
 
 ### Changed

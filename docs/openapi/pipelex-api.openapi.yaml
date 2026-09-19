@@ -11,7 +11,7 @@ info:
   license:
     name: Elastic License 2.0
     identifier: Elastic-2.0
-  version: 0.25.0
+  version: 0.26.0
 paths:
   /health:
     get:
@@ -2210,6 +2210,27 @@ components:
       - description
       - structure_class_name
       title: Concept
+      description: 'A concept as the runtime holds it in memory: its name and its definition.
+
+
+        The protocol model, `ConceptAbstract`, is a name and nothing more — `code`, `domain_code`
+
+        and the `concept_ref` they form — because the standard keeps a concept''s definition in the
+
+        library a method loads, never beside a stuff. The runtime needs the definition in memory to
+
+        resolve a structure class, check compatibility and render a representation, so it declares
+
+        those fields here, on its own subclass.
+
+
+        The fields declared here never travel beside a stuff: `StuffAbstract` serializes `concept`
+
+        as the ref string, so every dump of a `Stuff`, of a `WorkingMemory` and of a `PipeOutput`
+
+        carries `{"concept": "<domain>.<Code>", "content": …}`. A reader of such a dump resolves the
+
+        ref through the concept library the method loads, the way the input side does.'
     ConceptBlueprint:
       properties:
         source:
@@ -6706,7 +6727,7 @@ components:
           - type: 'null'
           title: Stuff Name
         concept:
-          $ref: '#/components/schemas/Concept'
+          type: string
         content:
           $ref: '#/components/schemas/StuffContent'
       additionalProperties: false
