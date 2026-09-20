@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **Pinned `pipelex` 0.61.0**: up from `==0.60.0`, exactly, for the new model generations it registers and a run of fixes to the way generated and remote images are fetched and stored. No wire schema moved — the committed `docs/openapi/pipelex-api.openapi.yaml` is unchanged — and the `.pipelex/` config schema did not move either, so no migration is required. What does change is the deck this server routes to and the behaviour of a run that handles images, both covered below.
+- **The deck `GET /v1/models` serves gains the newest generations and loses the superseded GPT ones (Breaking)**: Claude Opus 5, Claude Fable 5 and Claude Fable 5.1 join the Anthropic backend, and the GPT-5.6 series (`gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`) together with `gpt-6-astra` join both OpenAI backends. In the same pass `pipelex` retires the GPT-4.1 series, the `o1`, `o3` and `o4` reasoning models, the GPT-5, GPT-5.1 and GPT-5.2 generations, `gpt-3.5-turbo`, `gpt-4`, `gpt-4-turbo` and the dated `gpt-4o` aliases from the `openai` and `azure_openai` rosters it ships. A method naming one of those retired handles no longer resolves against the shipped deck, and an operator who still wants one keeps it by declaring it in their own backend config; the names also remain reachable through the `portkey` and `openrouter` backends, which still declare them, and `gpt-4o` and `gpt-4o-mini` are untouched on both direct backends.
+- **`POST /v1/codegen` stamps `engine_version` `0.61.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.60.0` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
+
+### Fixed
+
+- **A generated image is stored and reported under its real media type**: `pipelex` resolved a generated image's mime type to mint its storage key but never handed that type to the storage provider, so S3 stored every generated image untyped and served it back as `binary/octet-stream`; an image fetched from a remote URL now also keeps the type that URL served instead of falling through to a hardcoded `image/jpeg`. A caller that trusts the `mime_type` on an image a run returns, or that serves the stored object straight to a browser, now gets the type the bytes actually are.
+- **A remote image that fails to download no longer fails the whole run**: the upstream fallback for an unreachable remote image — log the warning, keep the URL — guarded on exception types the fetch never raised, so a 404 or a timeout on an image input propagated out and failed the run instead. A fetch given no explicit timeout also had no timeout at all, leaving a hanging server to block the caller indefinitely. Both are fixed in `pipelex` 0.61.0 and `POST /v1/execute` inherits them.
+
 ## [v0.26.0] - 2026-09-19
 
 ### Changed
