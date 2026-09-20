@@ -1,11 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [v0.26.1] - 2026-09-20
 
 ### Changed
 
-- **Pinned `pipelex` 0.61.0**: up from `==0.60.0`, exactly, for a set of fixes to the way generated and remote images are fetched and stored, which are the changes that actually reach a run here. Nothing on the wire moves — the committed `docs/openapi/pipelex-api.openapi.yaml` is unchanged — and the `.pipelex/` config schema did not move either, so no migration is required.
-- **The model roster this image serves does not move with the pin**: 0.61.0 revises the model handles in pipelex's own bundled kit, but this server reads the vendored `.pipelex/inference/` it ships rather than that kit, so `GET /v1/models` answers exactly what it answered under 0.60.0 and nothing here is breaking. Re-syncing the vendored tree to pick the new handles up is a separate change.
+- **Pinned `pipelex` 0.61.0**: up from `==0.60.0`, exactly, for a set of fixes to the way generated and remote images are fetched and stored, which are the changes that actually reach a run here. Nothing on the wire moves — the committed `docs/openapi/pipelex-api.openapi.yaml` is unchanged — and the `.pipelex/` config schema did not move either, so no migration is required. The model roster is unaffected as well: 0.61.0 revises the handles in pipelex's own bundled kit, but this server reads the vendored `.pipelex/inference/` it ships rather than that kit, so `GET /v1/models` answers exactly what it answered under 0.60.0.
 - **`POST /v1/codegen` stamps `engine_version` `0.61.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.60.0` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
 
 ### Fixed
