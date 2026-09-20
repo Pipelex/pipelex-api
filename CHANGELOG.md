@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **Pinned `pipelex` 0.61.0**: up from `==0.60.0`, exactly, for a set of fixes to the way generated and remote images are fetched and stored, which are the changes that actually reach a run here. Nothing on the wire moves — the committed `docs/openapi/pipelex-api.openapi.yaml` is unchanged — and the `.pipelex/` config schema did not move either, so no migration is required.
+- **The model roster this image serves does not move with the pin**: 0.61.0 revises the model handles in pipelex's own bundled kit, but this server reads the vendored `.pipelex/inference/` it ships rather than that kit, so `GET /v1/models` answers exactly what it answered under 0.60.0 and nothing here is breaking. Re-syncing the vendored tree to pick the new handles up is a separate change.
+- **`POST /v1/codegen` stamps `engine_version` `0.61.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.60.0` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
+
+### Fixed
+
+- **A generated image is stored and reported under its real media type**: `pipelex` resolved a generated image's mime type to mint its storage key but never handed that type to the storage provider, so S3 stored every generated image untyped and served it back as `binary/octet-stream`; an image fetched from a remote URL now also keeps the type that URL served instead of falling through to a hardcoded `image/jpeg`. A caller that trusts the `mime_type` on an image a run returns, or that serves the stored object straight to a browser, now gets the type the bytes actually are.
+- **A remote image that fails to download no longer fails the whole run**: the upstream fallback for an unreachable remote image — log the warning, keep the URL — guarded on exception types the fetch never raised, so a 404 or a timeout on an image input propagated out and failed the run instead. A fetch given no explicit timeout also had no timeout at all, leaving a hanging server to block the caller indefinitely. Both are fixed in `pipelex` 0.61.0 and `POST /v1/execute` inherits them.
+
 ## [v0.26.0] - 2026-09-19
 
 ### Changed
