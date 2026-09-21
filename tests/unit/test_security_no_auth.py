@@ -52,7 +52,7 @@ class TestNoAuthForwardedHeaders:
             ForwardedIdentityHeader.USER_ID: USER_ID,
             "x-user-email": "evil@example.com",
             "x-user-sub": "spoofed#1",
-            "x-auth-method": "gateway",
+            "x-auth-method": "proxy",
         }
         response = client.get(RoutePath.WHOAMI, headers=headers)
         assert response.status_code == 200
@@ -138,7 +138,7 @@ class TestNoAuthForwardedHeaders:
     def test_opaque_forwarded_user_id_honored(self, mocker: MockerFixture, opaque_user_id: str):
         """The runner treats `user_id` as opaque — any path-safe value is honored.
 
-        Identity is enforced upstream (the trusted proxy / gateway injects the
+        Identity is enforced upstream (the trusted proxy injects the
         authenticated id); the runner only requires path-safety, so a non-UUID
         but safe id (incl. the `user_<uuid>` prefixed scheme) is used as-is.
         """

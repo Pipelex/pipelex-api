@@ -41,17 +41,30 @@ It is the source-available reference implementation of the **[MTHDS Protocol](ht
 
 **Official Docker image available at:** [`pipelex/pipelex-api`](https://hub.docker.com/r/pipelex/pipelex-api)
 
-The published image is **generic and configuration-light**: Temporal is off, no S3, no remote tracing. It boots with a single required env var (`PIPELEX_GATEWAY_API_KEY`), and you bring your own [Pipelex configuration](docs/configuration.md) on top to enable storage, tracing, Temporal, or anything else.
+The published image is **generic and configuration-light**: Temporal is off, no S3, no remote tracing, and no inference credential baked in. You bring your own provider API key — one per provider you call, or a single [OpenRouter](https://openrouter.ai/) key to reach many models at once — and your own [Pipelex configuration](docs/configuration.md) on top to enable storage, tracing, Temporal, or anything else.
 
 ### 1. Run with Docker
 
-The only required env var is `PIPELEX_GATEWAY_API_KEY`. Get a free key (with free credits) at https://app.pipelex.com, then run:
+The image needs one credential: an API key for the inference provider you want your pipelines to call. You bring your own — `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `MISTRAL_API_KEY`, `XAI_API_KEY`, … one per provider — or a single [OpenRouter](https://openrouter.ai/) key, `OPENROUTER_API_KEY`, which reaches many models through one credential. Two things have to agree: the key you pass, and the **routing profile** that decides which backend serves a model.
+
+The shortest path is OpenRouter. Write a one-line routing override next to your `docker-compose.yml` or in your working directory:
+
+```bash
+echo 'active = "all_openrouter"' > routing_profiles_override.toml
+```
+
+Then run the image with your key and that override mounted:
 
 ```bash
 docker run --name pipelex-api -p 8081:8081 \
-  -e PIPELEX_GATEWAY_API_KEY=your-pipelex-gateway-api-key \
+  -e OPENROUTER_API_KEY=your-openrouter-key \
+  -v "$(pwd)/routing_profiles_override.toml:/root/.pipelex/inference/routing_profiles_override.toml:ro" \
   pipelex/pipelex-api:latest
 ```
+
+For a single provider instead, pass that provider's key and name its profile — `all_openai`, `all_anthropic`, `all_google`, `all_mistral`, `all_bedrock`, `all_vertexai`, `all_ollama`, … See [docs/configuration.md](docs/configuration.md#choosing-your-inference-provider) for the full list, for per-model routing, and for running against a local model server with no API key at all.
+
+**Don't want to manage provider keys?** Run your methods on the hosted Pipelex API at `api.pipelex.com` with a Pipelex API key instead of self-hosting this image — sign up at [app.pipelex.com](https://app.pipelex.com) and see [https://docs.pipelex.com/](https://docs.pipelex.com/).
 
 To require authentication on the API, add `-e AUTH_MODE=api_key -e API_KEY=your-secret` (or `AUTH_MODE=jwt` + `JWT_SECRET_KEY`). See [`.env.example`](.env.example) for the full list of supported variables and [docs/configuration.md](docs/configuration.md) for `--env-file` and `docker compose` patterns if you'd rather keep config out of your shell history.
 
@@ -120,7 +133,7 @@ The full reference for this API server lives next to the code in [`docs/`](docs/
 - [Pipe Builder](docs/pipe-builder.md) — `/build/inputs`, `/build/output`, `/build/runner`
 - [Configuration](docs/configuration.md) — env vars, mounting your own `.pipelex/` config
 
-For broader Pipelex documentation (MTHDS language, concepts, pipe types, the Gateway): **[https://docs.pipelex.com/](https://docs.pipelex.com/)**
+For broader Pipelex documentation (MTHDS language, concepts, pipe types, provider configuration): **[https://docs.pipelex.com/](https://docs.pipelex.com/)**
 
 # 💬 Support
 

@@ -59,7 +59,8 @@ docker-build:
 	docker build --platform linux/amd64 -t $(LOCAL_IMAGE) .
 
 # Run the API on http://localhost:8081, foreground. Reads all env from .env.
-# Required: PIPELEX_GATEWAY_API_KEY (only if you use the default routing profile).
+# Required: one inference provider key matching your active routing profile
+# (e.g. OPENROUTER_API_KEY with `all_openrouter`) — see .env.example.
 # Optional: AUTH_MODE, API_KEY, JWT_SECRET_KEY (see .env.example).
 docker-run: docker-build
 	@docker rm -f $(CONTAINER_NAME) 2>/dev/null || true
@@ -71,7 +72,8 @@ docker-run: docker-build
 
 # Pull and run the PUBLISHED image from Docker Hub — no local checkout/build needed.
 # Same env contract as docker-run (reads all env from .env).
-# Required: PIPELEX_GATEWAY_API_KEY (only if you use the default routing profile).
+# Required: one inference provider key matching your active routing profile
+# (e.g. OPENROUTER_API_KEY with `all_openrouter`) — see .env.example.
 # Optional: AUTH_MODE, API_KEY, JWT_SECRET_KEY (see .env.example).
 # Override the published tag with HUB_TAG, e.g. make docker-run-hub HUB_TAG=0.5.0
 docker-run-hub:

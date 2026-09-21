@@ -35,13 +35,18 @@ Deploy the Pipelex API anywhere that runs Docker (your laptop, ECS, Cloud Run, K
 
 ### 1. Run with Docker
 
-The only required env var is `PIPELEX_GATEWAY_API_KEY`. Get a free key (with free credits) at https://app.pipelex.com — it's the default path to LLMs and gives you access to every supported model with a single credential. (If you'd rather call providers like OpenAI, Anthropic, Bedrock, or Vertex directly, you reconfigure that on the Pipelex side, not here — see https://docs.pipelex.com.)
+You bring your own inference credential. Pass the API key of whichever provider you want your pipelines to call — `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `MISTRAL_API_KEY`, … one per provider — or a single [OpenRouter](https://openrouter.ai/) key, `OPENROUTER_API_KEY`, which reaches many models through one credential. The key has to be matched by a **routing profile** that sends models to that backend, which you set with a one-line override file (see [Configuration → Choosing your inference provider](configuration.md#choosing-your-inference-provider)):
 
 ```bash
+echo 'active = "all_openrouter"' > routing_profiles_override.toml
+
 docker run --name pipelex-api -p 8081:8081 \
-  -e PIPELEX_GATEWAY_API_KEY=your-pipelex-gateway-api-key \
+  -e OPENROUTER_API_KEY=your-openrouter-key \
+  -v "$(pwd)/routing_profiles_override.toml:/root/.pipelex/inference/routing_profiles_override.toml:ro" \
   pipelex/pipelex-api:latest
 ```
+
+If you'd rather not manage provider keys at all, run your methods on the hosted Pipelex API at `api.pipelex.com` with a Pipelex API key instead of self-hosting this image — see https://docs.pipelex.com.
 
 To require authentication on the API itself, add `-e AUTH_MODE=api_key -e API_KEY=your-secret` (or `AUTH_MODE=jwt` + `JWT_SECRET_KEY`). The full set of accepted env vars is documented in [Configuration](configuration.md) and `.env.example`.
 
@@ -89,7 +94,7 @@ The API supports three authentication modes via the `AUTH_MODE` environment vari
 
 ### No Authentication (Default)
 
-By default (`AUTH_MODE=none`), the API requires no authentication. This is the default for self-hosted deployments and for running behind an API Gateway that handles auth.
+By default (`AUTH_MODE=none`), the API requires no authentication. This is the default for self-hosted deployments and for running behind a reverse proxy that handles auth.
 
 If you sit this API behind a trusted reverse proxy that authenticates users and forwards the caller identity via the `X-User-Id` header, set `TRUST_FORWARDED_IDENTITY_HEADERS=true` to honor it. The runner is a generic execution engine — it does not own user metadata (email, OAuth subject, auth method), so a single opaque caller id is the entire trusted surface. The value must be a single path-safe segment (`is_safe_user_id`). **Default is off** — without this flag the API ignores `X-User-Id` entirely and the deployment is treated as single-tenant. With it on, a request arriving *without* the header is rejected with `401`: turning the flag on asserts that a proxy authenticates every caller, so a missing id means that proxy is absent, misconfigured or bypassed. Only enable it when your proxy strips any inbound copy of the header before adding its own; otherwise, any external client can spoof user identity by sending it directly.
 

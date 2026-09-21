@@ -36,12 +36,12 @@ def _synthetic_llm_report() -> ErrorReport:
 
 class TestProblemDocument:
     def test_builds_from_config_error(self):
-        report = PipelexConfigError("the gateway config is missing").to_error_report()
+        report = PipelexConfigError("the inference config is missing").to_error_report()
         doc = build_problem_document(report, instance="/v1/validate", request_id="REQ2", disclosure_mode=DisclosureMode.VERBOSE)
         assert doc["status"] == 500
         assert doc["error_domain"] == "config"
         assert doc["error_type"] == "PipelexConfigError"
-        assert doc["detail"] == "the gateway config is missing"
+        assert doc["detail"] == "the inference config is missing"
         assert doc["title"] == "Pipelex config"
         assert doc["type"].endswith("/pipelex-config-error/")
         assert doc["instance"] == "/v1/validate"
