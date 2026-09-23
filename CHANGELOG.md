@@ -6,6 +6,25 @@
 
 - **The documented minimum to boot is your own provider key, not a Pipelex Gateway key**: the README, `docs/index.md`, `docs/configuration.md`, `CONTRIBUTING.md`, `.env.example` and the `make docker-run*` targets no longer present `PIPELEX_GATEWAY_API_KEY` as the image's one required variable. You bring your own inference credential — one env var per provider you call, or a single `OPENROUTER_API_KEY` to reach many models at once — and name the routing profile that matches it with a one-line `inference/routing_profiles_override.toml`. A new "Choosing your inference provider" section in `docs/configuration.md` maps each shipped profile to the variable it reads, covers per-model routing and a local model server, and points at the hosted Pipelex API for anyone who would rather not hold provider keys at all. It also says that a key on its own is not enough — the backend has to carry `enabled = true`, since a profile naming one that is not enabled is refused at boot — and links to the provider-configuration page rather than the documentation root.
 
+## [v0.27.0] - 2026-09-21
+
+### Changed
+
+- **Pinned `pipelex` 0.62.0**: up from `==0.61.0`, exactly, for the shipped model deck's move onto the models the Pipelex Gateway serves from Azure. Nothing on the wire moves — the committed `docs/openapi/pipelex-api.openapi.yaml` changes only in its `info.version` — and the `.pipelex/` config schema did not move, so no migration is required.
+- **The vendored model deck resolves only to models the Pipelex Gateway serves from Azure (Breaking)**: this image serves the `.pipelex/inference/` tree it ships rather than the installed wheel's kit, and that deck had not been re-synced since v0.14.0, so every previous pin move left the roster untouched. Every default alias and preset keeps its name, but the language ladder is now the GPT-5.6 range — the premium tier and `@best-gpt` resolve to `gpt-5.6-sol`, the general and large-context tiers to `gpt-5.6-terra`, the small tiers to `gpt-5.6-luna`, where they previously resolved to `claude-4.7-opus`, `claude-4.6-sonnet`, the Gemini `*-latest` pair and `gpt-4o-mini` — and image generation's tiers resolve to `gpt-image-2` in place of `nano-banana` and `nano-banana-2`. `GET /v1/models` answers this deck, so its `aliases` and `waterfalls` change with it, and `$engineering-codebase-analysis` reaches its model through `@default-large-context-code` rather than a provider-named alias.
+- **A deployment holding its own provider key must declare the new handles (Breaking)**: the Pipelex Gateway resolves them from the remote config it fetches at boot, so the default deployment needs nothing, but the vendored `backends/` rosters declare none of the GPT-5.6 range. Such a deployment still starts — `missing_presets_reaction` is `log`, and an alias satisfies the deck's membership check without its target being declared — and then answers `500` on the first `/execute` that takes a default tier. Declare the handles in the backend file, or keep the previous models by naming them in an `x_custom_llm_deck.toml`, which `pipelex update` never touches.
+- **The vendored deck declares `temperature = 1` throughout (Breaking)**: every model in the GPT-5.6 range fixes its temperature at 1, so every preset states that value in place of one the worker would override while warning on every call, and `[llm.choice_defaults].default_temperature` is 1 for the same reason. Presets are therefore distinguished by their model tier and their reasoning effort alone, so `$writing-factual` and `$writing-creative` now issue the same call. A method that needs a temperature of its own must write an inline LLM settings table — `model = { model = "gpt-4o", temperature = 0.8 }`.
+- **The vendored Gateway roster reference agrees with the deck again**: `backends/pipelex_gateway_models.md` and its plain twin are generated from the served remote config and had never been refreshed since this repo was created, so they advertised `gpt-5.2` and carried no `gpt-5.6-*` handle at all while the deck resolved every tier to one. Both are re-synced, so the reference an operator opens to pick a handle now matches what the deck runs on.
+- **`POST /v1/codegen` stamps `engine_version` `0.62.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.61.0` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
+
+### Fixed
+
+- **The vendored deck no longer aliases a handle no enabled backend declares**: `@best-claude` and `@default-premium` both resolved to `claude-4.7-opus`, which the vendored `backends/anthropic.toml` does not declare — it stops at `claude-4.6-opus`. The re-synced deck removes the dangling target.
+
+### Removed
+
+- **`best-claude`, `best-gemini` and `best-mistral` are gone from the vendored deck (Breaking)**: an alias naming a provider cannot honestly resolve to a GPT model, and the image deck's `best-gemini` goes with them. A method referencing one now fails validation with the usual alias-not-found error; declare it in an `x_custom_llm_deck.toml` to keep it.
+
 ## [v0.26.1] - 2026-09-20
 
 ### Changed
