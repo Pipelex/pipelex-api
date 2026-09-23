@@ -8,7 +8,8 @@
 
 ### Changed
 
-- **`pipelex` resolves from an unreleased git commit**: the dependency is still declared `==0.62.0`, but a `[tool.uv.sources]` override resolves it from a merged `pipelex` `dev` commit, because no published release yet carries the analytics groups this server now imports. The image builds from the lock, so it would ship that commit under the 0.62.0 number; the override reverts to a plain PyPI pin once `pipelex` releases the change, and a release pull request is refused while it remains.
+- **Pinned `pipelex` 0.63.0**: up from `==0.62.0`, exactly, for the run-scoped analytics groups and per-caller telemetry that `analytics_groups` rides on. A deployment reporting to its own PostHog or OpenTelemetry backend now sees each run under its caller — the run's `user_id` becomes the PostHog `distinct_id` and is written on every span as `pipelex.run.user_id` — while a single-tenant deployment, whose runs all carry the shared `single-tenant` id, keeps reporting under its configured identity. Nothing on the wire moves and the `.pipelex/` config schema did not move, so no migration is required.
+- **`POST /v1/codegen` stamps `engine_version` `0.63.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.62.0` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
 
 ### Fixed
 

@@ -16,7 +16,7 @@ classifiers = [
 ]
 
 dependencies = [
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.62.0",
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.63.0",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",
@@ -76,28 +76,6 @@ packages = ["api"]
 
 [tool.uv]
 required-version = ">=0.7.2"
-
-# TEMPORARY: resolve `pipelex` from its merged `dev`, until the run-scoped
-# telemetry identity is released.
-#
-# `dependencies` above pins `pipelex==0.62.0`, and no published pipelex carries
-# what this server now imports: `pipelex.system.analytics_groups` (landed in
-# Pipelex/pipelex#1230, consumed in #1231) and `SINGLE_TENANT_USER_ID` in
-# `pipelex.system.storage_scope`, all merged to `dev` and not yet cut as a
-# release. Against 0.62.0 the server therefore fails at import.
-#
-# This block DOES reach the published artifact. pipelex-api ships only as the
-# Docker image, whose Dockerfile runs `uv sync --frozen` from `uv.lock`, and the
-# lock records this git source — so an image built while the block exists runs
-# this unreleased commit while reporting itself as pipelex 0.62.0. No release
-# may be cut until the pin moves to the version pipelex publishes the change as
-# and THIS BLOCK IS DELETED in that same change (the `bump-pipelex` skill does
-# both); `version-check.yml` refuses a release pull request until then.
-#
-# Pinned by SHA rather than by branch so the resolution cannot drift under a
-# force-push while the PR is open.
-[tool.uv.sources]
-pipelex = { git = "https://github.com/Pipelex/pipelex", rev = "a955cb50b0263c3fe49d778b01ce9bdc214a9921" }
 
 [tool.mypy]
 check_untyped_defs = true
