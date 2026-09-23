@@ -515,23 +515,16 @@ def _extras_error_type(exc: ValidationError) -> ErrorType:
 
 
 def _validate_extras(request_data: dict[str, Any]) -> PipelineApiExtras:
-    """Validate API-server-only fields (pipeline_run_id, callback_urls, orchestration_mode, storage_scope, analytics_groups)."""
+    """Validate the API-server-only fields `PipelineApiExtras` declares, read straight off the body.
+
+    The whole body is validated rather than a hand-copied subset of its keys: the model
+    ignores keys it does not declare, so a field added to it is read off the wire with no
+    second list to keep in step. Such a list would drop a forgotten key SILENTLY, and for
+    `storage_scope` that is worse than an error: the run falls back to the caller's own id
+    and writes to the wrong prefix while reporting success.
+    """
     try:
-        return PipelineApiExtras.model_validate(
-            {
-                "pipeline_run_id": request_data.get("pipeline_run_id"),
-                "callback_urls": request_data.get("callback_urls"),
-                "orchestration_mode": request_data.get("orchestration_mode"),
-                # This is an ALLOWLIST, not a passthrough — a key missing here is
-                # dropped SILENTLY, and for `storage_scope` that is worse than an
-                # error: the run falls back to the caller's own id and writes to
-                # the wrong prefix while reporting success.
-                "storage_scope": request_data.get("storage_scope"),
-                # The same silent drop for the groups costs the host its group
-                # facet: every span of the run arrives with no organization.
-                "analytics_groups": request_data.get("analytics_groups"),
-            }
-        )
+        return PipelineApiExtras.model_validate(request_data)
     except ValidationError as exc:
         raise_validation_error(
             message=str(exc),

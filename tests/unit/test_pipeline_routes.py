@@ -403,8 +403,9 @@ class TestStorageScopeReachesTheRun:
 
     Every failure on this path is SILENT by construction, which is why the
     constructor kwarg is asserted rather than just the status code.
-    `_validate_extras` is a key ALLOWLIST, so a field missing from it is dropped
-    with no error; the run then falls back to the caller's own id, writes under
+    The route hands the validated extras to `ApiRunner` field by field, so a
+    keyword left out there is dropped with no error; the run then falls back to
+    the caller's own id, writes under
     the wrong prefix, and still answers 202. On the hosted platform that is
     exactly the org-scoped storage bug — one tenant's output under another
     tenant's key — reported as success.

@@ -185,9 +185,9 @@ class RunRequest(BaseModel):
         if request_body.get("pipe_code") is not None or mthds_contents or has_bundle or request_body.get("method_ref") is not None:
             return
         # `PipelineApiExtras` is defined below in this module — resolved at call time, which is
-        # always after import. It is the allowlist of API-server-only keys the routes DO handle
-        # (pipeline_run_id, callback_urls, orchestration_mode, storage_scope, analytics_groups),
-        # so naming one of them as "not handled" would be a lie.
+        # always after import. Its fields are the API-server-only keys the routes DO handle —
+        # `_validate_extras` validates the body against this very model — so naming one of them
+        # as "not handled" would be a lie.
         handled_keys = set(cls.model_fields) | set(PipelineApiExtras.model_fields) | {"mthds_content"}
         unhandled_keys = sorted(key for key in request_body if key not in handled_keys)
         if not unhandled_keys:

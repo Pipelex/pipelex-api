@@ -1,8 +1,8 @@
 """`analytics_groups` must survive the wire -> extras -> runner -> `RunMetadata` hop on both run routes.
 
-Every failure on this path is SILENT by construction. `_validate_extras` is a key allowlist, so a
-field missing from it is dropped with no error; `ApiRunner.start` builds its job by calling
-`pipeline_run_setup` itself, so a keyword left out there is dropped too. Either way the run still
+Every failure on this path is SILENT by construction. The route hands the validated extras to
+`ApiRunner` field by field, so a keyword left out there is dropped with no error; `ApiRunner.start`
+builds its job by calling `pipeline_run_setup` itself, so a keyword left out there is dropped too. Either way the run still
 answers 200 or 202, and the only symptom is that every span of it arrives in PostHog with no
 organization. So these tests run the real `pipeline_run_setup` and read the groups off the
 `RunMetadata` the runtime built, rather than off a mocked constructor call.
