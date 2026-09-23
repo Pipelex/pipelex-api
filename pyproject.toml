@@ -81,17 +81,18 @@ required-version = ">=0.7.2"
 # telemetry identity is released.
 #
 # `dependencies` above pins `pipelex==0.62.0`, and no published pipelex carries
-# `analytics_groups` — the field landed in Pipelex/pipelex#1230 and its consumer
-# in Pipelex/pipelex#1231, both merged to `dev` and not yet cut as a release.
-# `ApiRunner` passes `analytics_groups=` to `PipelexMTHDSProtocol` and to
-# `pipeline_run_setup`, so against 0.62.0 every run fails with a `TypeError` on
-# an unexpected keyword argument.
+# what this server now imports: `pipelex.system.analytics_groups` (landed in
+# Pipelex/pipelex#1230, consumed in #1231) and `SINGLE_TENANT_USER_ID` in
+# `pipelex.system.storage_scope`, all merged to `dev` and not yet cut as a
+# release. Against 0.62.0 the server therefore fails at import.
 #
-# `[tool.uv.sources]` is dev-and-CI metadata: it is not part of the published
-# dependency, so a `pip install pipelex-api` still resolves the pin above. That
-# means this makes CI honest and does NOT make a release correct — the pin must
-# move to the version pipelex publishes the change as, and THIS BLOCK MUST BE
-# DELETED in that same change.
+# This block DOES reach the published artifact. pipelex-api ships only as the
+# Docker image, whose Dockerfile runs `uv sync --frozen` from `uv.lock`, and the
+# lock records this git source — so an image built while the block exists runs
+# this unreleased commit while reporting itself as pipelex 0.62.0. No release
+# may be cut until the pin moves to the version pipelex publishes the change as
+# and THIS BLOCK IS DELETED in that same change (the `bump-pipelex` skill does
+# both); `version-check.yml` refuses a release pull request until then.
 #
 # Pinned by SHA rather than by branch so the resolution cannot drift under a
 # force-push while the PR is open.

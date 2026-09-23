@@ -6,6 +6,10 @@
 
 - **`analytics_groups` on `POST /v1/execute` and `POST /v1/start`**: a run request may carry an opaque mapping of group type to group key, such as `{"organization": "org_acme"}`, which the runtime stamps on every span of the run as `pipelex.run.analytics_groups` and which the deployment's own PostHog stream, in `identified` mode, attaches to each capture as PostHog groups. It follows the runtime's own rules — lowercase snake_case group types, group keys from `A-Za-z0-9_-`, at most five entries — and a mapping outside them is refused with a `422` whose `error_type` is `InvalidAnalyticsGroups`; omitting it leaves the run in no group.
 
+### Changed
+
+- **`pipelex` resolves from an unreleased git commit**: the dependency is still declared `==0.62.0`, but a `[tool.uv.sources]` override resolves it from a merged `pipelex` `dev` commit, because no published release yet carries the analytics groups this server now imports. The image builds from the lock, so it would ship that commit under the 0.62.0 number; the override reverts to a plain PyPI pin once `pipelex` releases the change, and a release pull request is refused while it remains.
+
 ### Fixed
 
 - **A run route's `422` names the extension field that failed**: every failure on `pipeline_run_id`, `callback_urls`, `orchestration_mode` or `storage_scope` used to answer `error_type` `InvalidCallbackUrls`, including a traversal in `storage_scope` on a request that carried no callback at all. An invalid `storage_scope` now answers `InvalidStorageScope`, an invalid `callback_urls` still answers `InvalidCallbackUrls`, and a failure on any other field, or on more than one at once, carries the generic `ValidationError`.
