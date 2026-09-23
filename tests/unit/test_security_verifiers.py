@@ -6,10 +6,11 @@ import jwt
 import pytest
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
+from pipelex.system.storage_scope import SINGLE_TENANT_USER_ID
 from pytest_mock import MockerFixture
 
 from api.exception_handlers import register_exception_handlers
-from api.security import SINGLE_TENANT_USER_ID, RequestUser, get_request_user, verify_api_key, verify_jwt
+from api.security import RequestUser, get_request_user, verify_api_key, verify_jwt
 from tests.unit._constants import RoutePath
 
 JWT_SECRET = "test-jwt-secret-do-not-use-in-prod"

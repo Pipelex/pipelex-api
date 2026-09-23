@@ -42,6 +42,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The image is built from `uv.lock` with `uv sync --frozen`, so a
+      # `[tool.uv.sources]` override — a git rev or a path standing in for an
+      # unreleased pipelex — ships inside the release under the pinned version's
+      # number. A release must resolve pipelex from PyPI.
+      - name: Check pipelex resolves from PyPI
+        run: |
+          if grep -q '^\[tool\.uv\.sources\]' pyproject.toml; then
+            echo "❌ ERROR: pyproject.toml carries a [tool.uv.sources] block. Move the pipelex pin to a published release and delete the block (the bump-pipelex skill) before releasing."
+            exit 1
+          fi
+          PIPELEX_SOURCE=$(grep -A2 '^name = "pipelex"$' uv.lock | grep '^source = ' || true)
+          if [[ "$PIPELEX_SOURCE" != 'source = { registry = '* ]]; then
+            echo "❌ ERROR: uv.lock does not resolve pipelex from the registry: ${PIPELEX_SOURCE:-no source line found}"
+            exit 1
+          fi
+          echo "✅ pipelex resolves from PyPI: $PIPELEX_SOURCE"
+
       - name: Get version from pyproject.toml
         id: current_version
         run: |

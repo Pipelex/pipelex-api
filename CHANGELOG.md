@@ -6,6 +6,21 @@
 
 - **The documented minimum to boot is your own provider key, not a Pipelex Gateway key**: the README, `docs/index.md`, `docs/configuration.md`, `CONTRIBUTING.md`, `.env.example` and the `make docker-run*` targets no longer present `PIPELEX_GATEWAY_API_KEY` as the image's one required variable. You bring your own inference credential — one env var per provider you call, or a single `OPENROUTER_API_KEY` to reach many models at once — and name the routing profile that matches it with a one-line `inference/routing_profiles_override.toml`. A new "Choosing your inference provider" section in `docs/configuration.md` maps each shipped profile to the variable it reads, covers per-model routing and a local model server, and points at the hosted Pipelex API for anyone who would rather not hold provider keys at all. It also says that a key on its own is not enough — the backend has to carry `enabled = true`, since a profile naming one that is not enabled is refused at boot — and links to the provider-configuration page rather than the documentation root.
 
+## [v0.27.1] - 2026-09-23
+
+### Added
+
+- **`analytics_groups` on `POST /v1/execute` and `POST /v1/start`**: a run request may carry an opaque mapping of group type to group key, such as `{"organization": "org_acme"}`, which the runtime stamps on every span of the run as `pipelex.run.analytics_groups` and which the deployment's own PostHog stream, in `identified` mode, attaches to each capture as PostHog groups. It follows the runtime's own rules — lowercase snake_case group types, group keys from `A-Za-z0-9_-`, at most five entries — and a mapping outside them is refused with a `422` whose `error_type` is `InvalidAnalyticsGroups`; omitting it leaves the run in no group.
+
+### Changed
+
+- **Pinned `pipelex` 0.63.0**: up from `==0.62.0`, exactly, for the run-scoped analytics groups and per-caller telemetry that `analytics_groups` rides on. A deployment reporting to its own PostHog or OpenTelemetry backend now sees each run under its caller — the run's `user_id` becomes the PostHog `distinct_id` and is written on every span as `pipelex.run.user_id` — while a single-tenant deployment, whose runs all carry the shared `single-tenant` id, keeps reporting under its configured identity. Nothing on the wire moves and the `.pipelex/` config schema did not move, so no migration is required.
+- **`POST /v1/codegen` stamps `engine_version` `0.63.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.62.0` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
+
+### Fixed
+
+- **A run route's `422` names the extension field that failed**: every failure on `pipeline_run_id`, `callback_urls`, `orchestration_mode` or `storage_scope` used to answer `error_type` `InvalidCallbackUrls`, including a traversal in `storage_scope` on a request that carried no callback at all. An invalid `storage_scope` now answers `InvalidStorageScope`, an invalid `callback_urls` still answers `InvalidCallbackUrls`, and a failure on any other field, or on more than one at once, carries the generic `ValidationError`.
+
 ## [v0.27.0] - 2026-09-21
 
 ### Changed

@@ -3,10 +3,11 @@ from typing import Annotated
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
+from pipelex.system.storage_scope import SINGLE_TENANT_USER_ID
 from pytest_mock import MockerFixture
 
 from api.exception_handlers import register_exception_handlers
-from api.security import SINGLE_TENANT_USER_ID, ForwardedIdentityHeader, RequestUser, get_request_user, no_auth
+from api.security import ForwardedIdentityHeader, RequestUser, get_request_user, no_auth
 from tests.unit._constants import RoutePath
 
 USER_ID = "11111111-1111-4111-1111-111111111111"
