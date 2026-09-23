@@ -37,6 +37,12 @@ class ErrorType(StrEnum):
     VALIDATION_ERROR = "ValidationError"
     INVALID_JSON = "InvalidJSON"
     INVALID_CALLBACK_URLS = "InvalidCallbackUrls"
+    # A run request's `storage_scope` extra is not one to three path-safe segments. A 422, not a
+    # 500 from deep in the run: the value becomes a storage key prefix, so a `..` escapes the tenant.
+    INVALID_STORAGE_SCOPE = "InvalidStorageScope"
+    # A run request's `analytics_groups` extra is not a mapping of group type to group key within
+    # the runtime's charset and entry cap (`pipelex.system.analytics_groups`).
+    INVALID_ANALYTICS_GROUPS = "InvalidAnalyticsGroups"
     INVALID_MODEL_CATEGORY = "InvalidModelCategory"
     INVALID_BASE64 = "InvalidBase64"
     PAYLOAD_TOO_LARGE = "PayloadTooLarge"
