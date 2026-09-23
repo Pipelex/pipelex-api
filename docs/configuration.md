@@ -135,7 +135,7 @@ docker run --name pipelex-api -p 8081:8081 \
   pipelex/pipelex-api:latest
 ```
 
-**One key per provider.** Call a provider directly by naming its profile and passing that provider's own env var. The profiles ship in `inference/routing_profiles.toml` and the env var each backend reads is declared in `inference/backends.toml`:
+**One key per provider.** Call a provider directly by naming its profile and passing that provider's own env var. The backend also has to be switched on (`enabled = true` in `inference/backends.toml`), since a profile naming a backend that is not enabled is refused at boot — see [Configure AI Providers](https://docs.pipelex.com/latest/get-started/configure-ai-providers/). The profiles ship in `inference/routing_profiles.toml` and the env var each backend reads is declared in `inference/backends.toml`:
 
 | Profile | Env var it needs |
 | --- | --- |
@@ -151,7 +151,7 @@ docker run --name pipelex-api -p 8081:8081 \
 | `all_vertexai` | the Google Cloud credentials your environment already provides |
 | `all_ollama` | none — a local model server |
 
-**Mixing providers.** A profile can route per model instead of sending everything to one backend: give it a `default` and a `[profiles.<name>.routes]` table keyed by model handle or pattern. `inference/routing_profiles.toml` carries worked examples, and every backend whose models a profile routes to must have its key present. See https://docs.pipelex.com for the full routing reference.
+**Mixing providers.** A profile can route per model instead of sending everything to one backend: give it a `default` and a `[profiles.<name>.routes]` table keyed by model handle or pattern. `inference/routing_profiles.toml` carries worked examples, and every backend whose models a profile routes to must be enabled and have its key present. See the [inference backend reference](https://docs.pipelex.com/latest/configuration/config-technical/inference-backend-config/) for the full routing reference.
 
 **No provider keys at all.** Point Pipelex at a local model server (Ollama, vLLM, LM Studio, llama.cpp) with the `all_ollama` profile and its base URL — or skip self-hosting and run your methods on the hosted Pipelex API at `api.pipelex.com` with a Pipelex API key from [app.pipelex.com](https://app.pipelex.com).
 

@@ -64,7 +64,7 @@ docker run --name pipelex-api -p 8081:8081 \
 
 For a single provider instead, pass that provider's key and name its profile — `all_openai`, `all_anthropic`, `all_google`, `all_mistral`, `all_bedrock`, `all_vertexai`, `all_ollama`, … See [docs/configuration.md](docs/configuration.md#choosing-your-inference-provider) for the full list, for per-model routing, and for running against a local model server with no API key at all.
 
-**Don't want to manage provider keys?** Run your methods on the hosted Pipelex API at `api.pipelex.com` with a Pipelex API key instead of self-hosting this image — sign up at [app.pipelex.com](https://app.pipelex.com) and see [https://docs.pipelex.com/](https://docs.pipelex.com/).
+**Don't want to manage provider keys?** Run your methods on the hosted Pipelex API at `api.pipelex.com` with a Pipelex API key instead of self-hosting this image — sign up at [app.pipelex.com](https://app.pipelex.com) and see [Configure AI Providers](https://docs.pipelex.com/latest/get-started/configure-ai-providers/).
 
 To require authentication on the API, add `-e AUTH_MODE=api_key -e API_KEY=your-secret` (or `AUTH_MODE=jwt` + `JWT_SECRET_KEY`). See [`.env.example`](.env.example) for the full list of supported variables and [docs/configuration.md](docs/configuration.md) for `--env-file` and `docker compose` patterns if you'd rather keep config out of your shell history.
 
