@@ -23,6 +23,7 @@ from pipelex.runtime_bridge.exceptions import MissingBundleValidatorError, Missi
 from pipelex.runtime_bridge.primitives.hydration import hydrate_working_memory
 from pipelex.runtime_hub import get_bundle_validator_registry, get_orchestrator_registry
 from pipelex.system.environment import get_required_env
+from pipelex.system.storage_scope import SINGLE_TENANT_USER_ID
 from pydantic import ValidationError
 from typing_extensions import override
 
@@ -49,7 +50,6 @@ from api.schemas.models import (
     PipelineApiExtras,
     RunRequest,
 )
-from api.security import SINGLE_TENANT_USER_ID
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -348,6 +348,10 @@ class ApiRunner(PipelexMTHDSProtocol):
             pipe_run_mode=self.pipe_run_mode,
             user_id=self.user_id,
             storage_scope=self.storage_scope,
+            # The base `execute` threads this itself; `start` builds its job
+            # here, so a group left out of this call is dropped with no error
+            # and the run's spans lose their groups while the ack still says 202.
+            analytics_groups=self.analytics_groups,
             pipeline_run_id=pipeline_run_id,
             request_id=request_id,
         )
@@ -487,8 +491,31 @@ def _decode_body(body: bytes) -> dict[str, Any]:
     return cast("dict[str, Any]", decoded)
 
 
+# The `error_type` a 422 on one extras field carries. A field absent from this map
+# (`pipeline_run_id`, `orchestration_mode`) answers with the generic `ValidationError`.
+_EXTRAS_FIELD_ERROR_TYPES: dict[str, ErrorType] = {
+    "callback_urls": ErrorType.INVALID_CALLBACK_URLS,
+    "storage_scope": ErrorType.INVALID_STORAGE_SCOPE,
+    "analytics_groups": ErrorType.INVALID_ANALYTICS_GROUPS,
+}
+
+
+def _extras_error_type(exc: ValidationError) -> ErrorType:
+    """Classify an extras failure by the field that failed, so a client can branch on `error_type`.
+
+    Every extras failure used to answer `InvalidCallbackUrls`, including a traversal in
+    `storage_scope` on a request that carried no callback at all. A body failing on
+    more than one field gets the generic `ValidationError`: naming one of them would
+    send the caller to fix that field and leave the other one for the next request.
+    """
+    failed_fields = {str(error["loc"][0]) for error in exc.errors() if error["loc"]}
+    if len(failed_fields) != 1:
+        return ErrorType.VALIDATION_ERROR
+    return _EXTRAS_FIELD_ERROR_TYPES.get(failed_fields.pop(), ErrorType.VALIDATION_ERROR)
+
+
 def _validate_extras(request_data: dict[str, Any]) -> PipelineApiExtras:
-    """Validate API-server-only fields (pipeline_run_id, callback_urls, orchestration_mode, storage_scope)."""
+    """Validate API-server-only fields (pipeline_run_id, callback_urls, orchestration_mode, storage_scope, analytics_groups)."""
     try:
         return PipelineApiExtras.model_validate(
             {
@@ -500,12 +527,15 @@ def _validate_extras(request_data: dict[str, Any]) -> PipelineApiExtras:
                 # error: the run falls back to the caller's own id and writes to
                 # the wrong prefix while reporting success.
                 "storage_scope": request_data.get("storage_scope"),
+                # The same silent drop for the groups costs the host its group
+                # facet: every span of the run arrives with no organization.
+                "analytics_groups": request_data.get("analytics_groups"),
             }
         )
     except ValidationError as exc:
         raise_validation_error(
             message=str(exc),
-            error_type=ErrorType.INVALID_CALLBACK_URLS,
+            error_type=_extras_error_type(exc),
         )
 
 
@@ -541,9 +571,9 @@ async def _parse_request(request: Request) -> tuple[RunRequest, PipelineApiExtra
     Splits the body into:
       1. The upstream `RunRequest` (pipe_code, mthds_contents, inputs, …)
          decoded via `kajson` so structured inputs survive without re-parsing.
-      2. `PipelineApiExtras` (pipeline_run_id, callback_urls) validated by
-         Pydantic — callback_urls are checked for scheme + private/loopback
-         hosts to harden against SSRF.
+      2. `PipelineApiExtras` (pipeline_run_id, callback_urls, orchestration_mode,
+         storage_scope, analytics_groups) validated by Pydantic — callback_urls
+         are checked for scheme + private/loopback hosts to harden against SSRF.
 
     Body size is capped upstream by `request_body_size_middleware`.
     """
@@ -705,6 +735,7 @@ async def execute(request: Request) -> JSONResponse:
         runner = ApiRunner(
             user_id=_get_user_id(request),
             storage_scope=_resolve_storage_scope(request, requested=extras.storage_scope),
+            analytics_groups=extras.analytics_groups,
             library_dirs=source.library_dirs,
         )
         response = await runner.execute(
@@ -792,6 +823,7 @@ async def start(
         runner = ApiRunner(
             user_id=_get_user_id(request),
             storage_scope=_resolve_storage_scope(request, requested=extras.storage_scope),
+            analytics_groups=extras.analytics_groups,
             library_dirs=source.library_dirs,
         )
         start_result = await runner.start(
