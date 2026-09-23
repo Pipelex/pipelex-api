@@ -1,0 +1,23 @@
+README.md
+  s_177b6af8a168a6::t_044189067988b0 67
+docs/configuration.md
+  s_177b6af8a168a6::t_044189067988b0 138,154
+CHANGELOG.md
+  s_177b6af8a168a6::t_9b6b0512bd364b 7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "655a5d58b77593f85c98369d84feff9f686a40a4",
+  "prompts": {},
+  "sessions": {
+    "s_177b6af8a168a6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6d0cb6e4-df5b-45ba-ab3c-25e38f06b2ed",
+        "model": "claude-opus-5"
+      },
+      "human_author": "thomashebrard <thomas@pipelex.com>"
+    }
+  }
+}
