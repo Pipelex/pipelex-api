@@ -1,0 +1,50 @@
+.claude/skills/release/SKILL.md
+  s_177b6af8a168a6::t_eff409da1d0755 57,66
+pyproject.toml
+  s_177b6af8a168a6::t_eff409da1d0755 3,19
+tests/unit/test_analytics_groups_extras.py
+  s_177b6af8a168a6::t_eff409da1d0755 1-164
+api/routes/pipelex/pipeline.py
+  s_177b6af8a168a6::t_eff409da1d0755 26,351-354,494-516,518-525,527,531,567-569,731,819
+api/security.py
+  s_177b6af8a168a6::t_eff409da1d0755 16,47-50,63-69
+docs/pipe-run.md
+  s_177b6af8a168a6::t_eff409da1d0755 41-42,120-121,280-304
+  s_177b6af8a168a6::t_9f2e3601db3567 305-307
+tests/unit/test_security_no_auth.py
+  s_177b6af8a168a6::t_eff409da1d0755 6,10
+tests/unit/test_pipeline_routes.py
+  s_177b6af8a168a6::t_eff409da1d0755 18,406-408,447-449
+api/schemas/models.py
+  s_177b6af8a168a6::t_eff409da1d0755 23,188-190,253-263,297,303-307,316,333-348,390,394,398-399,404
+api/error_types.py
+  s_177b6af8a168a6::t_eff409da1d0755 40-45
+.github/workflows/version-check.yml
+  s_177b6af8a168a6::t_eff409da1d0755 45-61
+tests/unit/test_security_verifiers.py
+  s_177b6af8a168a6::t_eff409da1d0755 9,13
+docs/error-responses.md
+  s_177b6af8a168a6::t_eff409da1d0755 135-136
+docs/openapi/pipelex-api.openapi.yaml
+  s_177b6af8a168a6::t_eff409da1d0755 14,512-526,530,537-539,786-800
+CHANGELOG.md
+  s_177b6af8a168a6::t_1cf8efc1304bc5 9-23
+uv.lock
+  s_177b6af8a168a6::t_7e1b90ee48998f 2314,2356,2358,2387,2439
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dae15c0b0f20afae16f4ea596c9892706f4ff3d8",
+  "prompts": {},
+  "sessions": {
+    "s_177b6af8a168a6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6d0cb6e4-df5b-45ba-ab3c-25e38f06b2ed",
+        "model": "claude-opus-5"
+      },
+      "human_author": "thomashebrard <thomas@pipelex.com>"
+    }
+  }
+}
