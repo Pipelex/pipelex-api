@@ -16,8 +16,8 @@ from api.errors import raise_validation_error
 from api.exception_handlers import problem_response_from_error_report
 from api.method_source import fetched_method_source
 from api.openapi_responses import PROBLEM_403_RUN_POLICY, PROBLEM_404_METHOD_PACKAGE
-from api.routes.pipelex.pipeline import ApiRunner
-from api.schemas.models import MthdsContentsRequest
+from api.routes.pipelex.pipeline import ApiRunner, get_request_user_id
+from api.schemas.models import CallerAnalyticsGroupsMixin, MthdsContentsRequest
 
 router = APIRouter(tags=["validate"])
 
@@ -68,7 +68,7 @@ def _resolve_validation_views(views: list[str]) -> set[ValidationView]:
     return {ValidationView(token) for token in views if token in supported_values}
 
 
-class ValidateRequest(MthdsContentsRequest):
+class ValidateRequest(MthdsContentsRequest, CallerAnalyticsGroupsMixin):
     """The shared `mthds_contents` + `allow_signatures` payload, plus optional per-file sources.
 
     `mthds_sources`, when provided, pairs each `mthds_contents[i]` with a logical source (e.g. the
@@ -354,6 +354,9 @@ async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSO
     # Opt-in structured views (D-D, the `views` axis): resolved once, applied to the valid arm only.
     # Empty by default → neither view field, response byte-identical to the no-`views` request.
     requested_views = _resolve_validation_views(request_data.views)
+    # The validation is done for the caller: its dry runs and `pipe_dry_run` event carry the
+    # authenticated user and the body's groups, exactly as a run of this request would.
+    user_id = get_request_user_id(request)
     # Verdict-as-value: the runner resolves the orchestration mode and dispatches through the bundle
     # validator registry, returning either a validation verdict or a classified fault report.
     # Only `ErrorReport`s with validation diagnostics are invalid-bundle verdicts (→ 200
@@ -370,7 +373,11 @@ async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSO
             # The manifest's declared entry pipe outranks the closure's own in the run/build default
             # chain, so it must reach `default_pipe_ref` — the report itself is manifest-blind.
             manifest_main_pipe = fetched.main_pipe
-            verdict = await ApiRunner(library_dirs=fetched.library_dirs).validate_verdict(
+            verdict = await ApiRunner(
+                library_dirs=fetched.library_dirs,
+                user_id=user_id,
+                analytics_groups=request_data.analytics_groups,
+            ).validate_verdict(
                 mthds_contents=fetched.mthds_contents,
                 mthds_sources=fetched.mthds_sources,
                 allow_signatures=request_data.allow_signatures,
@@ -380,7 +387,7 @@ async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSO
         validated_contents = request_data.mthds_contents
         # Inline contents carry no manifest, so the closure's own declaration is the whole chain.
         manifest_main_pipe = None
-        verdict = await ApiRunner().validate_verdict(
+        verdict = await ApiRunner(user_id=user_id, analytics_groups=request_data.analytics_groups).validate_verdict(
             mthds_contents=request_data.mthds_contents,
             mthds_sources=request_data.mthds_sources,
             allow_signatures=request_data.allow_signatures,

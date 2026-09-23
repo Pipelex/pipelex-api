@@ -255,11 +255,41 @@ _ANALYTICS_GROUPS_DESCRIPTION = (
     'telemetry belongs to, as a mapping of group type to group key (e.g. `{"organization": "org_acme"}`). '
     "The runtime never reads a key by name: it carries the mapping on the run and stamps it on every span as "
     "`pipelex.run.analytics_groups`, so every OpenTelemetry exporter receives it, and the deployment's own "
-    "PostHog stream, in `identified` mode, forwards it as the capture's groups. Pipelex's own Gateway telemetry "
-    "stream never receives it. Group types are lowercase snake_case starting with a letter, at most 32 characters; group keys "
+    "PostHog stream, in `identified` mode, forwards it as the capture's groups. What Pipelex's own Gateway telemetry "
+    "stream receives is the runtime's decision, not this server's: the pinned runtime forwards none of the host's "
+    "groups to it. Group types are lowercase snake_case starting with a letter, at most 32 characters; group keys "
     "are 1 to 128 characters from `[A-Za-z0-9_-]`; at most five entries. Omit it and the run belongs to no "
     "group, which is right for a single-tenant deployment."
 )
+
+_CALLER_ANALYTICS_GROUPS_DESCRIPTION = (
+    "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the host-supplied groups the caller of this request "
+    'belongs to, as a mapping of group type to group key (e.g. `{"organization": "org_acme"}`), exactly as a run '
+    "request states them. The work this request does is not a run, but it still emits telemetry — the validation "
+    "sweep's `pipe_dry_run` event and its dry runs — and that telemetry is attributed to the caller: the "
+    "authenticated user and these groups. Same rules and same 422 `InvalidAnalyticsGroups` refusal as on "
+    "`/execute` and `/start`. Omit it and the caller belongs to no group."
+)
+
+
+class CallerAnalyticsGroupsMixin(BaseModel):
+    """The optional `analytics_groups` of a request whose work is done for a caller without being a run.
+
+    `/validate` and `/build/runner` dry-run the submitted pipes, and the runtime attributes that
+    telemetry to the caller it is handed (`pipelex.system.caller_identity.CallerIdentity`). The user
+    comes from the trusted auth layer, as on a run; the groups come from the body, as on a run, and are
+    refused at the wire with the runtime's own rules.
+    """
+
+    analytics_groups: dict[str, str] | None = Field(default=None, description=_CALLER_ANALYTICS_GROUPS_DESCRIPTION)
+
+    @field_validator("analytics_groups")
+    @classmethod
+    def _validate_caller_analytics_groups(cls, value: dict[str, str] | None) -> dict[str, str] | None:
+        if value is None:
+            return None
+        return validate_analytics_groups(value=value)
+
 
 _ORCHESTRATION_MODE_DESCRIPTION = (
     "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — request the orchestration mode (the backend) "

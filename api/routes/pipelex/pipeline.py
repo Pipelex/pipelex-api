@@ -71,7 +71,7 @@ if TYPE_CHECKING:
 router = APIRouter(tags=["run"])
 
 
-def _get_user_id(request: Request) -> str:
+def get_request_user_id(request: Request) -> str:
     """The caller this run is attributed to, and the owner its storage is keyed by.
 
     **There is no `anonymous` fallback any more, and its removal is the point.**
@@ -113,7 +113,7 @@ def _resolve_storage_scope(request: Request, *, requested: str | None) -> str:
     rather than by accident, and a multi-tenant one that forgets to send a scope
     still isolates its callers.
     """
-    return requested or _get_user_id(request)
+    return requested or get_request_user_id(request)
 
 
 def _completion_signature(pipeline_run_id: str) -> str:
@@ -442,6 +442,9 @@ class ApiRunner(PipelexMTHDSProtocol):
             mthds_sources=mthds_sources,
             allow_signatures=allow_signatures,
             library_dirs=library_dirs,
+            # A validation is not a run, but its dry runs and its `pipe_dry_run` event are still
+            # done for the caller this runner was built for — the user and groups a run would state.
+            caller_identity=self.caller_identity,
         )
         # The core seam types its valid arm at the protocol-level ValidationReport (a leaf type)
         # to stay import-acyclic in core; every registered validator in fact produces the canonical
@@ -726,7 +729,7 @@ async def execute(request: Request) -> JSONResponse:
     run_request, extras = await _parse_request(request)
     with _run_source(run_request) as source:
         runner = ApiRunner(
-            user_id=_get_user_id(request),
+            user_id=get_request_user_id(request),
             storage_scope=_resolve_storage_scope(request, requested=extras.storage_scope),
             analytics_groups=extras.analytics_groups,
             library_dirs=source.library_dirs,
@@ -814,7 +817,7 @@ async def start(
     # context exit is safe for the async path.
     with _run_source(run_request) as source:
         runner = ApiRunner(
-            user_id=_get_user_id(request),
+            user_id=get_request_user_id(request),
             storage_scope=_resolve_storage_scope(request, requested=extras.storage_scope),
             analytics_groups=extras.analytics_groups,
             library_dirs=source.library_dirs,

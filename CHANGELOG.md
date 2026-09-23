@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **`analytics_groups` on `POST /v1/validate` and `POST /v1/build/runner`**: both routes dry-run the submitted pipes, and that telemetry — the `pipe_dry_run` event and the dry runs themselves — is now attributed to the caller: the authenticated user and the request's optional `analytics_groups`, which follow the same rules as on a run and are refused with the same `422` `InvalidAnalyticsGroups`. Before this, every validation on a hosted deployment reported under one constant id per deployment.
+
+### Changed
+
+- **`pipelex` resolves from the pipelex#1236 commit (temporary)**: the runtime is pinned to git commit `1a2ccb645f9d62275dcaa5a24f8047a3684934c2`, still version 0.63.0, because the caller a validation is done for is a required argument of the bundle-validator seam only there. It must be re-pinned to the published `pipelex` release before this ships; `version-check.yml` refuses a release while it resolves from git.
+
 ## [v0.27.1] - 2026-09-23
 
 ### Added
