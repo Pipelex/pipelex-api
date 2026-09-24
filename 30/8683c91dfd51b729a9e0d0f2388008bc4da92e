@@ -1,0 +1,21 @@
+pyproject.toml
+  s_c6484f6b49c956::t_84e21672777510 83
+uv.lock
+  s_c6484f6b49c956::t_52b06104785194 2315,2435
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "308683c91dfd51b729a9e0d0f2388008bc4da92e",
+  "prompts": {},
+  "sessions": {
+    "s_c6484f6b49c956": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_c6484f6b49c956",
+        "model": "unknown"
+      },
+      "human_author": "thomashebrard <thomas@pipelex.com>"
+    }
+  }
+}
