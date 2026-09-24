@@ -98,7 +98,7 @@ class TestAnalyticsGroupsReachTheRun:
 
         assert response.status_code == _SUCCESS_STATUS[route], response.text
         assert len(orchestrator.run_metadatas) == 1
-        assert orchestrator.run_metadatas[0].analytics_groups == groups
+        assert orchestrator.run_metadatas[0].extras == groups
 
     @pytest.mark.parametrize("route", _ROUTES)
     @pytest.mark.parametrize(
@@ -117,7 +117,7 @@ class TestAnalyticsGroupsReachTheRun:
 
         assert response.status_code == _SUCCESS_STATUS[route], response.text
         assert len(orchestrator.run_metadatas) == 1
-        assert orchestrator.run_metadatas[0].analytics_groups == {}
+        assert orchestrator.run_metadatas[0].extras == {}
 
     @pytest.mark.parametrize("route", _ROUTES)
     @pytest.mark.parametrize(

@@ -77,10 +77,10 @@ packages = ["api"]
 [tool.uv]
 required-version = ">=0.7.2"
 
-# TEMPORARY: pinned to the pipelex#1236 commit (feature/Runtime-events-always-carry) for the
+# TEMPORARY: pinned to the pipelex#1236 commit (feature/Runtime-events-always-carry, merged with #1237) for the
 # required `caller_identity` on `validate_bundles`. Re-pin to the pipelex release before merge.
 [tool.uv.sources]
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "1a2ccb645f9d62275dcaa5a24f8047a3684934c2" }
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "9d3ae4a3d6992303ed0fa9c52d256958ed856e56" }
 
 [tool.mypy]
 check_untyped_defs = true

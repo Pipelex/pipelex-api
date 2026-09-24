@@ -2312,7 +2312,7 @@ wheels = [
 [[package]]
 name = "pipelex"
 version = "0.63.0"
-source = { git = "https://github.com/Pipelex/pipelex.git?rev=1a2ccb645f9d62275dcaa5a24f8047a3684934c2#1a2ccb645f9d62275dcaa5a24f8047a3684934c2" }
+source = { git = "https://github.com/Pipelex/pipelex.git?rev=9d3ae4a3d6992303ed0fa9c52d256958ed856e56#9d3ae4a3d6992303ed0fa9c52d256958ed856e56" }
 dependencies = [
     { name = "aiofiles" },
     { name = "annotated-types" },
@@ -2432,7 +2432,7 @@ requires-dist = [
     { name = "mkdocs-meta-manager", marker = "extra == 'docs'", specifier = "==1.1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.2" },
     { name = "pandas-stubs", marker = "extra == 'dev'", specifier = ">=2.2.3.241126" },
-    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal"], git = "https://github.com/Pipelex/pipelex.git?rev=1a2ccb645f9d62275dcaa5a24f8047a3684934c2" },
+    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal"], git = "https://github.com/Pipelex/pipelex.git?rev=9d3ae4a3d6992303ed0fa9c52d256958ed856e56" },
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.3.8" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.405" },

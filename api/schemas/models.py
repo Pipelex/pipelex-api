@@ -20,7 +20,7 @@ from pipelex.core.pipes.pipe_output import PipeOutput
 from pipelex.methods.fetching import MethodProvenance
 from pipelex.pipeline.pipeline_response import PipelexRunResultExecute, PipelexRunResultStart
 from pipelex.reporting.usage_records import TokensUsageRecord
-from pipelex.system.analytics_groups import validate_analytics_groups
+from pipelex.system.run_extras import validate_run_extras
 from pipelex.system.storage_scope import validate_storage_scope
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.functional_validators import SkipValidation
@@ -253,11 +253,11 @@ _STORAGE_SCOPE_DESCRIPTION = (
 _ANALYTICS_GROUPS_DESCRIPTION = (
     "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the host-supplied groups this run's "
     'telemetry belongs to, as a mapping of group type to group key (e.g. `{"organization": "org_acme"}`). '
-    "The runtime never reads a key by name: it carries the mapping on the run and stamps it on every span as "
-    "`pipelex.run.analytics_groups`, so every OpenTelemetry exporter receives it, and the deployment's own "
+    "The runtime never reads a key by name: it carries the mapping on the run as its `extras` and stamps it on every span as "
+    "`pipelex.run.extras`, so every OpenTelemetry exporter receives it, and the deployment's own "
     "PostHog stream, in `identified` mode, forwards it as the capture's groups. What Pipelex's own Gateway telemetry "
-    "stream receives is the runtime's decision, not this server's: the pinned runtime forwards none of the host's "
-    "groups to it. Group types are lowercase snake_case starting with a letter, at most 32 characters; group keys "
+    "stream receives is the runtime's decision, not this server's: the pinned runtime attributes it the same way, "
+    "with the run's `user_id` and these groups. Group types are lowercase snake_case starting with a letter, at most 32 characters; group keys "
     "are 1 to 128 characters from `[A-Za-z0-9_-]`; at most five entries. Omit it and the run belongs to no "
     "group, which is right for a single-tenant deployment."
 )
@@ -288,7 +288,7 @@ class CallerAnalyticsGroupsMixin(BaseModel):
     def _validate_caller_analytics_groups(cls, value: dict[str, str] | None) -> dict[str, str] | None:
         if value is None:
             return None
-        return validate_analytics_groups(value=value)
+        return validate_run_extras(value=value)
 
 
 _ORCHESTRATION_MODE_DESCRIPTION = (
@@ -374,7 +374,7 @@ class PipelineApiExtras(BaseModel):
         """
         if value is None:
             return None
-        return validate_analytics_groups(value=value)
+        return validate_run_extras(value=value)
 
     @field_validator("callback_urls")
     @classmethod

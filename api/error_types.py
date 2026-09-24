@@ -41,7 +41,7 @@ class ErrorType(StrEnum):
     # 500 from deep in the run: the value becomes a storage key prefix, so a `..` escapes the tenant.
     INVALID_STORAGE_SCOPE = "InvalidStorageScope"
     # A run request's `analytics_groups` extra is not a mapping of group type to group key within
-    # the runtime's charset and entry cap (`pipelex.system.analytics_groups`).
+    # the runtime's charset and entry cap (`pipelex.system.run_extras`).
     INVALID_ANALYTICS_GROUPS = "InvalidAnalyticsGroups"
     INVALID_MODEL_CATEGORY = "InvalidModelCategory"
     INVALID_BASE64 = "InvalidBase64"

@@ -114,7 +114,7 @@ class TestValidationCallerIdentity:
         response = client.post("/v1/validate", json={"mthds_contents": [VALID_MTHDS], "analytics_groups": _GROUPS})
 
         assert response.status_code == 200, response.text
-        assert validator.caller_identities == [CallerIdentity(user_id=_USER_ID, analytics_groups=_GROUPS)]
+        assert validator.caller_identities == [CallerIdentity(user_id=_USER_ID, extras=_GROUPS)]
 
     @pytest.mark.parametrize(
         "extras",
@@ -134,7 +134,7 @@ class TestValidationCallerIdentity:
         response = client.post("/v1/validate", json={"mthds_contents": [VALID_MTHDS], **extras})
 
         assert response.status_code == 200, response.text
-        assert validator.caller_identities == [CallerIdentity(user_id=SINGLE_TENANT_USER_ID, analytics_groups={})]
+        assert validator.caller_identities == [CallerIdentity(user_id=SINGLE_TENANT_USER_ID, extras={})]
 
     def test_validate_by_method_ref_hands_the_validator_the_caller(self, mocker: MockerFixture, install_method_package: Callable[..., Path]) -> None:
         install_method_package(files={"documents.mthds": VALID_MTHDS})
@@ -144,7 +144,7 @@ class TestValidationCallerIdentity:
         response = client.post("/v1/validate", json={"method_ref": _METHOD_REF, "analytics_groups": _GROUPS})
 
         assert response.status_code == 200, response.text
-        assert validator.caller_identities == [CallerIdentity(user_id=_USER_ID, analytics_groups=_GROUPS)]
+        assert validator.caller_identities == [CallerIdentity(user_id=_USER_ID, extras=_GROUPS)]
 
     def test_direct_validate_reaches_the_in_process_sweep_with_the_caller(self, mocker: MockerFixture) -> None:
         # The deployment default (`direct`) through the real in-process validator: the caller must
@@ -157,7 +157,7 @@ class TestValidationCallerIdentity:
         assert response.status_code == 200, response.text
         assert response.json()["is_valid"] is True
         assert sweep.call_count == 1
-        assert _caller_of(sweep.call_args) == CallerIdentity(user_id=_USER_ID, analytics_groups=_GROUPS)
+        assert _caller_of(sweep.call_args) == CallerIdentity(user_id=_USER_ID, extras=_GROUPS)
 
     @pytest.mark.parametrize("bad_groups", _BAD_GROUPS)
     def test_validate_refuses_malformed_groups_with_a_422_naming_the_field(self, mocker: MockerFixture, bad_groups: Any) -> None:
@@ -203,7 +203,7 @@ class TestValidationCallerIdentity:
         assert response.status_code == 200, response.text
         assert response.json()["is_valid"] is True
         assert sweep.call_count == 1
-        assert _caller_of(sweep.call_args) == CallerIdentity(user_id=_USER_ID, analytics_groups=_GROUPS)
+        assert _caller_of(sweep.call_args) == CallerIdentity(user_id=_USER_ID, extras=_GROUPS)
 
     def test_build_runner_without_groups_or_user_states_the_single_tenant_caller(self, mocker: MockerFixture) -> None:
         sweep = mocker.patch(f"{_RUNNER_NS}.validate_bundle", wraps=validate_bundle)
@@ -212,7 +212,7 @@ class TestValidationCallerIdentity:
         response = client.post("/v1/build/runner", json={"files": [{"content": VALID_MTHDS}], "pipe_ref": "smoke.echo"})
 
         assert response.status_code == 200, response.text
-        assert _caller_of(sweep.call_args) == CallerIdentity(user_id=SINGLE_TENANT_USER_ID, analytics_groups={})
+        assert _caller_of(sweep.call_args) == CallerIdentity(user_id=SINGLE_TENANT_USER_ID, extras={})
 
     @pytest.mark.parametrize("bad_groups", _BAD_GROUPS)
     def test_build_runner_refuses_malformed_groups_with_a_422_naming_the_field(self, mocker: MockerFixture, bad_groups: Any) -> None:

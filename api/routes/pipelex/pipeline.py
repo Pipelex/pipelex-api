@@ -351,7 +351,7 @@ class ApiRunner(PipelexMTHDSProtocol):
             # The base `execute` threads this itself; `start` builds its job
             # here, so a group left out of this call is dropped with no error
             # and the run's spans lose their groups while the ack still says 202.
-            analytics_groups=self.analytics_groups,
+            extras=self.extras,
             pipeline_run_id=pipeline_run_id,
             request_id=request_id,
         )
@@ -731,7 +731,7 @@ async def execute(request: Request) -> JSONResponse:
         runner = ApiRunner(
             user_id=get_request_user_id(request),
             storage_scope=_resolve_storage_scope(request, requested=extras.storage_scope),
-            analytics_groups=extras.analytics_groups,
+            extras=extras.analytics_groups,
             library_dirs=source.library_dirs,
         )
         response = await runner.execute(
@@ -819,7 +819,7 @@ async def start(
         runner = ApiRunner(
             user_id=get_request_user_id(request),
             storage_scope=_resolve_storage_scope(request, requested=extras.storage_scope),
-            analytics_groups=extras.analytics_groups,
+            extras=extras.analytics_groups,
             library_dirs=source.library_dirs,
         )
         start_result = await runner.start(

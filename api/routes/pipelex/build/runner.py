@@ -171,7 +171,7 @@ async def build_runner(request: Request, request_data: BuildRunnerRequest) -> JS
             allow_signatures=request_data.allow_signatures,
             dry_run_pipe_codes=[request_data.pipe_ref] if request_data.pipe_ref else None,
             # The sweep is done for the caller, so its dry runs and `pipe_dry_run` event name them.
-            caller_identity=CallerIdentity.make_from_host(user_id=get_request_user_id(request), analytics_groups=request_data.analytics_groups),
+            caller_identity=CallerIdentity.make_from_host(user_id=get_request_user_id(request), extras=request_data.analytics_groups),
         )
     except ValidateBundleError as validate_error:
         return invalid_crate_report_response(validate_error.to_error_report())

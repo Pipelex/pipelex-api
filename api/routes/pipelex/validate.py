@@ -376,7 +376,7 @@ async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSO
             verdict = await ApiRunner(
                 library_dirs=fetched.library_dirs,
                 user_id=user_id,
-                analytics_groups=request_data.analytics_groups,
+                extras=request_data.analytics_groups,
             ).validate_verdict(
                 mthds_contents=fetched.mthds_contents,
                 mthds_sources=fetched.mthds_sources,
@@ -387,7 +387,7 @@ async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSO
         validated_contents = request_data.mthds_contents
         # Inline contents carry no manifest, so the closure's own declaration is the whole chain.
         manifest_main_pipe = None
-        verdict = await ApiRunner(user_id=user_id, analytics_groups=request_data.analytics_groups).validate_verdict(
+        verdict = await ApiRunner(user_id=user_id, extras=request_data.analytics_groups).validate_verdict(
             mthds_contents=request_data.mthds_contents,
             mthds_sources=request_data.mthds_sources,
             allow_signatures=request_data.allow_signatures,
