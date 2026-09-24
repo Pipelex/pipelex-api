@@ -518,12 +518,13 @@ paths:
                   title: Analytics Groups
                   description: 'PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the host-supplied groups this run''s
                     telemetry belongs to, as a mapping of group type to group key (e.g. `{"organization": "org_acme"}`). The
-                    runtime never reads a key by name: it carries the mapping on the run and stamps it on every span as `pipelex.run.analytics_groups`,
-                    so every OpenTelemetry exporter receives it, and the deployment''s own PostHog stream, in `identified`
-                    mode, forwards it as the capture''s groups. Pipelex''s own Gateway telemetry stream never receives it.
-                    Group types are lowercase snake_case starting with a letter, at most 32 characters; group keys are 1 to
-                    128 characters from `[A-Za-z0-9_-]`; at most five entries. Omit it and the run belongs to no group, which
-                    is right for a single-tenant deployment.'
+                    runtime never reads a key by name: it carries the mapping on the run as its `extras` and stamps it on
+                    every span as `pipelex.run.extras`, so every OpenTelemetry exporter receives it, and the deployment''s
+                    own PostHog stream, in `identified` mode, forwards it as the capture''s groups. What Pipelex''s own Gateway
+                    telemetry stream receives is the runtime''s decision, not this server''s: the pinned runtime attributes
+                    it the same way, with the run''s `user_id` and these groups. Group types are lowercase snake_case starting
+                    with a letter, at most 32 characters; group keys are 1 to 128 characters from `[A-Za-z0-9_-]`; at most
+                    five entries. Omit it and the run belongs to no group, which is right for a single-tenant deployment.'
               additionalProperties: true
               type: object
               title: PipelexApiExecuteRequest
@@ -792,12 +793,13 @@ paths:
                   title: Analytics Groups
                   description: 'PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the host-supplied groups this run''s
                     telemetry belongs to, as a mapping of group type to group key (e.g. `{"organization": "org_acme"}`). The
-                    runtime never reads a key by name: it carries the mapping on the run and stamps it on every span as `pipelex.run.analytics_groups`,
-                    so every OpenTelemetry exporter receives it, and the deployment''s own PostHog stream, in `identified`
-                    mode, forwards it as the capture''s groups. Pipelex''s own Gateway telemetry stream never receives it.
-                    Group types are lowercase snake_case starting with a letter, at most 32 characters; group keys are 1 to
-                    128 characters from `[A-Za-z0-9_-]`; at most five entries. Omit it and the run belongs to no group, which
-                    is right for a single-tenant deployment.'
+                    runtime never reads a key by name: it carries the mapping on the run as its `extras` and stamps it on
+                    every span as `pipelex.run.extras`, so every OpenTelemetry exporter receives it, and the deployment''s
+                    own PostHog stream, in `identified` mode, forwards it as the capture''s groups. What Pipelex''s own Gateway
+                    telemetry stream receives is the runtime''s decision, not this server''s: the pinned runtime attributes
+                    it the same way, with the run''s `user_id` and these groups. Group types are lowercase snake_case starting
+                    with a letter, at most 32 characters; group keys are 1 to 128 characters from `[A-Za-z0-9_-]`; at most
+                    five entries. Omit it and the run belongs to no group, which is right for a single-tenant deployment.'
               additionalProperties: true
               type: object
               title: PipelexApiStartRequest
@@ -2001,6 +2003,19 @@ components:
       title: BuildPipeSpecResponse
     BuildRunnerRequest:
       properties:
+        analytics_groups:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Analytics Groups
+          description: 'PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the host-supplied groups the caller of this
+            request belongs to, as a mapping of group type to group key (e.g. `{"organization": "org_acme"}`), exactly as
+            a run request states them. The work this request does is not a run, but it still emits telemetry — the validation
+            sweep''s `pipe_dry_run` event and its dry runs — and that telemetry is attributed to the caller: the authenticated
+            user and these groups. Same rules and same 422 `InvalidAnalyticsGroups` refusal as on `/execute` and `/start`.
+            Omit it and the caller belongs to no group.'
         files:
           anyOf:
           - items:
@@ -7479,6 +7494,19 @@ components:
         tool signature wants the output, and neither should pay for the other.'
     ValidateRequest:
       properties:
+        analytics_groups:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Analytics Groups
+          description: 'PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the host-supplied groups the caller of this
+            request belongs to, as a mapping of group type to group key (e.g. `{"organization": "org_acme"}`), exactly as
+            a run request states them. The work this request does is not a run, but it still emits telemetry — the validation
+            sweep''s `pipe_dry_run` event and its dry runs — and that telemetry is attributed to the caller: the authenticated
+            user and these groups. Same rules and same 422 `InvalidAnalyticsGroups` refusal as on `/execute` and `/start`.
+            Omit it and the caller belongs to no group.'
         mthds_contents:
           anyOf:
           - items:
