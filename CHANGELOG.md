@@ -8,7 +8,8 @@
 
 ### Changed
 
-- **`pipelex` resolves from the pipelex#1236 commit (temporary)**: the runtime is pinned to git commit `1a2ccb645f9d62275dcaa5a24f8047a3684934c2`, still version 0.63.0, because the caller a validation is done for is a required argument of the bundle-validator seam only there. It must be re-pinned to the published `pipelex` release before this ships; `version-check.yml` refuses a release while it resolves from git.
+- **Pinned `pipelex` 0.64.0**: up from `==0.63.0`, exactly, because the caller a validation is done for is a required argument of the runtime's bundle-validator seam from that release on, and the runtime now carries a run's caller context as `extras`, which the `analytics_groups` wire field maps onto. Nothing else on the wire moves and the `.pipelex/` config schema did not move, so no migration is required.
+- **`POST /v1/codegen` stamps `engine_version` `0.64.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.63.0` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
 
 ## [v0.27.1] - 2026-09-23
 
