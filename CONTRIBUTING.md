@@ -41,6 +41,19 @@ make install
 cp .env.example .env
 $EDITOR .env
 
+# Choose that provider with two git-ignored overrides in .pipelex/inference/:
+# the routing profile, and its backend switched on with the Pipelex Gateway off.
+# OpenRouter shown; `make run`, `make docker-run` and `make docker-run-hub` all
+# pick them up.
+echo 'active = "all_openrouter"' > .pipelex/inference/routing_profiles_override.toml
+cat > .pipelex/inference/backends_override.toml <<'EOF'
+[pipelex_gateway]
+enabled = false
+
+[openrouter]
+enabled = true
+EOF
+
 # Run the API locally (hot reload)
 make run
 

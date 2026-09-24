@@ -9,6 +9,13 @@ HUB_IMAGE       := $(HUB_IMAGE_NAME):$(HUB_TAG)
 ENV_FILE        ?= .env
 CONTAINER_NAME  ?= pipelex-api
 
+# Your inference provider choice, kept in the checkout's .pipelex/inference/ (both names are
+# git-ignored): routing_profiles_override.toml selects the profile, backends_override.toml
+# switches its backend on and the Pipelex Gateway off. `make run` reads them from there; the
+# docker targets mount each one that exists, so all three run on the same provider.
+INFERENCE_OVERRIDE_FILES  := routing_profiles_override.toml backends_override.toml
+INFERENCE_OVERRIDE_MOUNTS = $(foreach file,$(INFERENCE_OVERRIDE_FILES),$(if $(wildcard .pipelex/inference/$(file)),-v "$(CURDIR)/.pipelex/inference/$(file):/root/.pipelex/inference/$(file):ro"))
+
 define HELP_LOCAL
 	$(GREEN)Run the API locally — two ways:$(RESET)
 
@@ -59,8 +66,9 @@ docker-build:
 	docker build --platform linux/amd64 -t $(LOCAL_IMAGE) .
 
 # Run the API on http://localhost:8081, foreground. Reads all env from .env.
-# Required: one inference provider key matching your active routing profile
-# (e.g. OPENROUTER_API_KEY with `all_openrouter`) — see .env.example.
+# Required: one inference provider key in .env (e.g. OPENROUTER_API_KEY), plus
+# the two inference overrides in .pipelex/inference/ that select its profile and
+# switch its backend on (see INFERENCE_OVERRIDE_FILES above and .env.example).
 # Optional: AUTH_MODE, API_KEY, JWT_SECRET_KEY (see .env.example).
 docker-run: docker-build
 	@docker rm -f $(CONTAINER_NAME) 2>/dev/null || true
@@ -68,12 +76,14 @@ docker-run: docker-build
 	@echo "\n=== Run $(LOCAL_IMAGE) on http://localhost:8081  —  Ctrl+C to stop ==="
 	docker run --rm --name $(CONTAINER_NAME) -p 8081:8081 \
 		--env-file $(ENV_FILE) \
+		$(INFERENCE_OVERRIDE_MOUNTS) \
 		$(LOCAL_IMAGE)
 
 # Pull and run the PUBLISHED image from Docker Hub — no local checkout/build needed.
-# Same env contract as docker-run (reads all env from .env).
-# Required: one inference provider key matching your active routing profile
-# (e.g. OPENROUTER_API_KEY with `all_openrouter`) — see .env.example.
+# Same env and override contract as docker-run (reads all env from .env).
+# Required: one inference provider key in .env (e.g. OPENROUTER_API_KEY), plus
+# the two inference overrides in .pipelex/inference/ that select its profile and
+# switch its backend on (see INFERENCE_OVERRIDE_FILES above and .env.example).
 # Optional: AUTH_MODE, API_KEY, JWT_SECRET_KEY (see .env.example).
 # Override the published tag with HUB_TAG, e.g. make docker-run-hub HUB_TAG=0.5.0
 docker-run-hub:
@@ -84,6 +94,7 @@ docker-run-hub:
 	@echo "\n=== Run $(HUB_IMAGE) on http://localhost:8081  —  Ctrl+C to stop ==="
 	docker run --rm --name $(CONTAINER_NAME) -p 8081:8081 \
 		--env-file $(ENV_FILE) \
+		$(INFERENCE_OVERRIDE_MOUNTS) \
 		$(HUB_IMAGE)
 
 docker-stop:

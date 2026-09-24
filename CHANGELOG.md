@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **The documented minimum to boot is your own provider key, not a Pipelex Gateway key**: the README, `docs/index.md`, `docs/configuration.md`, `CONTRIBUTING.md`, `.env.example`, `docker-compose.yml` and the `make docker-run*` targets no longer present `PIPELEX_GATEWAY_API_KEY` as the image's one required variable. You bring your own inference credential — one per provider you call, or a single `OPENROUTER_API_KEY` to reach many models at once — and choose that provider with two override files in `/root/.pipelex/inference/`, `routing_profiles_override.toml` naming the matching profile and `backends_override.toml` switching that backend on and the Pipelex Gateway off, because the image refuses to boot while a switched-on backend lacks its key or while the active profile names a switched-off one; `docker-compose.yml` mounts both files, and `make docker-run` and `make docker-run-hub` mount them from the checkout's `.pipelex/inference/`, where they are now git-ignored. A new "Choosing your inference provider" section in `docs/configuration.md` lists, for each shipped profile, the backend to switch on and the variables it reads, and covers the model names to use under your own key, per-model routing, a local model server and the hosted Pipelex API for anyone who would rather not hold provider keys at all.
+
 ## [v0.27.3] - 2026-09-24
 
 ### Changed
@@ -17,7 +23,6 @@
 
 - **Pinned `pipelex` 0.64.0**: up from `==0.63.0`, exactly, because the caller a validation is done for is a required argument of the runtime's bundle-validator seam from that release on, and the runtime now carries a run's caller context as `extras`, which the `analytics_groups` wire field maps onto. Nothing else on the wire moves and the `.pipelex/` config schema did not move, so no migration is required.
 - **`POST /v1/codegen` stamps `engine_version` `0.64.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.63.0` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
-- **The documented minimum to boot is your own provider key, not a Pipelex Gateway key**: the README, `docs/index.md`, `docs/configuration.md`, `CONTRIBUTING.md`, `.env.example` and the `make docker-run*` targets no longer present `PIPELEX_GATEWAY_API_KEY` as the image's one required variable. You bring your own inference credential — one env var per provider you call, or a single `OPENROUTER_API_KEY` to reach many models at once — and name the routing profile that matches it with a one-line `inference/routing_profiles_override.toml`. A new "Choosing your inference provider" section in `docs/configuration.md` maps each shipped profile to the variable it reads, covers per-model routing and a local model server, and points at the hosted Pipelex API for anyone who would rather not hold provider keys at all. It also says that a key on its own is not enough — the backend has to carry `enabled = true`, since a profile naming one that is not enabled is refused at boot — and links to the provider-configuration page rather than the documentation root.
 
 ## [v0.27.1] - 2026-09-23
 

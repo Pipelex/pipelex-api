@@ -45,24 +45,33 @@ The published image is **generic and configuration-light**: Temporal is off, no 
 
 ### 1. Run with Docker
 
-The image needs one credential: an API key for the inference provider you want your pipelines to call. You bring your own — `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `MISTRAL_API_KEY`, `XAI_API_KEY`, … one per provider — or a single [OpenRouter](https://openrouter.ai/) key, `OPENROUTER_API_KEY`, which reaches many models through one credential. Two things have to agree: the key you pass, and the **routing profile** that decides which backend serves a model.
+The image needs one credential: an API key for the inference provider you want your pipelines to call. You bring your own — `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `MISTRAL_API_KEY`, `XAI_API_KEY`, … one per provider — or a single [OpenRouter](https://openrouter.ai/) key, `OPENROUTER_API_KEY`, which reaches many models through one credential. Three things have to agree: the key you pass, the **routing profile** that decides which backend serves a model, and the **backends** that are switched on. Out of the box the image routes every model to the Pipelex Gateway, the only inference backend it switches on, and it refuses to boot while a switched-on backend is missing its key or while the active profile names a backend that is switched off. So you choose your provider with two small override files.
 
-The shortest path is OpenRouter. Write a one-line routing override next to your `docker-compose.yml` or in your working directory:
+The shortest path is OpenRouter. Write both files next to your `docker-compose.yml` or in your working directory — one selects the `all_openrouter` routing profile, the other switches the `openrouter` backend on and the Pipelex Gateway off:
 
 ```bash
 echo 'active = "all_openrouter"' > routing_profiles_override.toml
+
+cat > backends_override.toml <<'EOF'
+[pipelex_gateway]
+enabled = false
+
+[openrouter]
+enabled = true
+EOF
 ```
 
-Then run the image with your key and that override mounted:
+Then run the image with your key and both overrides mounted:
 
 ```bash
 docker run --name pipelex-api -p 8081:8081 \
   -e OPENROUTER_API_KEY=your-openrouter-key \
   -v "$(pwd)/routing_profiles_override.toml:/root/.pipelex/inference/routing_profiles_override.toml:ro" \
+  -v "$(pwd)/backends_override.toml:/root/.pipelex/inference/backends_override.toml:ro" \
   pipelex/pipelex-api:latest
 ```
 
-For a single provider instead, pass that provider's key and name its profile — `all_openai`, `all_anthropic`, `all_google`, `all_mistral`, `all_bedrock`, `all_vertexai`, `all_ollama`, … See [docs/configuration.md](docs/configuration.md#choosing-your-inference-provider) for the full list, for per-model routing, and for running against a local model server with no API key at all.
+For a single provider instead, pass that provider's key, name its profile — `all_openai`, `all_anthropic`, `all_google`, `all_mistral`, `all_bedrock`, `all_vertexai`, `all_ollama`, … — and switch its backend on in `backends_override.toml` in place of `openrouter`. See [docs/configuration.md](docs/configuration.md#choosing-your-inference-provider) for the full list with the variables each backend reads, for the model names to use under your own key, for per-model routing, and for running against a local model server with no API key at all.
 
 **Don't want to manage provider keys?** Run your methods on the hosted Pipelex API at `api.pipelex.com` with a Pipelex API key instead of self-hosting this image — sign up at [app.pipelex.com](https://app.pipelex.com) and see [Configure AI Providers](https://docs.pipelex.com/latest/get-started/configure-ai-providers/).
 

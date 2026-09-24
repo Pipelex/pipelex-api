@@ -35,14 +35,23 @@ Deploy the Pipelex API anywhere that runs Docker (your laptop, ECS, Cloud Run, K
 
 ### 1. Run with Docker
 
-You bring your own inference credential. Pass the API key of whichever provider you want your pipelines to call — `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `MISTRAL_API_KEY`, … one per provider — or a single [OpenRouter](https://openrouter.ai/) key, `OPENROUTER_API_KEY`, which reaches many models through one credential. The key has to be matched by a **routing profile** that sends models to that backend, which you set with a one-line override file (see [Configuration → Choosing your inference provider](configuration.md#choosing-your-inference-provider)):
+You bring your own inference credential. Pass the API key of whichever provider you want your pipelines to call — `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `MISTRAL_API_KEY`, … one per provider — or a single [OpenRouter](https://openrouter.ai/) key, `OPENROUTER_API_KEY`, which reaches many models through one credential. The key has to be matched by a **routing profile** that sends models to that backend, and that backend has to be switched on. Out of the box the image routes every model to the Pipelex Gateway, the only inference backend it switches on, and it refuses to boot while a switched-on backend is missing its key or while the active profile names a backend that is switched off, so you set both with two small override files (see [Configuration → Choosing your inference provider](configuration.md#choosing-your-inference-provider)):
 
 ```bash
 echo 'active = "all_openrouter"' > routing_profiles_override.toml
 
+cat > backends_override.toml <<'EOF'
+[pipelex_gateway]
+enabled = false
+
+[openrouter]
+enabled = true
+EOF
+
 docker run --name pipelex-api -p 8081:8081 \
   -e OPENROUTER_API_KEY=your-openrouter-key \
   -v "$(pwd)/routing_profiles_override.toml:/root/.pipelex/inference/routing_profiles_override.toml:ro" \
+  -v "$(pwd)/backends_override.toml:/root/.pipelex/inference/backends_override.toml:ro" \
   pipelex/pipelex-api:latest
 ```
 
@@ -108,6 +117,9 @@ Authorization: Bearer YOUR_API_KEY
 
 ```bash
 docker run --name pipelex-api -p 8081:8081 \
+  -e OPENROUTER_API_KEY=your-openrouter-key \
+  -v "$(pwd)/routing_profiles_override.toml:/root/.pipelex/inference/routing_profiles_override.toml:ro" \
+  -v "$(pwd)/backends_override.toml:/root/.pipelex/inference/backends_override.toml:ro" \
   -e AUTH_MODE=api_key \
   -e API_KEY=your-api-key \
   pipelex/pipelex-api:latest
@@ -119,6 +131,9 @@ Set `AUTH_MODE=jwt` and provide the `JWT_SECRET_KEY` environment variable:
 
 ```bash
 docker run --name pipelex-api -p 8081:8081 \
+  -e OPENROUTER_API_KEY=your-openrouter-key \
+  -v "$(pwd)/routing_profiles_override.toml:/root/.pipelex/inference/routing_profiles_override.toml:ro" \
+  -v "$(pwd)/backends_override.toml:/root/.pipelex/inference/backends_override.toml:ro" \
   -e AUTH_MODE=jwt \
   -e JWT_SECRET_KEY=your-jwt-secret-key \
   pipelex/pipelex-api:latest

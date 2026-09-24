@@ -13,7 +13,12 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
-    # Optional: mount your own Pipelex configuration to override the defaults
-    # baked into the image. See docs/configuration.md for details.
-    # volumes:
-    #   - ./.pipelex:/root/.pipelex:ro
+    volumes:
+      # Your inference provider: the routing profile to use, and its backend
+      # switched on with the Pipelex Gateway off. Write both files next to this
+      # one first — see docs/configuration.md, "Choosing your inference provider".
+      - ./routing_profiles_override.toml:/root/.pipelex/inference/routing_profiles_override.toml:ro
+      - ./backends_override.toml:/root/.pipelex/inference/backends_override.toml:ro
+      # Optional: mount your own Pipelex configuration to override the defaults
+      # baked into the image. See docs/configuration.md for details.
+      # - ./.pipelex:/root/.pipelex:ro

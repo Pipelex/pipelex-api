@@ -13,7 +13,8 @@ The API reads its settings from environment variables. With Docker, the easiest 
 ```bash
 # Your inference provider key — one per provider you call, or a single
 # OpenRouter key to reach many models at once. Which one you need is decided by
-# the active routing profile: see "Choosing your inference provider" below.
+# the active routing profile and the backends it switches on, set by two
+# override files: see "Choosing your inference provider" below.
 OPENROUTER_API_KEY=your-openrouter-key
 # OPENAI_API_KEY=...
 # ANTHROPIC_API_KEY=...
@@ -59,7 +60,7 @@ Pipelex config TOML files can reference env vars via `${VAR}` substitution — t
 
 ### Setting env vars in Docker
 
-You have three idiomatic options. Pick whichever fits your workflow — they all do the same thing.
+You have three idiomatic options. Pick whichever fits your workflow — they all do the same thing. Every sample below also mounts the two inference override files described in [Choosing your inference provider](#choosing-your-inference-provider), which the image needs beside your key; they are assumed to sit in the current directory.
 
 **Option 1 — `.env` file (recommended).** Edit your `.env` and pass it to the container with `--env-file`. Best for long-lived deployments and when you want the config in version control next to your `docker-compose.yml`.
 
@@ -72,7 +73,10 @@ API_KEY=your-strong-secret
 ```
 
 ```bash
-docker run --name pipelex-api -p 8081:8081 --env-file .env pipelex/pipelex-api:latest
+docker run --name pipelex-api -p 8081:8081 --env-file .env \
+  -v "$(pwd)/routing_profiles_override.toml:/root/.pipelex/inference/routing_profiles_override.toml:ro" \
+  -v "$(pwd)/backends_override.toml:/root/.pipelex/inference/backends_override.toml:ro" \
+  pipelex/pipelex-api:latest
 ```
 
 **Option 2 — Inline `-e` flags on `docker run`.** Best for one-off overrides or quickly testing a single value without editing files.
@@ -81,6 +85,8 @@ docker run --name pipelex-api -p 8081:8081 --env-file .env pipelex/pipelex-api:l
 docker run --name pipelex-api -p 8081:8081 \
   -e OPENROUTER_API_KEY=your-openrouter-key \
   -e MAX_REQUEST_BODY_MIB=200 \
+  -v "$(pwd)/routing_profiles_override.toml:/root/.pipelex/inference/routing_profiles_override.toml:ro" \
+  -v "$(pwd)/backends_override.toml:/root/.pipelex/inference/backends_override.toml:ro" \
   pipelex/pipelex-api:latest
 ```
 
@@ -94,6 +100,9 @@ services:
     env_file: .env                # for shared values + secrets
     environment:                  # for explicit per-service overrides
       MAX_REQUEST_BODY_MIB: "200"
+    volumes:
+      - ./routing_profiles_override.toml:/root/.pipelex/inference/routing_profiles_override.toml:ro
+      - ./backends_override.toml:/root/.pipelex/inference/backends_override.toml:ro
 ```
 
 You can mix `env_file:` and `environment:` — values in `environment:` win.
@@ -119,43 +128,76 @@ For the schema and meaning of every key in these files, see https://docs.pipelex
 
 ## Choosing your inference provider
 
-The image ships no inference credential of its own: you bring your own provider API key. Two things have to agree — **the key you pass in the environment**, and **the routing profile** that decides which backend serves a model.
+The image ships no inference credential of its own: you bring your own provider API key. Three things have to agree — **the key you pass in the environment**, **the routing profile** that decides which backend serves a model, and **the backends that are switched on**. Out of the box the image routes every model to the Pipelex Gateway, the only inference backend it switches on, and the runtime refuses to boot in two cases: a backend that is switched on while a variable it reads is unset (the gateway reads `PIPELEX_GATEWAY_API_KEY`), and an active profile whose backend is switched off. So choosing your provider always takes two override files, mounted into `/root/.pipelex/inference/`:
+
+- `routing_profiles_override.toml` selects the profile, with `active = "all_<backend>"`.
+- `backends_override.toml` switches that backend on and the Pipelex Gateway off.
 
 **One key for many models.** An [OpenRouter](https://openrouter.ai/) key reaches models from many providers through a single credential, which makes it the shortest path to a working server:
 
-```bash
+```toml
 # routing_profiles_override.toml
 active = "all_openrouter"
+```
+
+```toml
+# backends_override.toml
+[pipelex_gateway]
+enabled = false
+
+[openrouter]
+enabled = true
 ```
 
 ```bash
 docker run --name pipelex-api -p 8081:8081 \
   -e OPENROUTER_API_KEY=your-openrouter-key \
   -v "$(pwd)/routing_profiles_override.toml:/root/.pipelex/inference/routing_profiles_override.toml:ro" \
+  -v "$(pwd)/backends_override.toml:/root/.pipelex/inference/backends_override.toml:ro" \
   pipelex/pipelex-api:latest
 ```
 
-**One key per provider.** Call a provider directly by naming its profile and passing that provider's own env var. The backend also has to be switched on (`enabled = true` in `inference/backends.toml`), since a profile naming a backend that is not enabled is refused at boot — see [Configure AI Providers](https://docs.pipelex.com/latest/get-started/configure-ai-providers/). The profiles ship in `inference/routing_profiles.toml` and the env var each backend reads is declared in `inference/backends.toml`:
+**One key per provider.** Call a provider directly by naming its profile, switching its backend on in `backends_override.toml` in place of `[openrouter]` (keep the `[pipelex_gateway]` table that switches the gateway off), and passing the variables that backend reads. The profiles ship in `inference/routing_profiles.toml` and the variables each backend reads are declared in `inference/backends.toml`; see also [Configure AI Providers](https://docs.pipelex.com/latest/get-started/configure-ai-providers/).
 
-| Profile | Env var it needs |
-| --- | --- |
-| `all_openrouter` | `OPENROUTER_API_KEY` |
-| `all_openai` | `OPENAI_API_KEY` |
-| `all_anthropic` | `ANTHROPIC_API_KEY` |
-| `all_google` | `GOOGLE_API_KEY` |
-| `all_mistral` | `MISTRAL_API_KEY` |
-| `all_xai` | `XAI_API_KEY` |
-| `all_groq` | `GROQ_API_KEY` |
-| `all_azure_openai` | `AZURE_API_KEY` (plus the endpoint keys the backend declares) |
-| `all_bedrock` | the AWS credentials your environment already provides |
-| `all_vertexai` | the Google Cloud credentials your environment already provides |
-| `all_ollama` | none — a local model server |
+| Profile | Table to switch on in `backends_override.toml` | Variables it reads |
+| --- | --- | --- |
+| `all_openrouter` | `[openrouter]` | `OPENROUTER_API_KEY` |
+| `all_openai` | `[openai]` | `OPENAI_API_KEY` |
+| `all_anthropic` | `[anthropic]` | `ANTHROPIC_API_KEY` |
+| `all_google` | `[google]` | `GOOGLE_API_KEY` |
+| `all_mistral` | `[mistral]` | `MISTRAL_API_KEY` |
+| `all_xai` | `[xai]` | `XAI_API_KEY` |
+| `all_groq` | `[groq]` | `GROQ_API_KEY` |
+| `all_azure_openai` | `[azure_openai]` | `AZURE_API_KEY`, `AZURE_API_BASE` and `AZURE_API_VERSION` |
+| `all_bedrock` | `[bedrock]` | `AWS_REGION`, plus `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` |
+| `all_vertexai` | `[vertexai]` | `GCP_PROJECT_ID`, `GCP_LOCATION` and `GCP_CREDENTIALS_FILE_PATH`, the path inside the container of a service-account JSON file you mount |
+| `all_ollama` | `[ollama]`, with its `endpoint` (see "No provider keys at all" below) | none |
 
-**Mixing providers.** A profile can route per model instead of sending everything to one backend: give it a `default` and a `[profiles.<name>.routes]` table keyed by model handle or pattern. `inference/routing_profiles.toml` carries worked examples, and every backend whose models a profile routes to must be enabled and have its key present. See the [inference backend reference](https://docs.pipelex.com/latest/configuration/config-technical/inference-backend-config/) for the full routing reference.
+**Model names under your own key.** The model deck shipped in the image points its aliases and presets (`@default-general`, `$writing-factual`, …) at the GPT-5.6 range, which only the Pipelex Gateway serves. Under any other profile the server boots, but a pipe that relies on those names fails at run time with `Model handle 'gpt-5.6-terra' was not found in the model deck`. Name a model your backend lists instead — each backend's list is `inference/backends/<backend>.toml` in this repository, shipped at `/root/.pipelex/inference/backends/` in the image, and OpenRouter's are named like `openai/gpt-5-mini` or `anthropic/claude-sonnet-4.6` — or repoint the aliases you use in a deck override mounted at `/root/.pipelex/inference/deck/x_custom_llm_deck.toml`:
 
-**No provider keys at all.** Point Pipelex at a local model server (Ollama, vLLM, LM Studio, llama.cpp) with the `all_ollama` profile and its base URL — or skip self-hosting and run your methods on the hosted Pipelex API at `api.pipelex.com` with a Pipelex API key from [app.pipelex.com](https://app.pipelex.com).
+```toml
+# x_custom_llm_deck.toml
+[llm.aliases]
+default-general = "openai/gpt-5-mini"
+```
 
-> `routing_profiles_override.toml` and `backends_override.toml` are deep-merged on top of the files shipped in the image, so an override only has to carry the keys it changes — you never copy the whole file. Mount them into `/root/.pipelex/inference/` exactly like any other override (see "Providing your own configuration to Docker" below).
+**Mixing providers.** A profile can route per model instead of sending everything to one backend: give it a `default` and a `[profiles.<name>.routes]` table keyed by model handle or pattern. `inference/routing_profiles.toml` carries worked examples, and every backend whose models a profile routes to must be switched on in `backends_override.toml` and have its variables set. See the [inference backend reference](https://docs.pipelex.com/latest/configuration/config-technical/inference-backend-config/) for the full routing reference.
+
+**No provider keys at all.** Point Pipelex at a local model server (Ollama, vLLM, LM Studio, llama.cpp) with the `all_ollama` profile. The `ollama` backend's shipped endpoint, `http://localhost:11434/v1`, is the container itself once inside Docker, so `backends_override.toml` also points it at your host:
+
+```toml
+# backends_override.toml
+[pipelex_gateway]
+enabled = false
+
+[ollama]
+enabled = true
+endpoint = "http://host.docker.internal:11434/v1"
+```
+
+`host.docker.internal` resolves on Docker Desktop; on Linux, add `--add-host=host.docker.internal:host-gateway` to `docker run`. Or skip self-hosting and run your methods on the hosted Pipelex API at `api.pipelex.com` with a Pipelex API key from [app.pipelex.com](https://app.pipelex.com).
+
+> `routing_profiles_override.toml` and `backends_override.toml` are deep-merged on top of the files shipped in the image, so an override only has to carry the keys it changes — you never copy the whole file. Mount them into `/root/.pipelex/inference/` exactly like any other override (see "Providing your own configuration to Docker" below). Running the API natively with `make run`, put them in the checkout's `.pipelex/inference/` instead (both names are git-ignored), or in `~/.pipelex/inference/` to apply them to every project on your machine.
 
 ## Orchestration mode
 
@@ -250,7 +292,9 @@ Use this when you want full control — for example, to ship your own inference 
 ```bash
 docker run --name pipelex-api -p 8081:8081 \
   --env-file .env \
-  -v $(pwd)/pipelex_override.toml:/root/.pipelex/pipelex_override.toml:ro \
+  -v "$(pwd)/routing_profiles_override.toml:/root/.pipelex/inference/routing_profiles_override.toml:ro" \
+  -v "$(pwd)/backends_override.toml:/root/.pipelex/inference/backends_override.toml:ro" \
+  -v "$(pwd)/pipelex_override.toml:/root/.pipelex/pipelex_override.toml:ro" \
   pipelex/pipelex-api:latest
 ```
 
@@ -270,6 +314,16 @@ OPENROUTER_API_KEY=your-openrouter-key
 active = "all_openrouter"
 ```
 
+`backends_override.toml`:
+
+```toml
+[pipelex_gateway]
+enabled = false
+
+[openrouter]
+enabled = true
+```
+
 `docker-compose.yml`:
 
 ```yaml
@@ -280,6 +334,7 @@ services:
     env_file: .env
     volumes:
       - ./routing_profiles_override.toml:/root/.pipelex/inference/routing_profiles_override.toml:ro
+      - ./backends_override.toml:/root/.pipelex/inference/backends_override.toml:ro
 ```
 
 `docker compose up`, then `curl http://localhost:8081/health`.
