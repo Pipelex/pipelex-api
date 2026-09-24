@@ -1,0 +1,51 @@
+CHANGELOG.md
+  s_177b6af8a168a6::t_055fbc3ec7fe5c 5-8,11-12
+api/error_types.py
+  s_177b6af8a168a6::t_29b711cc63c14f 44
+api/exception_handlers.py
+  s_177b6af8a168a6::t_1f33290db59c35 566-591,610
+api/routes/pipelex/build/runner.py
+  s_177b6af8a168a6::t_51dd991f2a28ec 3,22,37-38,43,138,173-174
+api/routes/pipelex/pipeline.py
+  s_177b6af8a168a6::t_e1617394e2c2dc 74,116,354,445-447,732,734,820,822
+api/routes/pipelex/validate.py
+  s_177b6af8a168a6::t_e19273c22438d8 19-20,71,357-359,376-380,390
+api/schemas/models.py
+  s_177b6af8a168a6::t_a5041b45bb560a 23,256-260,265-293,377
+docs/error-responses.md
+  s_177b6af8a168a6::t_09156d7937194c 135
+docs/openapi/pipelex-api.openapi.yaml
+  s_177b6af8a168a6::t_264a9cf0720d50 521-527,796-802,2006-2018,7497-7509
+docs/pipe-builder.md
+  s_177b6af8a168a6::t_ccf04ee9d55991 158
+docs/pipe-run.md
+  s_177b6af8a168a6::t_2a13439ac8c60d 295
+docs/pipe-validate.md
+  s_177b6af8a168a6::t_0cffa56c2ca09b 26,157-160,169
+pyproject.toml
+  s_177b6af8a168a6::t_345a6067a4d342 19
+tests/unit/test_analytics_groups_extras.py
+  s_177b6af8a168a6::t_03e796206806bc 101,120
+tests/unit/test_validate_caller_identity.py
+  s_177b6af8a168a6::t_78ee87a19748ca 1-231
+tests/unit/test_validate_dispatch.py
+  s_177b6af8a168a6::t_f376882f6822f4 23,50,58
+uv.lock
+  s_177b6af8a168a6::t_bd486e55f79f71 2314,2356,2358,2439
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "233dd9eded4c82528016c2dbc50120ba75d19bd1",
+  "prompts": {},
+  "sessions": {
+    "s_177b6af8a168a6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6d0cb6e4-df5b-45ba-ab3c-25e38f06b2ed",
+        "model": "claude-opus-5"
+      },
+      "human_author": "thomashebrard <thomas@pipelex.com>"
+    }
+  }
+}
