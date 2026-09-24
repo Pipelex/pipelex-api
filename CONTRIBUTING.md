@@ -35,8 +35,9 @@ cd pipelex-api
 # Install dependencies (creates .venv and installs runtime + dev extras)
 make install
 
-# Configure environment — only PIPELEX_GATEWAY_API_KEY is required.
-# Get a free key (with free credits) at https://app.pipelex.com.
+# Configure environment — you need one inference provider key: your own key
+# per provider, or a single OpenRouter key for many models at once. See
+# docs/configuration.md -> "Choosing your inference provider".
 cp .env.example .env
 $EDITOR .env
 

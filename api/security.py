@@ -26,7 +26,7 @@ JWT_ALGORITHM = "HS256"
 # URI and S3 key (`<user_id>/...`). The runner treats it as an OPAQUE id and
 # does NOT validate its identity/shape: a self-hosted deployment may use any id
 # scheme (uuid, `user_<uuid>`, …), and a hosted deployment behind a trusted
-# proxy receives the *authenticated* id the gateway injects (derived from the
+# proxy receives the *authenticated* id that proxy injects (derived from the
 # JWT / API key — never client-chosen). The only constraint is that the id be a
 # single, UNAMBIGUOUS path segment, because it is embedded into a
 # `pipelex-storage://<user_id>/...` URI / S3 key:
@@ -220,7 +220,7 @@ async def no_auth(request: Request) -> None:
 
     With no trusted proxy configured this binds no identity, and the deployment
     is treated as single-tenant (see `SINGLE_TENANT_USER_ID`). If the API sits behind a trusted
-    reverse proxy / API gateway that authenticates callers and forwards the
+    reverse proxy that authenticates callers and forwards the
     caller identifier via the `X-User-Id` header, set
     TRUST_FORWARDED_IDENTITY_HEADERS=true to read it. That single header is
     the only thing the runner trusts from a forwarded request — any other
@@ -270,7 +270,7 @@ async def get_request_user(request: Request) -> RequestUser | None:
 def get_auth_dependency() -> Any:
     """Select authentication dependency based on AUTH_MODE env var.
 
-    - none: No authentication (self-hosted default, or behind API Gateway)
+    - none: No authentication (self-hosted default, or behind a reverse proxy)
     - jwt: Validate JWT tokens
     - api_key: Validate static API key
     """

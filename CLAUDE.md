@@ -201,7 +201,7 @@ if upload_size > MAX_UPLOAD_BYTES:
 ## Authentication
 
 - Three modes via `AUTH_MODE` env var: `none` (default), `jwt`, `api_key`
-- `none`: No auth (self-hosted default, or behind API Gateway in hosted version)
+- `none`: No auth (self-hosted default, or behind an authenticating reverse proxy in the hosted version)
 - `jwt`: Validate `Authorization: Bearer <jwt>` using `JWT_SECRET_KEY`
 - `api_key`: Validate `Authorization: Bearer <key>` against `API_KEY` env var
 - Selection is environment-based via `get_auth_dependency()`

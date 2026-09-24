@@ -236,7 +236,7 @@ _router = APIRouter()
 
 @_router.get("/config-error")
 async def config_error_route() -> None:
-    msg = "the gateway config is missing"
+    msg = "the inference config is missing"
     raise PipelexConfigError(msg)
 
 
@@ -379,7 +379,7 @@ def _bind_test_run_state(request: Request) -> None:
 @_router.get("/authenticated-config-error")
 async def authenticated_config_error_route(request: Request) -> None:
     _bind_test_user(request)
-    msg = "the gateway config is missing"
+    msg = "the inference config is missing"
     raise PipelexConfigError(msg)
 
 
@@ -402,7 +402,7 @@ async def run_state_pipelex_error_route(request: Request) -> None:
     # (state bound), then pipelex raised a `PipelexError` further down the
     # stack. Exercises `_log_error_report`.
     _bind_test_run_state(request)
-    msg = "the gateway config is missing"
+    msg = "the inference config is missing"
     raise PipelexConfigError(msg)
 
 
@@ -459,7 +459,7 @@ class TestExceptionHandlers:
         assert body["type"].endswith("/pipelex-config-error/")
         assert body["title"] == "Pipelex config"
         assert body["status"] == 500
-        assert body["detail"] == "the gateway config is missing"
+        assert body["detail"] == "the inference config is missing"
         assert body["error_type"] == "PipelexConfigError"
         assert body["error_domain"] == "config"
         assert body["instance"] == "/config-error"
@@ -485,7 +485,7 @@ class TestExceptionHandlers:
         config_response = client.get("/config-error")
         assert config_response.status_code == 500
         assert config_response.json()["detail"] == INTERNAL_ERROR_PLACEHOLDER
-        assert "the gateway config is missing" not in config_response.text
+        assert "the inference config is missing" not in config_response.text
 
         input_response = client.get("/input-error")
         assert input_response.status_code == 422

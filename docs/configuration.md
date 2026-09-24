@@ -4,18 +4,19 @@ This page covers how to configure the **Docker image** — the env vars it needs
 
 For the syntax and meaning of Pipelex config itself (storage backends, tracing, inference routing, model decks, …), see the official Pipelex documentation: **https://docs.pipelex.com**. This page does not duplicate that.
 
-> **The official `pipelex/pipelex-api` image is generic and orchestrator-agnostic.** It runs every pipeline **in-process** (no distributed orchestrator), with no S3, no remote tracing, and the Pipelex Gateway as the only enabled inference backend. Anything environment-specific is meant to be supplied by you, on top of the image, via a mounted `.pipelex/` override file. Distributed execution (Temporal, Mistral Workflows, …) is **not** built in — it is added by installing exactly one orchestrator plugin on top of this base to produce a deployment *flavor* (see "Execution mode" below).
+> **The official `pipelex/pipelex-api` image is generic and orchestrator-agnostic.** It runs every pipeline **in-process** (no distributed orchestrator), with no S3, no remote tracing, and no inference credential of its own — you bring your own provider API key. Anything environment-specific is meant to be supplied by you, on top of the image, via a mounted `.pipelex/` override file. Distributed execution (Temporal, Mistral Workflows, …) is **not** built in — it is added by installing exactly one orchestrator plugin on top of this base to produce a deployment *flavor* (see "Execution mode" below).
 
 ## Environment variables
 
 The API reads its settings from environment variables. With Docker, the easiest way is a `.env` file:
 
 ```bash
-# Pipelex Gateway API key — used to call LLMs through Pipelex's inference layer.
-# Required only if you keep the default routing profile. If you reconfigure
-# Pipelex to call providers directly (OpenAI, Anthropic, Bedrock, …), you'll
-# need those providers' own env vars instead — see https://docs.pipelex.com.
-PIPELEX_GATEWAY_API_KEY=your-pipelex-gateway-key
+# Your inference provider key — one per provider you call, or a single
+# OpenRouter key to reach many models at once. Which one you need is decided by
+# the active routing profile: see "Choosing your inference provider" below.
+OPENROUTER_API_KEY=your-openrouter-key
+# OPENAI_API_KEY=...
+# ANTHROPIC_API_KEY=...
 
 # Authentication for the API itself (optional — defaults to AUTH_MODE=none)
 AUTH_MODE=none                 # one of: none | api_key | jwt
@@ -64,7 +65,7 @@ You have three idiomatic options. Pick whichever fits your workflow — they all
 
 ```bash
 # .env
-PIPELEX_GATEWAY_API_KEY=your-pipelex-gateway-key
+OPENROUTER_API_KEY=your-openrouter-key
 MAX_REQUEST_BODY_MIB=200
 AUTH_MODE=api_key
 API_KEY=your-strong-secret
@@ -78,7 +79,7 @@ docker run --name pipelex-api -p 8081:8081 --env-file .env pipelex/pipelex-api:l
 
 ```bash
 docker run --name pipelex-api -p 8081:8081 \
-  -e PIPELEX_GATEWAY_API_KEY=your-pipelex-gateway-key \
+  -e OPENROUTER_API_KEY=your-openrouter-key \
   -e MAX_REQUEST_BODY_MIB=200 \
   pipelex/pipelex-api:latest
 ```
@@ -115,6 +116,46 @@ The Pipelex runtime loads `.toml` config files in a layered, deep-merged order. 
 In the official Docker image, the `.pipelex/` directory shipped in this repository is copied to `/root/.pipelex` at build time and the project-level `.pipelex/` is removed from the image. That means **`/root/.pipelex/` is the single config dir the runtime reads from**, and any file you mount there participates in the layering above. To override anything, you only need to provide the keys you want to change — the layering does the rest.
 
 For the schema and meaning of every key in these files, see https://docs.pipelex.com.
+
+## Choosing your inference provider
+
+The image ships no inference credential of its own: you bring your own provider API key. Two things have to agree — **the key you pass in the environment**, and **the routing profile** that decides which backend serves a model.
+
+**One key for many models.** An [OpenRouter](https://openrouter.ai/) key reaches models from many providers through a single credential, which makes it the shortest path to a working server:
+
+```bash
+# routing_profiles_override.toml
+active = "all_openrouter"
+```
+
+```bash
+docker run --name pipelex-api -p 8081:8081 \
+  -e OPENROUTER_API_KEY=your-openrouter-key \
+  -v "$(pwd)/routing_profiles_override.toml:/root/.pipelex/inference/routing_profiles_override.toml:ro" \
+  pipelex/pipelex-api:latest
+```
+
+**One key per provider.** Call a provider directly by naming its profile and passing that provider's own env var. The backend also has to be switched on (`enabled = true` in `inference/backends.toml`), since a profile naming a backend that is not enabled is refused at boot — see [Configure AI Providers](https://docs.pipelex.com/latest/get-started/configure-ai-providers/). The profiles ship in `inference/routing_profiles.toml` and the env var each backend reads is declared in `inference/backends.toml`:
+
+| Profile | Env var it needs |
+| --- | --- |
+| `all_openrouter` | `OPENROUTER_API_KEY` |
+| `all_openai` | `OPENAI_API_KEY` |
+| `all_anthropic` | `ANTHROPIC_API_KEY` |
+| `all_google` | `GOOGLE_API_KEY` |
+| `all_mistral` | `MISTRAL_API_KEY` |
+| `all_xai` | `XAI_API_KEY` |
+| `all_groq` | `GROQ_API_KEY` |
+| `all_azure_openai` | `AZURE_API_KEY` (plus the endpoint keys the backend declares) |
+| `all_bedrock` | the AWS credentials your environment already provides |
+| `all_vertexai` | the Google Cloud credentials your environment already provides |
+| `all_ollama` | none — a local model server |
+
+**Mixing providers.** A profile can route per model instead of sending everything to one backend: give it a `default` and a `[profiles.<name>.routes]` table keyed by model handle or pattern. `inference/routing_profiles.toml` carries worked examples, and every backend whose models a profile routes to must be enabled and have its key present. See the [inference backend reference](https://docs.pipelex.com/latest/configuration/config-technical/inference-backend-config/) for the full routing reference.
+
+**No provider keys at all.** Point Pipelex at a local model server (Ollama, vLLM, LM Studio, llama.cpp) with the `all_ollama` profile and its base URL — or skip self-hosting and run your methods on the hosted Pipelex API at `api.pipelex.com` with a Pipelex API key from [app.pipelex.com](https://app.pipelex.com).
+
+> `routing_profiles_override.toml` and `backends_override.toml` are deep-merged on top of the files shipped in the image, so an override only has to carry the keys it changes — you never copy the whole file. Mount them into `/root/.pipelex/inference/` exactly like any other override (see "Providing your own configuration to Docker" below).
 
 ## Orchestration mode
 
@@ -172,7 +213,11 @@ services:
       # Or env-specific (selected by PIPELEX_ENV):
       - ./pipelex_dev.toml:/root/.pipelex/pipelex_dev.toml:ro
 
-      # Or replace inference layer files directly:
+      # Or layer the inference overrides (deep-merged — carry only what changes):
+      - ./routing_profiles_override.toml:/root/.pipelex/inference/routing_profiles_override.toml:ro
+      - ./backends_override.toml:/root/.pipelex/inference/backends_override.toml:ro
+
+      # Or replace an inference layer file outright:
       - ./backends.toml:/root/.pipelex/inference/backends.toml:ro
       - ./routing_profiles.toml:/root/.pipelex/inference/routing_profiles.toml:ro
 
@@ -211,12 +256,18 @@ docker run --name pipelex-api -p 8081:8081 \
 
 ## Quick recipes
 
-### Local, default everything
+### Local, one OpenRouter key
 
 `.env`:
 
 ```bash
-PIPELEX_GATEWAY_API_KEY=your-pipelex-gateway-key
+OPENROUTER_API_KEY=your-openrouter-key
+```
+
+`routing_profiles_override.toml`:
+
+```toml
+active = "all_openrouter"
 ```
 
 `docker-compose.yml`:
@@ -227,9 +278,11 @@ services:
     image: pipelex/pipelex-api:latest
     ports: ["8081:8081"]
     env_file: .env
+    volumes:
+      - ./routing_profiles_override.toml:/root/.pipelex/inference/routing_profiles_override.toml:ro
 ```
 
-`docker compose up`, then `curl http://localhost:8081/health`. No override file needed.
+`docker compose up`, then `curl http://localhost:8081/health`.
 
 ### Local, with API key auth
 
