@@ -23,6 +23,7 @@ Validate MTHDS content by parsing, loading, and dry-running pipes without execut
 - `render` (list[str], optional, default `[]`): opt-in *rendered text* to attach to the verdict — see [Opt-in extras](#opt-in-extras-render-and-views)
 - `views` (list[str], optional, default `[]`): opt-in *structured views* to attach to the verdict — see [Opt-in extras](#opt-in-extras-render-and-views)
 - `orchestration_mode` (string | null, optional): per-request backend override for the validation dispatch — see [Where validation runs](#where-validation-runs). Honored only when the deployment allows it; a forbidden override is a 403
+- `analytics_groups` (object | null, optional): **Pipelex-API extension.** The groups the caller belongs to, as a mapping of group type to group key, with the same rules as on a run — see [Who the validation is done for](#who-the-validation-is-done-for). A mapping outside those rules is a 422 whose `error_type` is `InvalidAnalyticsGroups`
 
 **Response (the verdict union):**
 
@@ -153,6 +154,10 @@ The submit path carries bundle text, not file paths, so by default the runtime c
 
 Validation is **`orchestration_mode`-aware**, the same way `/start` is: the runner resolves the effective backend (the deployment default plus the optional per-request `orchestration_mode` override) and dispatches through the bundle-validator registry. Validation is inherently blocking, so there is no delivery axis here — only the backend varies. On the orchestrator-agnostic base — and for `orchestration_mode: direct` — the whole job runs **in-process in one library load on the API side**. On an orchestrator flavor whose mode is selected (e.g. `temporal`), the whole job is **dispatched to a worker** instead, and the API side assembles the same canonical report from the worker's result without loading a library. Either way the verdict is byte-identical: the backend changes, the contract does not. A per-request override the deployment forbids is refused with a 403.
 
+**Who the validation is done for:**
+
+A validation is not a run, but it still emits telemetry: the sweep's `pipe_dry_run` event and every dry run it performs. The route hands the runtime the caller it is working for — the authenticated user, exactly as a run states it (the single-tenant placeholder when the deployment has no user model), and the request's `analytics_groups`, or none — and the runtime attributes that telemetry to them rather than to the deployment's configured identity. The caller travels with the dispatch, so a validation sent to a worker is attributed the same way. How each telemetry stream then treats the caller is the runtime's decision, described with [`analytics_groups` on a run](pipe-run.md#host-supplied-run-context-storage_scope-and-analytics_groups).
+
 > **Resource note for deployment.** When validation runs in-process (the agnostic base, or `direct` mode), the API server loads the method library to validate, so a deployment that receives large or frequent in-process `/validate` traffic should be sized for that load (memory + CPU for library assembly and the graph dry-run). On a distributed-execution flavor that dispatches validation to a worker, the library work happens worker-side; size the workers accordingly.
 
 The graph is best-effort: a bundle that validates but whose graph dry-run fails still returns 200 on the valid arm with `graph_spec: null`.
@@ -161,7 +166,7 @@ The graph is best-effort: a bundle that validates but whose graph dry-run fails 
 
 Only conditions where the endpoint could not produce a verdict are non-2xx, rendered as [RFC 7807 problem documents](error-responses.md):
 
-- **422** — a malformed request body, an `mthds_sources` / `mthds_contents` length mismatch, or both/neither of `mthds_contents` / `method_ref` (request-shape errors caught before the runtime).
+- **422** — a malformed request body, an `mthds_sources` / `mthds_contents` length mismatch, both/neither of `mthds_contents` / `method_ref`, or a malformed `analytics_groups` (`error_type` `InvalidAnalyticsGroups`) — request-shape errors caught before the runtime.
 - **401 / 403** — unauthenticated / forbidden (including a per-request `orchestration_mode` override the deployment does not allow).
 - **`method_ref` resolution failures** — a selector that could not be resolved produced no verdict, so it is never rendered as `is_valid: false`: a malformed reference or a failed fetch is a **422**, no matching package in the repository a **404**, and the custom-Python policy (the sandbox gate, the structures refusal) a **403** — the same statuses and `error_type`s as on the run routes (see the [error table](pipe-run.md#running-a-method-by-address-method_ref)).
 - **5xx** — a server fault (including a host-wiring programmer error, surfaced as `PipelexUnexpectedError`).

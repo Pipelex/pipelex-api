@@ -155,6 +155,7 @@ Generate a Python runner script for executing a pipe. The script's imports, exam
 **Request Fields:** the shared envelope above, plus:
 
 - `allow_signatures` (boolean, optional): tolerate unimplemented pipe signatures in the dry-run sweep (default `false`). This is the only build route that takes it — the only one that still sweeps.
+- `analytics_groups` (object | null, optional): the groups the caller belongs to, with the same rules and the same 422 `InvalidAnalyticsGroups` as [on `/validate`](pipe-validate.md#who-the-validation-is-done-for). The sweep is done for the authenticated user and these groups, so its telemetry is attributed to them.
 
 The sweep is scoped to the requested pipe, so unrelated broken siblings do not block a good pipe. When `pipe_ref` is omitted the scope is not settled before the closure loads, so the **whole closure** is swept and the pipe then defaults as described in the shared envelope above — the fetched manifest's `main_pipe` on a `method_ref` request, else the closure's own — a stricter verdict, and the honest one for a caller who did not say which pipe they meant.
 
