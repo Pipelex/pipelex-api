@@ -1,6 +1,13 @@
 # Changelog
 
-## [Unreleased]
+## [v0.27.3] - 2026-09-24
+
+### Changed
+
+- **Pinned `pipelex` 0.64.1**: up from `==0.64.0`, exactly, a patch release whose runtime change keeps a test run's telemetry off the Pipelex Gateway stream and which moves its own exact pin to `mthds` 0.16.0, so the image now ships that version. Nothing on the wire moves — the committed `docs/openapi/pipelex-api.openapi.yaml` changes only in its `info.version` — and the `.pipelex/` config schema did not move, so no migration is required.
+- **`POST /v1/codegen` stamps `engine_version` `0.64.1`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.64.0` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
+
+## [v0.27.2] - 2026-09-24
 
 ### Added
 
