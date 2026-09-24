@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.27.4] - 2026-09-24
+
+### Changed
+
+- **Pinned `pipelex` 0.64.2**: up from `==0.64.1`, exactly, a patch release that keeps the message of an unknown model reference under strict error disclosure. A `/v1/validate` or run of a method naming a model the deck does not know now answers its 422 with the model that was named and the "Did you mean" suggestions, instead of "An internal error occurred.". No wire, config or OpenAPI change.
+- **`POST /v1/codegen` stamps `engine_version` `0.64.2`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.64.1` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
+
 ## [v0.27.3] - 2026-09-24
 
 ### Changed
