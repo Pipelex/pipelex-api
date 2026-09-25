@@ -169,7 +169,7 @@ Every error is rendered as RFC 7807 `application/problem+json` by the global han
 - **Domain errors** (pipelex `PipelexError` subclasses) — raise from your code and let them propagate. The `PipelexError` global handler obtains an `ErrorReport` via `to_error_report()` and renders it into a problem document. Do not wrap, classify, or re-shape.
 - **API-authored 4xx/5xx** — use the helpers in `api/errors.py`: `raise_validation_error`, `raise_bad_request`, `raise_forbidden`, `raise_unauthenticated`, `raise_payload_too_large`, `raise_internal_server_error`. Each raises an `ApiError` carrying a pre-built problem document; the global handler emits it. **Do not raise `HTTPException` directly** — FastAPI's default handler wraps the body as `{"detail": <whatever>}` and cannot emit a flat RFC 7807 document.
 - **Auth errors** — the helpers set `WWW-Authenticate: Bearer` automatically on 401.
-- **Logging** — the global handlers emit one structured log line per error (`event=api_error`) with `request_id`, `route`, `error_type`, `error_domain`, `retryable`, `status`, and `user_id` when authenticated. Log disposition follows the final HTTP status: 4xx logs at `warning` (caller mistakes, the provider-429 passthrough, and API-level 4xx overrides like the 409 conflict); 5xx logs at `error` with traceback. Routes should not log error tracebacks themselves.
+- **Logging** — the global handlers emit one structured record per error, carrying `event: "api_error"`, `route`, `error_type`, `error_domain`, `retryable`, `status`, and `user_id` / `pipe_code` / `pipeline_run_id` when the request bound them. `detail` rides the API-authored path only: a Pipelex `ErrorReport`'s body text has been through disclosure redaction, so it is not the cause and is deliberately not logged. They travel as `fields=` on the runtime's log call, never interpolated into the message, and `request_id` is not among them: `RequestIdMiddleware` binds it on the runtime's log context, so every record emitted under the request already carries it. The server selects the `json` sink, so a record reaches stderr as one JSON object per line — see `docs/logging.md`. Log disposition follows the final HTTP status: 4xx logs at `warning` (caller mistakes, the provider-429 passthrough, and API-level 4xx overrides like the 409 conflict); 5xx logs at `error` with traceback. Routes should not log error tracebacks themselves.
 - **Documenting a failure in OpenAPI** — the shared, typed `responses=` declarations live in `api/openapi_responses.py` (`ProblemDocument` + one constant per status). Every auth-wrapped `/v1` route already documents `401`/`413`/`422`/`500` via the composite router's `responses=` (`api/routes/__init__.py`); a route declares on its own decorator only the statuses **it alone** can produce. Never hand-write an error `content` block: `api/openapi_schema.py` re-keys the generated schema onto `application/problem+json`, because FastAPI renders a response `model` under the route's response-class media type and offers no per-response override. Adding a new status means adding a constant there and referencing it — then `make openapi-export`.
 
 Typical route:
@@ -177,12 +177,13 @@ Typical route:
 ```python
 @router.post("/start", response_model=PipelexStartAck, status_code=202)
 async def start(
-    request: Annotated[RunRequest, Depends(request_deserialization)],
+    request: Request,
+    run_request: Annotated[RunRequest, Depends(request_deserialization)],
     user: Annotated[RequestUser | None, Depends(get_optional_user)],
-    request_id: Annotated[str, Depends(get_request_id)],
 ) -> PipelexStartAck:
     # Let PipelexError / EnvVarNotFoundError / etc. propagate to the global handler.
-    return await api_runner.start(request, user=user, request_id=request_id)
+    # `request_id_of` (api/middleware.py) reads back what RequestIdMiddleware put on the request.
+    return await api_runner.start(run_request, user=user, request_id=request_id_of(request))
 ```
 
 For an API-authored failure that has no `PipelexError`:

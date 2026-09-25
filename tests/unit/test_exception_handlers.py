@@ -9,7 +9,7 @@ the way the real app routes them.
 """
 
 import re
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi import APIRouter, FastAPI, Request
@@ -36,7 +36,7 @@ from typing_extensions import override
 
 from api.error_types import ErrorType
 from api.errors import raise_internal_server_error, raise_validation_error
-from api.exception_handlers import emit_error_log, register_exception_handlers
+from api.exception_handlers import API_ERROR_EVENT, register_exception_handlers
 from api.middleware import REQUEST_ID_HEADER, RequestIdMiddleware
 from api.problem_document import PROBLEM_JSON_MEDIA_TYPE
 from api.security import RequestUser
@@ -45,48 +45,17 @@ from api.security import RequestUser
 _ULID_RE = re.compile(r"\A[0-9A-HJKMNP-TV-Z]{26}\Z")
 
 
-def _parse_logfmt(line: str) -> dict[str, str]:
-    """Minimal logfmt parser used by the injection-guard test.
+def _emitted_fields(log_spy: Any, *, as_error: bool) -> dict[str, Any]:
+    """The record attributes the handler shipped on its one `api_error` call.
 
-    Splits ``key=value`` pairs separated by spaces, honoring ``"..."`` quoting
-    with embedded ``""`` doubled (the same convention `_logfmt_value` writes).
-    Returns the top-level field map a downstream parser would extract — used
-    to assert that a crafted value did NOT introduce extra top-level keys.
+    The handlers hand everything but the summary message to the runtime as `fields=`, so the
+    assertions below read that mapping rather than parsing a rendered line: there is no rendering
+    left to parse, and a sink is what decides how an attribute reaches the wire.
     """
-    fields: dict[str, str] = {}
-    index = 0
-    length = len(line)
-    while index < length:
-        while index < length and line[index] == " ":
-            index += 1
-        if index >= length:
-            break
-        equals_position = line.find("=", index)
-        if equals_position == -1:
-            break
-        key = line[index:equals_position]
-        index = equals_position + 1
-        if index < length and line[index] == '"':
-            index += 1
-            value_chars: list[str] = []
-            while index < length:
-                if line[index] == '"':
-                    if index + 1 < length and line[index + 1] == '"':
-                        value_chars.append('"')
-                        index += 2
-                        continue
-                    index += 1
-                    break
-                value_chars.append(line[index])
-                index += 1
-            fields[key] = "".join(value_chars)
-        else:
-            value_end = line.find(" ", index)
-            if value_end == -1:
-                value_end = length
-            fields[key] = line[index:value_end]
-            index = value_end
-    return fields
+    call = log_spy.error.call_args if as_error else log_spy.warning.call_args
+    fields = call.kwargs["fields"]
+    assert isinstance(fields, dict)
+    return cast("dict[str, Any]", fields)
 
 
 class _SimulatedLLMError(PipelexError):
@@ -310,6 +279,13 @@ async def crafted_retry_route(report_key: str) -> None:
 async def api_input_error_route() -> None:
     # An API-authored 422 — the INPUT-domain branch of `handle_api_error`.
     raise_validation_error("a caller-side mistake")
+
+
+@_router.get("/crafted-detail")
+async def crafted_detail_route(detail: str) -> None:
+    # An API-authored 422 whose `detail` is exactly what the caller sent — the real shape of the
+    # `raise_validation_error(str(exc))` sites, where the message is built from caller input.
+    raise_validation_error(detail)
 
 
 @_router.get("/api-config-error")
@@ -638,31 +614,31 @@ class TestExceptionHandlers:
         assert response.headers[REQUEST_ID_HEADER] == "inbound-correlation-007"
         assert response.json()["request_id"] == "inbound-correlation-007"
 
-    def test_api_authored_500_emits_structured_error_log(self, mocker: MockerFixture):
+    def test_api_authored_500_emits_structured_error_record(self, mocker: MockerFixture):
         # Without `handle_api_error` logging, an `ApiError`-shaped 500 produces
         # zero operator output (`/version`'s `PackageNotFoundError →
         # raise_internal_server_error` is the canonical silent case). Assert
-        # the handler emits one `event=api_error` line at `error` level with
-        # the response fields — same shape `_log_error_report` emits for a
-        # pipelex-derived 500, so a downstream log sink sees them uniformly.
+        # the handler emits one `api_error` record at `error` level whose fields
+        # mirror the response — the same set `_log_error_report` ships for a
+        # pipelex-derived 500, so a downstream sink queries them uniformly.
         log_spy = mocker.patch("api.exception_handlers.log")
         response = _build_client().get("/api-config-error")
         assert response.status_code == 500
         log_spy.error.assert_called_once()
-        rendered = log_spy.error.call_args.args[0]
-        assert "event=api_error" in rendered
-        assert "status=500" in rendered
-        assert "error_type=ServerMisconfigured" in rendered
-        assert "error_domain=config" in rendered
-        assert "retryable=False" in rendered
-        assert "route=/api-config-error" in rendered
-        # Values containing whitespace are logfmt-quoted by `_logfmt_value`
-        # so a crafted `detail` cannot forge sibling fields.
-        assert 'detail="the configuration is broken"' in rendered
-        assert log_spy.error.call_args.kwargs == {"include_exception": True}
+        fields = _emitted_fields(log_spy, as_error=True)
+        assert fields["event"] == API_ERROR_EVENT
+        assert fields["status"] == 500
+        assert fields["error_type"] == "ServerMisconfigured"
+        assert fields["error_domain"] == "config"
+        assert fields["retryable"] is False
+        assert fields["route"] == "/api-config-error"
+        # The operator-facing cause rides a field of its own and never reaches the message, which
+        # is what stops a crafted value from shaping the rendered line at all.
+        assert fields["detail"] == "the configuration is broken"
+        assert log_spy.error.call_args.kwargs["include_exception"] is True
         log_spy.warning.assert_not_called()
 
-    def test_api_authored_4xx_emits_structured_warning_log(self, mocker: MockerFixture):
+    def test_api_authored_4xx_emits_structured_warning_record(self, mocker: MockerFixture):
         # Mirror at the warning level: an INPUT-domain `ApiError` is a caller
         # mistake, not an operator fault, so it logs at `warning` without a
         # traceback — same disposition rule `_log_error_report` uses.
@@ -670,30 +646,37 @@ class TestExceptionHandlers:
         response = _build_client().get("/api-input-error")
         assert response.status_code == 422
         log_spy.warning.assert_called_once()
-        rendered = log_spy.warning.call_args.args[0]
-        assert "event=api_error" in rendered
-        assert "status=422" in rendered
-        assert "error_type=ValidationError" in rendered
-        assert "error_domain=input" in rendered
-        assert "retryable=False" in rendered
-        assert 'detail="a caller-side mistake"' in rendered
+        fields = _emitted_fields(log_spy, as_error=False)
+        assert fields["event"] == API_ERROR_EVENT
+        assert fields["status"] == 422
+        assert fields["error_type"] == "ValidationError"
+        assert fields["error_domain"] == "input"
+        assert fields["retryable"] is False
+        assert fields["detail"] == "a caller-side mistake"
         log_spy.error.assert_not_called()
 
-    def test_user_id_rides_authenticated_pipelex_error_log(self, mocker: MockerFixture):
+    def test_the_summary_message_names_the_status_and_the_error_type(self, mocker: MockerFixture):
+        # The message is built from server-authored values alone, so it stays a stable sentence
+        # whatever a caller sent; everything variable is a field beside it.
+        log_spy = mocker.patch("api.exception_handlers.log")
+        assert _build_client().get("/api-config-error").status_code == 500
+        assert log_spy.error.call_args.args[0] == "API error 500: ServerMisconfigured"
+
+    def test_user_id_rides_authenticated_pipelex_error_record(self, mocker: MockerFixture):
         # Phase 3 deleted the per-route `log.error(... user=...)` lines on
         # storage / pipeline-backend failures; the global handler now reads
         # `request.state.user` so the operator can still tie a `PipelexError`
-        # to the caller via the structured log alone — no cross-line grep on
-        # `request_id` required.
+        # to the caller through the record alone — no correlating across
+        # records on `request_id` required.
         log_spy = mocker.patch("api.exception_handlers.log")
         response = _build_client().get("/authenticated-config-error")
         assert response.status_code == 500
         log_spy.error.assert_called_once()
-        rendered = log_spy.error.call_args.args[0]
-        assert f"user_id={_TEST_USER_ID}" in rendered
-        assert "error_type=PipelexConfigError" in rendered
+        fields = _emitted_fields(log_spy, as_error=True)
+        assert fields["user_id"] == _TEST_USER_ID
+        assert fields["error_type"] == "PipelexConfigError"
 
-    def test_user_id_rides_authenticated_api_authored_log(self, mocker: MockerFixture):
+    def test_user_id_rides_authenticated_api_authored_record(self, mocker: MockerFixture):
         # `handle_api_error` covers the API-authored 4xx surface (storage's
         # `raise_bad_request`, `raise_forbidden`, `raise_payload_too_large`;
         # uploader's same set). It must ride the same `user_id` correlation
@@ -703,11 +686,11 @@ class TestExceptionHandlers:
         response = _build_client().get("/authenticated-api-input-error")
         assert response.status_code == 422
         log_spy.warning.assert_called_once()
-        rendered = log_spy.warning.call_args.args[0]
-        assert f"user_id={_TEST_USER_ID}" in rendered
-        assert "error_type=ValidationError" in rendered
+        fields = _emitted_fields(log_spy, as_error=False)
+        assert fields["user_id"] == _TEST_USER_ID
+        assert fields["error_type"] == "ValidationError"
 
-    def test_user_id_rides_authenticated_unexpected_error_log(self, mocker: MockerFixture):
+    def test_user_id_rides_authenticated_unexpected_error_record(self, mocker: MockerFixture):
         # The catch-all 500 (`handle_unexpected_error`) is the one place a
         # missing `user_id` is most expensive — by definition the failure
         # was not classifiable upstream — so the same enrichment fires here.
@@ -715,23 +698,22 @@ class TestExceptionHandlers:
         response = _build_client(raise_server_exceptions=False).get("/authenticated-unexpected-error")
         assert response.status_code == 500
         log_spy.error.assert_called_once()
-        rendered = log_spy.error.call_args.args[0]
-        assert f"user_id={_TEST_USER_ID}" in rendered
-        assert "error_type=RuntimeError" in rendered
+        fields = _emitted_fields(log_spy, as_error=True)
+        assert fields["user_id"] == _TEST_USER_ID
+        assert fields["error_type"] == "RuntimeError"
 
-    def test_user_id_absent_from_unauthenticated_error_log(self, mocker: MockerFixture):
+    def test_user_id_absent_from_unauthenticated_error_record(self, mocker: MockerFixture):
         # Pre-auth paths, and a deployment with no user model, have no `request.state.user`;
-        # `_user_id_of` returns `None` and `emit_error_log` drops `None`-
-        # valued fields, so the rendered line carries no `user_id=` token —
-        # never `user_id=None`, which would be misleading noise.
+        # `_user_id_of` returns `None` and `_emit_api_error` drops `None`-valued fields, so the
+        # record carries no `user_id` attribute at all — never a null, which a query filtering on
+        # presence would read as an answer.
         log_spy = mocker.patch("api.exception_handlers.log")
         response = _build_client().get("/config-error")
         assert response.status_code == 500
         log_spy.error.assert_called_once()
-        rendered = log_spy.error.call_args.args[0]
-        assert "user_id=" not in rendered
+        assert "user_id" not in _emitted_fields(log_spy, as_error=True)
 
-    def test_run_state_rides_pipelex_error_log(self, mocker: MockerFixture):
+    def test_run_state_rides_pipelex_error_record(self, mocker: MockerFixture):
         # `_parse_request` binds `pipe_code` / `pipeline_run_id` on
         # `request.state` so a downstream pipelex failure is tied to the
         # specific pipe and run id without each backend frame having to forward
@@ -742,62 +724,59 @@ class TestExceptionHandlers:
         response = _build_client().get("/pipeline-state-pipelex-error")
         assert response.status_code == 500
         log_spy.error.assert_called_once()
-        rendered = log_spy.error.call_args.args[0]
-        assert f"pipe_code={_TEST_PIPE_CODE}" in rendered
-        assert f"pipeline_run_id={_TEST_RUN_ID}" in rendered
-        assert "error_type=PipelexConfigError" in rendered
+        fields = _emitted_fields(log_spy, as_error=True)
+        assert fields["pipe_code"] == _TEST_PIPE_CODE
+        assert fields["pipeline_run_id"] == _TEST_RUN_ID
+        assert fields["error_type"] == "PipelexConfigError"
 
-    def test_run_state_rides_api_authored_log(self, mocker: MockerFixture):
+    def test_run_state_rides_api_authored_record(self, mocker: MockerFixture):
         # API-authored 4xx surface: `raise_validation_error` raised from a
         # route that has already bound pipe state must ship the same fields,
-        # so the operator log is uniform across the validation and the
+        # so the operator record is uniform across the validation and the
         # pipelex-domain failure surfaces.
         log_spy = mocker.patch("api.exception_handlers.log")
         response = _build_client().get("/pipeline-state-api-input-error")
         assert response.status_code == 422
         log_spy.warning.assert_called_once()
-        rendered = log_spy.warning.call_args.args[0]
-        assert f"pipe_code={_TEST_PIPE_CODE}" in rendered
-        assert f"pipeline_run_id={_TEST_RUN_ID}" in rendered
-        assert "error_type=ValidationError" in rendered
+        fields = _emitted_fields(log_spy, as_error=False)
+        assert fields["pipe_code"] == _TEST_PIPE_CODE
+        assert fields["pipeline_run_id"] == _TEST_RUN_ID
+        assert fields["error_type"] == "ValidationError"
 
-    def test_run_state_rides_unexpected_error_log(self, mocker: MockerFixture):
+    def test_run_state_rides_unexpected_error_record(self, mocker: MockerFixture):
         # The catch-all 500 is the most operationally expensive case for a
         # missing pipe-state field — by definition the failure was not
-        # classifiable upstream, so the identifiers in the log are the
+        # classifiable upstream, so the identifiers on the record are the
         # operator's only starting point for which pipe and which run were
         # in flight.
         log_spy = mocker.patch("api.exception_handlers.log")
         response = _build_client(raise_server_exceptions=False).get("/pipeline-state-unexpected-error")
         assert response.status_code == 500
         log_spy.error.assert_called_once()
-        rendered = log_spy.error.call_args.args[0]
-        assert f"pipe_code={_TEST_PIPE_CODE}" in rendered
-        assert f"pipeline_run_id={_TEST_RUN_ID}" in rendered
-        assert "error_type=RuntimeError" in rendered
+        fields = _emitted_fields(log_spy, as_error=True)
+        assert fields["pipe_code"] == _TEST_PIPE_CODE
+        assert fields["pipeline_run_id"] == _TEST_RUN_ID
+        assert fields["error_type"] == "RuntimeError"
 
     def test_run_state_absent_when_parse_request_did_not_bind(self, mocker: MockerFixture):
         # A route that didn't go through `_parse_request` (here: `/config-error`,
         # a GET that never touches the body) has no `pipe_code` /
         # `pipeline_run_id` on `request.state`. The getters return `None` and
-        # `emit_error_log` drops `None`-valued fields, so the rendered line
-        # carries no `pipe_code=` or `pipeline_run_id=` token — never
-        # `pipe_code=None`, which would be misleading noise. Same defensive
-        # posture as `test_user_id_absent_from_unauthenticated_error_log`.
+        # `_emit_api_error` drops those, so the record carries neither attribute.
+        # Same defensive posture as `test_user_id_absent_from_unauthenticated_error_record`.
         log_spy = mocker.patch("api.exception_handlers.log")
         response = _build_client().get("/config-error")
         assert response.status_code == 500
         log_spy.error.assert_called_once()
-        rendered = log_spy.error.call_args.args[0]
-        assert "pipe_code=" not in rendered
-        assert "pipeline_run_id=" not in rendered
+        fields = _emitted_fields(log_spy, as_error=True)
+        assert "pipe_code" not in fields
+        assert "pipeline_run_id" not in fields
 
-    def test_request_validation_error_emits_structured_warning_log(self, mocker: MockerFixture):
+    def test_request_validation_error_emits_structured_warning_record(self, mocker: MockerFixture):
         # FastAPI's automatic-validation 422 goes through
         # `handle_request_validation_error`, not `handle_api_error`, but emits
-        # the same `event=api_error` warning line so the surface is uniform —
-        # whichever code path rejects a caller-input failure, the operator
-        # log shape is identical.
+        # the same `api_error` record so the surface is uniform — whichever code
+        # path rejects a caller-input failure, the operator record is identical.
         log_spy = mocker.patch("api.exception_handlers.log")
         # `{"wrong": 1}` triggers FastAPI's automatic validation failure on
         # `_RequestValidationBody`: `field` is missing AND `wrong` is an
@@ -807,59 +786,48 @@ class TestExceptionHandlers:
         response = _build_client().post("/needs-body", json={"wrong": 1})
         assert response.status_code == 422
         log_spy.warning.assert_called_once()
-        rendered = log_spy.warning.call_args.args[0]
-        assert "event=api_error" in rendered
-        assert "status=422" in rendered
-        assert "error_type=ValidationError" in rendered
-        assert "error_domain=input" in rendered
+        fields = _emitted_fields(log_spy, as_error=False)
+        assert fields["event"] == API_ERROR_EVENT
+        assert fields["status"] == 422
+        assert fields["error_type"] == "ValidationError"
+        assert fields["error_domain"] == "input"
         # The summary covers both per-field failures the request triggered.
-        assert "field" in rendered
-        assert "wrong" in rendered
+        assert "field" in fields["detail"]
+        assert "wrong" in fields["detail"]
         log_spy.error.assert_not_called()
 
     @pytest.mark.parametrize(
         "crafted_detail",
         [
-            # A newline in the detail would forge a second log line entirely —
-            # the worst case for `\n`-delimited log shippers (Loki, journald,
-            # CloudWatch). `_logfmt_value` encodes it as `\\n` so the line
-            # stays single-line.
+            # A newline in the detail used to forge a second log line entirely — the worst case
+            # for newline-delimited shippers (Loki, journald, CloudWatch) back when the API
+            # flattened its own fields into one `key=value` run.
             "legit\nstatus=200 event=auth_success",
-            # Whitespace + key=value runs are the canonical logfmt forge: a
-            # crafted detail must not produce a top-level `event` field that
-            # logfmt-aware parsers would treat as a real field.
+            # Whitespace plus `key=value` runs were the canonical logfmt forge.
             "hijack status=200 event=fake",
-            # A carriage return alone is enough to corrupt a `\r\n` shipper.
+            # A carriage return alone was enough to corrupt a CRLF shipper.
             "legit\rstatus=200",
-            # A bare `"` inside the value would close the quoted region early
-            # in a permissive parser; the escape doubles it.
+            # A bare quote used to close the quoted region early in a permissive parser.
             'has " a quote = inside',
         ],
     )
-    def test_log_injection_in_detail_is_neutralized(self, mocker: MockerFixture, crafted_detail: str) -> None:
-        # `_log_api_authored_error` ships `document["detail"]` into the log
-        # line, and `detail` originates from caller input on several routes
-        # (`raise_validation_error(str(exc))`, callback-URL rejections,
-        # `_summarize_request_validation_error`'s per-field messages). Without
-        # escaping, a crafted body could forge sibling log fields or whole
-        # new log lines (Greptile P1 finding). Pin the neutralization
-        # contract directly at the formatter so a future caller that ships a
-        # new caller-controlled field is also covered without re-auditing.
+    def test_crafted_detail_stays_one_field_and_shapes_no_other(self, mocker: MockerFixture, crafted_detail: str) -> None:
+        # `_log_api_authored_error` ships `document["detail"]`, and `detail` originates from caller
+        # input on several routes (`raise_validation_error(str(exc))`, callback-URL rejections,
+        # `_summarize_request_validation_error`'s per-field messages). The API renders none of it
+        # any more: the value is handed to the runtime as one field, so it cannot forge a sibling
+        # field and cannot reach the message, and the selected sink is what escapes it on the way
+        # out. Pin that at the handler, so a route shipping some new caller-controlled field later
+        # is covered without re-auditing this surface.
         log_spy = mocker.patch("api.exception_handlers.log")
-        emit_error_log(
-            fields={"event": "api_error", "detail": crafted_detail, "status": 422},
-            as_error=False,
-        )
-        rendered = log_spy.warning.call_args.args[0]
-        # Line stays single-line — no shipper-delimiter forgery.
-        assert "\n" not in rendered, f"newline survived escaping: rendered={rendered!r}"
-        assert "\r" not in rendered, f"carriage return survived escaping: rendered={rendered!r}"
-        # The top-level field set, as a logfmt-aware parser would read it,
-        # is exactly the three keys we shipped — no forged siblings.
-        parsed = _parse_logfmt(rendered)
-        assert set(parsed.keys()) == {"event", "detail", "status"}, f"forged field surfaced: rendered={rendered!r}, parsed={parsed!r}"
-        assert parsed["event"] == "api_error", f"legitimate `event` field was overwritten: rendered={rendered!r}"
-        assert parsed["status"] == "422", f"legitimate `status` field was overwritten: rendered={rendered!r}"
+        response = _build_client().get("/crafted-detail", params={"detail": crafted_detail})
+        assert response.status_code == 422
+        fields = _emitted_fields(log_spy, as_error=False)
+        assert fields["detail"] == crafted_detail, f"the value was altered on the way to the record: {fields['detail']!r}"
+        assert fields["event"] == API_ERROR_EVENT, "a crafted detail overwrote a legitimate field"
+        assert fields["status"] == 422, "a crafted detail overwrote a legitimate field"
+        message = log_spy.warning.call_args.args[0]
+        assert crafted_detail not in message, f"caller input reached the message: {message!r}"
 
     def test_async_execution_not_enabled_maps_to_501(self):
         # The pipelex-side ``AsyncExecutionNotEnabledError`` reports as
@@ -885,19 +853,19 @@ class TestExceptionHandlers:
 
     def test_async_execution_not_enabled_logs_post_override_status(self, mocker: MockerFixture):
         # ``_log_error_report`` receives the overridden status so the operator
-        # log line agrees with what the client actually saw. Without the
-        # ``status=`` plumbing the log would read ``status=500`` (the report's
-        # domain default) while the response shipped 501 — a silent disagree
+        # record agrees with what the client actually saw. Without the
+        # ``status=`` plumbing the record would carry 500 (the report's domain
+        # default) while the response shipped 501 — a silent disagreement
         # between the two surfaces. Pin the alignment.
         log_spy = mocker.patch("api.exception_handlers.log")
         response = _build_client().get("/async-execution-not-enabled")
         assert response.status_code == 501
         log_spy.error.assert_called_once()
-        rendered = log_spy.error.call_args.args[0]
-        assert "event=api_error" in rendered
-        assert "status=501" in rendered
-        assert "error_type=AsyncExecutionNotEnabledError" in rendered
-        assert "error_domain=config" in rendered
+        fields = _emitted_fields(log_spy, as_error=True)
+        assert fields["event"] == API_ERROR_EVENT
+        assert fields["status"] == 501
+        assert fields["error_type"] == "AsyncExecutionNotEnabledError"
+        assert fields["error_domain"] == "config"
 
     def test_pipeline_run_id_conflict_maps_to_409(self):
         # ``PipelineManagerAlreadyExistsError`` carries no ``error_domain``
@@ -923,14 +891,14 @@ class TestExceptionHandlers:
         # A duplicate pipeline_run_id is a client-visible 409 conflict, not a
         # server fault: disposition is keyed off the final HTTP status, so it
         # logs at `warning` without a traceback — never `error` (which would
-        # page or pollute error dashboards for a normal conflict). The line
+        # page or pollute error dashboards for a normal conflict). The record
         # still agrees with the status the client saw.
         log_spy = mocker.patch("api.exception_handlers.log")
         response = _build_client().get("/pipeline-run-id-conflict")
         assert response.status_code == 409
         log_spy.warning.assert_called_once()
         log_spy.error.assert_not_called()
-        rendered = log_spy.warning.call_args.args[0]
-        assert "event=api_error" in rendered
-        assert "status=409" in rendered
-        assert "error_type=PipelineManagerAlreadyExistsError" in rendered
+        fields = _emitted_fields(log_spy, as_error=False)
+        assert fields["event"] == API_ERROR_EVENT
+        assert fields["status"] == 409
+        assert fields["error_type"] == "PipelineManagerAlreadyExistsError"

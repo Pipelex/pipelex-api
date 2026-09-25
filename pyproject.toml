@@ -16,7 +16,9 @@ classifiers = [
 ]
 
 dependencies = [
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.65.0",
+  # The extras deliberately leave out `cli`: the runner selects the `json` log sink and a Rich-free
+  # pretty-print mode, so nothing it does on a request renders a terminal.
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.66.0",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",

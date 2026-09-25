@@ -7,31 +7,43 @@ from collections.abc import Awaitable, Callable
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
+from pipelex import log
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from api.error_types import ErrorType
 from api.limits import MAX_REQUEST_BODY_BYTES, MAX_REQUEST_BODY_MIB
-from api.logging_context import bound_request_context, get_request_id, get_route_path
 from api.problem_document import PROBLEM_JSON_MEDIA_TYPE, build_problem_document_from_api_error
 
 
-def _too_large_response() -> JSONResponse:
+def request_id_of(request: Request) -> str | None:
+    """Return the correlation id `RequestIdMiddleware` stored on this request, or `None` when it did not run.
+
+    `getattr` rather than attribute access: a request that never went through the middleware — a unit
+    test issuing a bare ASGI call, a non-HTTP scope — simply has no id, and a reader of the id is not
+    the place to discover that. This is the one way the API reads the id back; the runtime's bound log
+    context carries the same value onto every record but is not a lookup table for anyone else.
+    """
+    return getattr(request.state, "request_id", None)
+
+
+def _too_large_response(*, request: Request) -> JSONResponse:
     """Build the 413 RFC 7807 problem response for an over-limit request body.
 
     The body-size check runs in middleware, before routing, so it cannot go
     through the `api.errors` helpers — a middleware must `return` a response,
-    not raise. It builds the same problem document directly.
-    `RequestIdMiddleware` runs outermost, so the request-scoped contextvars are
-    already bound and feed `instance` / `request_id`; that middleware's `send`
-    wrapper also stamps the `X-Request-ID` header onto this response.
+    not raise. It builds the same problem document directly, reading the request
+    context off the `Request` it was handed. `RequestIdMiddleware` runs outermost,
+    so the id is already on `request.state` by the time this is reached; that
+    middleware's `send` wrapper also stamps the `X-Request-ID` header onto this
+    response.
     """
     document = build_problem_document_from_api_error(
         ErrorType.PAYLOAD_TOO_LARGE,
         f"Request body exceeds {MAX_REQUEST_BODY_MIB} MiB limit",
         413,
-        instance=get_route_path(),
-        request_id=get_request_id(),
+        instance=request.url.path,
+        request_id=request_id_of(request),
     )
     return JSONResponse(status_code=413, content=document, media_type=PROBLEM_JSON_MEDIA_TYPE)
 
@@ -57,7 +69,7 @@ async def request_body_size_middleware(request: Request, call_next: Callable[[Re
         except ValueError:
             declared = -1
         if declared > MAX_REQUEST_BODY_BYTES:
-            return _too_large_response()
+            return _too_large_response(request=request)
 
     original_receive = request.receive
     bytes_seen = 0
@@ -86,7 +98,7 @@ async def request_body_size_middleware(request: Request, call_next: Callable[[Re
 
     response = await call_next(request)
     if too_large:
-        return _too_large_response()
+        return _too_large_response(request=request)
     return response
 
 
@@ -149,17 +161,23 @@ class RequestIdMiddleware:
     """Pure-ASGI middleware that assigns a correlation id to every HTTP request.
 
     For each request it reuses a valid inbound `X-Request-ID` or mints a fresh
-    ULID, stores it on `request.state.request_id`, binds the `request_id` /
-    `route_path` logging contextvars for the duration of the request, and
-    echoes `X-Request-ID` on the response (success and error alike).
+    ULID, stores it on `request.state.request_id`, binds the runtime's log
+    context to that id for the duration of the request, and echoes
+    `X-Request-ID` on the response (success and error alike).
+
+    Binding the runtime's context rather than an API-owned contextvar is what
+    puts `request_id` on *every* record emitted underneath — the API's own
+    error lines, and equally the ones pipelex emits from inside a run — as an
+    attribute a structured sink indexes, with no call site having to pass it
+    and no message having to interpolate it.
 
     Applied in `api.main` by wrapping the whole FastAPI app
     (`app = RequestIdMiddleware(app)`), NOT via `app.add_middleware()`.
     `add_middleware` always nests a middleware *inside* Starlette's
-    `ServerErrorMiddleware`, which would leave it unable to bind the contextvars
+    `ServerErrorMiddleware`, which would leave it unable to bind the context
     for — or set a header on — the catch-all 500 that `ServerErrorMiddleware`
     emits. Wrapping the app puts this middleware genuinely outermost, outside
-    `ServerErrorMiddleware`, so the contextvars are bound and `X-Request-ID` is
+    `ServerErrorMiddleware`, so the context is bound and `X-Request-ID` is
     echoed on every response, the catch-all 500 included. Raw ASGI (rather than
     `BaseHTTPMiddleware`) keeps a single contextvar context across the whole
     stack and lets the `send` wrapper inject the header on any response.
@@ -181,5 +199,9 @@ class RequestIdMiddleware:
                 MutableHeaders(scope=message)[REQUEST_ID_HEADER] = request_id
             await send(message)
 
-        with bound_request_context(request_id=request_id, route_path=scope.get("path", "")):
+        # The runtime's own context, not an API-owned one: `request_id` is one of the three run
+        # identifiers it reserves, so every record emitted underneath carries it as an attribute.
+        # The route path is deliberately not bound here — it is not a run identifier, and the API
+        # ships it as a `route` field on the lines that want it (see `api.exception_handlers`).
+        with log.context(request_id=request_id):
             await self.app(scope, receive, send_with_request_id)
