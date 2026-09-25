@@ -16,11 +16,9 @@ classifiers = [
 ]
 
 dependencies = [
-  # No version specifier here on purpose: the resolution is pinned by the git source declared in
-  # [tool.uv.sources] below. See the note there for why, and for what collapses it.
   # The extras deliberately leave out `cli`: the runner selects the `json` log sink and a Rich-free
   # pretty-print mode, so nothing it does on a request renders a terminal.
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]>=0.66.0",
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.66.0",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",
@@ -80,15 +78,6 @@ packages = ["api"]
 
 [tool.uv]
 required-version = ">=0.7.2"
-
-# Sprint-temporary git source. The structured-log seam this server emits through — the run-scoped
-# log context, per-call `fields=`, the sink registry that provides `json`, and Rich moved behind the
-# `cli` extra — is not in any published `pipelex` release, so the runner builds against the branch
-# carrying it while the sprint runs. It collapses at release time: delete this section and put the
-# shipped version back on the `pipelex` entry in [project.dependencies], then re-lock.
-# Only `uv` reads this, so it steers `uv lock` / `uv sync` (and therefore the Docker build, which
-# runs `uv sync --frozen`) and nothing else. The image installs `git`, and the repository is public,
-# so the build needs no credentials to fetch it.
 
 [tool.mypy]
 check_untyped_defs = true

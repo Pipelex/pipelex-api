@@ -18,8 +18,6 @@ WORKDIR /app
 # among them: the server selects the `json` log sink and a Rich-free pretty-print mode, so nothing
 # it does on a request renders a terminal. (Rich itself is still in the image — typer and
 # instructor both require it unconditionally — it is simply never reached.)
-# `git` above is a build dependency for this step as well as a compile one, for as long as
-# pyproject.toml pins pipelex to a git source; see the note at that pin.
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 

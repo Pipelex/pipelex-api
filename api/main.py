@@ -33,17 +33,7 @@ from api.openapi_schema import PipelexFastAPI
 from api.routes import router as api_router
 from api.routes.health import router as health_router
 from api.routes.version import router as version_router
-from api.runtime_contract import assert_the_runtime_carries_the_structured_log_seam
 from api.security import get_auth_dependency
-
-# First, before anything below reads a config: check that the `pipelex` this process resolved is one
-# whose logs this server can use. While the structured-log seam is unreleased the pin is a git source
-# only `uv` reads, so a `pip install .` gets a published `pipelex` and nothing about its version says
-# so. This runs at import rather than in `lifespan` because the config is already read at import —
-# `HTTP_ERROR_MAPPERS` below validates it — and a runtime without the seam refuses this server's
-# `[runtime.log] sink` key right there, naming the key but not the cause. See api/runtime_contract.py;
-# it goes with the pin.
-assert_the_runtime_carries_the_structured_log_seam()
 
 
 @asynccontextmanager

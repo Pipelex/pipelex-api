@@ -12,7 +12,7 @@ An error response produces exactly one line. A caller mistake:
 
 A server fault looks the same at `ERROR`, and carries the traceback under an `exception` key.
 
-The `message` is a short, stable sentence built from the HTTP status and the error type — both of them values the server chose. Nothing a caller supplied ever reaches it: the caller-facing explanation rides the `detail` field instead, so a body crafted with newlines or quotes cannot break the line or forge a key. The sink escapes what it writes.
+The `message` is a short, stable sentence built from the HTTP status and the error type — both of them values the server chose. Nothing a caller supplied ever reaches it: the caller-facing explanation rides the `detail` field instead, so a body crafted with newlines or quotes cannot break the line or forge a key. Two layers keep the `detail` value safe to write. Before any sink sees a record, the Pipelex runtime's redaction processor replaces a control character in a field's value with its printable escape, so a newline a caller sent reads as `\n` in `detail`, and replaces a credential it recognises, an `Authorization` header's token or an API key, with `[REDACTED]`. The sink then escapes what it writes, so a quote or an `=` stays inside its value. The processor is configured under `[runtime.log.redaction]` and is on by default.
 
 ## The fields a line carries
 
@@ -25,6 +25,7 @@ These keys come from the sink itself and are on every line written by the proces
 | `logger` | The module that emitted it |
 | `message` | The human-readable summary |
 | `exception` | The traceback, when the record carries one |
+| `trace_id`, `span_id`, `trace_flags` | The trace context, in lowercase hex, when the record was logged inside a span, which is the case for a line the runtime emits from inside a traced run |
 
 `request_id` comes from the request-scoped context the request-id middleware binds, so **every** record emitted while a request is in flight carries it. The example above is one of the server's own lines, but a line the Pipelex runtime emits from inside a pipeline run carries the same id, which is what ties the two together without any call site passing it along. The value is the one echoed in the response's `X-Request-ID` header and in the problem document's `request_id` member, so a caller reporting a failure hands you the key to its log lines.
 

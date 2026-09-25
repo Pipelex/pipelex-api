@@ -138,26 +138,41 @@ class TestErrorLogRecords:
         assert "PipelexConfigError" in payload["exception"]
 
     @pytest.mark.parametrize(
-        "crafted_detail",
+        ("crafted_detail", "logged_detail"),
         [
             # Back when the API flattened its own fields into a `key=value` run, each of these
-            # forged either a sibling field or a whole second line. The API renders nothing now,
-            # and the sink escapes what it writes, so each must survive as one field's value.
-            "legit\nstatus=200 event=auth_success",
-            "hijack status=200 event=fake",
-            "legit\rstatus=200",
-            'has " a quote = inside',
+            # forged either a sibling field or a whole second line. The API renders nothing now:
+            # the runtime escapes a control character in a field's value and the sink escapes what
+            # it writes, so each must survive as one field's value.
+            ("legit\nstatus=200 event=auth_success", "legit\\nstatus=200 event=auth_success"),
+            ("hijack status=200 event=fake", "hijack status=200 event=fake"),
+            ("legit\rstatus=200", "legit\\rstatus=200"),
+            ('has " a quote = inside', 'has " a quote = inside'),
         ],
     )
-    def test_a_crafted_detail_survives_as_one_value_and_forges_nothing(self, caplog: pytest.LogCaptureFixture, crafted_detail: str):
-        # The escaping the API used to do itself is the sink's job now: `json.dumps` writes a
-        # control character inside the string, so the line stays one object and the value comes
-        # back out of the parser exactly as the caller sent it.
+    def test_a_crafted_detail_survives_as_one_value_and_forges_nothing(
+        self, caplog: pytest.LogCaptureFixture, crafted_detail: str, logged_detail: str
+    ):
+        # The escaping the API used to do itself is the runtime's job now, in two layers. The
+        # redaction processor every sink sits behind turns a control character in a field's value
+        # into its printable escape, so a newline the caller sent reads `\n` in `detail`; then
+        # `json.dumps` writes each value inside one string, so a quote or an `=` stays part of it.
+        # Either way the line stays one object and the value comes back as one field.
         with caplog.at_level(logging.WARNING):
             response = _build_client().get("/caller-mistake", params={"detail": crafted_detail})
         assert response.status_code == 422
         payload = _rendered_json(_api_error_record(caplog))
-        assert payload["detail"] == crafted_detail
+        assert payload["detail"] == logged_detail
         assert payload["event"] == API_ERROR_EVENT, "a crafted detail forged or overwrote a field"
         assert payload["status"] == 422, "a crafted detail forged or overwrote a field"
         assert crafted_detail not in payload["message"], "caller input reached the message"
+
+    def test_a_credential_echoed_into_a_detail_is_redacted_on_the_line(self, caplog: pytest.LogCaptureFixture):
+        # A validation message can echo what the caller sent, header text included. The runtime's
+        # redaction processor scrubs the credential out of the field before the sink writes it, and
+        # keeps the scheme, so the line still says which kind of credential went.
+        with caplog.at_level(logging.WARNING):
+            response = _build_client().get("/caller-mistake", params={"detail": "rejected Authorization: Bearer placeholder-not-a-token"})
+        assert response.status_code == 422
+        payload = _rendered_json(_api_error_record(caplog))
+        assert payload["detail"] == "rejected Authorization: Bearer [REDACTED]"
