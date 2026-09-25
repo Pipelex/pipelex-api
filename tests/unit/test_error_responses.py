@@ -136,6 +136,10 @@ class TestErrorResponses:
         assert body["error_type"] == "PayloadTooLarge"
         assert body["error_domain"] == "input"
         assert body["status"] == 413
+        # The body-size middleware has to return a response rather than raise, so it builds its own
+        # problem document — and it reads the route and the id off the `Request` it was handed,
+        # like every other error path.
+        assert body["instance"] == "/v1/version"
         assert body["request_id"] == response.headers[REQUEST_ID_HEADER]
         assert body["retryable"] is False
 

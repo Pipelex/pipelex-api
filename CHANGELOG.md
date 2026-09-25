@@ -1,5 +1,21 @@
 # Changelog
 
+## [v0.28.0] - 2026-09-25
+
+### Highlights
+
+**The runner's logs are structured.** Every line it writes to stderr is one JSON object with each value under a key of its own, the request id rides every record a request emits, the Pipelex runtime's included, and secrets are scrubbed before a line is written.
+
+### Changed
+
+- **The server's logs are structured, one JSON object per line on stderr (Breaking)**: `[runtime.log] sink = "json"` replaces the Rich console renderer, `console_log_target` moves to `stderr`, and `pretty_print_mode = "silent"` stops an operator pipe drawing its "Output of pipe" panel on the thread serving a request. Every value an error line carries — `route`, `status`, `error_type`, `error_domain`, `retryable`, `user_id` / `pipe_code` / `pipeline_run_id` when the request bound them, and `detail` on the failures this API authors itself — is a key of its own now rather than part of a `key=value` run inside the message, and `request_id` rides the runtime's request-scoped log context, so it lands on every record emitted during a request, including the ones Pipelex emits from inside a run. The message is a short sentence built only from the status and the error type, so no caller-supplied string reaches it and the API's own escaping is gone: the sink is what serializes a value now. A log query matching `event=api_error` as text has to move to the `event` field. The new `docs/logging.md` documents the line and every field on it. Uvicorn's own banner and access log are unchanged and still plain text.
+- **Pinned `pipelex` 0.66.0 (Breaking)**: up from `==0.65.0`, exactly, the release that carries the structured-log seam the entry above rides on: named fields and the run-scoped log context, the `json` sink selected by `[runtime.log] sink`, the redaction of secrets before any sink sees a record, and Rich behind the `cli` extra, which this server's extras leave out. On this server's lines that means a credential echoed into `detail` reads `[REDACTED]`, a control character in a field's value reads as its printable escape (`\n` where a caller sent a newline), and a line logged inside a traced run carries `trace_id`, `span_id` and `trace_flags`; `docs/logging.md` says so. The `.pipelex/` config shipped here already sits at the schema that release migrates to, so no migration is required. One change reaches an operator beyond the logs: the S3 storage provider now signs links and reads and writes objects on the bucket's own regional host, `<bucket>.s3.<region>.amazonaws.com`, so a deployment whose egress rules allow S3 by hostname must allow `*.s3.<region>.amazonaws.com`. Nothing on the wire moves.
+- **`POST /v1/codegen` stamps `engine_version` `0.66.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.65.0` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
+
+### Fixed
+
+- **A local image build no longer bakes the builder's own Pipelex overrides in**: `.pipelex/pipelex_override.toml` and `.pipelex/telemetry_override.toml` are untracked per-developer files, so CI never had them, but `make docker-build` copied whatever the developer had into the image — their storage backend, their log level, their telemetry credentials. A locally built image then behaved differently from the published one, with nothing in the diff to say so. `.dockerignore` excludes them; an operator still supplies overrides to a container by mounting them at `/root/.pipelex`.
+
 ## [v0.27.5] - 2026-09-25
 
 ### Changed

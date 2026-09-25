@@ -200,6 +200,19 @@ services:
 
 Use this when you want full control — for example, to ship your own inference backends, model deck, or routing profiles. You're now responsible for keeping the contents in sync with the version of Pipelex inside the image (the image's bundled `inference/`, `pipelex.toml`, etc. are no longer present at runtime).
 
+!!! warning "Your `pipelex.toml` must re-supply the logging keys"
+
+    The shipped `pipelex.toml` is what puts this server on structured logs, and replacing the directory replaces it. Without these three keys Pipelex falls back to its own defaults, which are written for someone at a terminal: the Rich console sink instead of JSON lines, and the "Output of pipe" panel rendered on the thread serving each request. Copy them into your own file:
+
+    ```toml
+    [runtime.log]
+    sink = "json"
+    console_log_target = "stderr"
+    pretty_print_mode = "silent"
+    ```
+
+    See [Logging](logging.md#configuration) for what each one does. Option 1 above does not have this problem — a layered override keeps the keys you did not mention.
+
 ### `docker run` equivalent
 
 ```bash

@@ -20,7 +20,6 @@ from typing import Any, NoReturn
 from pipelex.base_exceptions import ErrorDomain
 
 from api.error_types import ErrorType
-from api.logging_context import get_request_id, get_route_path
 from api.problem_document import build_problem_document_from_api_error
 
 
@@ -31,7 +30,9 @@ class ApiError(Exception):
     `api.exception_handlers` as `application/problem+json`. Distinct from a pipelex
     `PipelexError`: there is no `ErrorReport` behind it — the failure is the
     API's own request validation, auth, or configuration check. The problem
-    document is built at raise time so the handler only has to serialize it.
+    document is built at raise time, less the request context: `instance` and
+    `request_id` are stamped by the handler, which is the frame that holds the
+    `Request`.
     """
 
     def __init__(self, *, status_code: int, document: dict[str, Any], headers: dict[str, str] | None = None) -> None:
@@ -51,16 +52,19 @@ def _raise_api_error(
 ) -> NoReturn:
     """Build the RFC 7807 document and raise `ApiError`.
 
-    `instance` and `request_id` come from the request-scoped logging
-    contextvars (`api.logging_context`), bound by `RequestIdMiddleware`, so the
-    helpers stay parameter-clean and call sites need no `Request`.
+    The document is built without the request context: `instance` and
+    `request_id` are stamped by `handle_api_error`, from the `Request` it is
+    handed. That keeps these helpers parameter-clean — a call site deep inside
+    a route still needs no `Request` — while leaving the API with no ambient
+    request state of its own, and it is how the three error paths end up
+    reading the route and the id from exactly one place.
     """
     document = build_problem_document_from_api_error(
         error_type,
         message,
         status,
-        instance=get_route_path(),
-        request_id=get_request_id(),
+        instance=None,
+        request_id=None,
         error_domain=error_domain,
     )
     raise ApiError(status_code=status, document=document, headers=headers)
