@@ -11,6 +11,89 @@
 
 - **A local image build no longer bakes the builder's own Pipelex overrides in**: `.pipelex/pipelex_override.toml` and `.pipelex/telemetry_override.toml` are untracked per-developer files, so CI never had them, but `make docker-build` copied whatever the developer had into the image — their storage backend, their log level, their telemetry credentials. A locally built image then behaved differently from the published one, with nothing in the diff to say so. `.dockerignore` excludes them; an operator still supplies overrides to a container by mounting them at `/root/.pipelex`.
 
+## [v0.27.5] - 2026-09-25
+
+### Changed
+
+- **`POST /v1/validate` graphs a `method_ref` package's manifest entry pipe**: the valid arm's `graph_spec` is now drawn from the pipe `default_pipe_ref` names, so a package whose `METHODS.toml` names a `main_pipe` is graphed from that pipe rather than from its primary bundle's own `main_pipe`. A published method whose entry pipe only its manifest declares, which used to answer `graph_spec: null`, now carries its graph, and a manifest `main_pipe` the package does not resolve answers `null` rather than a graph of another pipe. Inline `mthds_contents` are graphed as before.
+- **Pinned `pipelex` 0.65.0**: up from `==0.64.2`, exactly. The runtime's bundle-validator seam now takes the pipe to graph, which the `POST /v1/validate` change above rides on. The `.pipelex/` config schema did not move, so no migration is required.
+- **`POST /v1/codegen` stamps `engine_version` `0.65.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.64.2` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
+
+### Fixed
+
+- **In-page links on the Pipe Validate docs page**: the page's topical sections are now headings, so the links to the effective entry pipe, the opt-in extras, sourcing submitted files, where validation runs and who the validation is done for land on their section instead of the top of the page, from that page and from Pipe Builder. The deployment resource note is back under where validation runs.
+
+## [v0.27.4] - 2026-09-24
+
+### Changed
+
+- **Pinned `pipelex` 0.64.2**: up from `==0.64.1`, exactly, a patch release that keeps the message of an unknown model reference under strict error disclosure. A `/v1/validate` or run of a method naming a model the deck does not know now answers its 422 with the model that was named and the "Did you mean" suggestions, instead of "An internal error occurred.". No wire, config or OpenAPI change.
+- **`POST /v1/codegen` stamps `engine_version` `0.64.2`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.64.1` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
+
+## [v0.27.3] - 2026-09-24
+
+### Changed
+
+- **Pinned `pipelex` 0.64.1**: up from `==0.64.0`, exactly, a patch release whose runtime change keeps a test run's telemetry off the Pipelex Gateway stream and which moves its own exact pin to `mthds` 0.16.0, so the image now ships that version. Nothing on the wire moves — the committed `docs/openapi/pipelex-api.openapi.yaml` changes only in its `info.version` — and the `.pipelex/` config schema did not move, so no migration is required.
+- **`POST /v1/codegen` stamps `engine_version` `0.64.1`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.64.0` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
+
+## [v0.27.2] - 2026-09-24
+
+### Added
+
+- **`analytics_groups` on `POST /v1/validate` and `POST /v1/build/runner`**: both routes dry-run the submitted pipes, and that telemetry — the `pipe_dry_run` event and the dry runs themselves — is now attributed to the caller: the authenticated user and the request's optional `analytics_groups`, which follow the same rules as on a run and are refused with the same `422` `InvalidAnalyticsGroups`. Before this, every validation on a hosted deployment reported under one constant id per deployment.
+
+### Changed
+
+- **Pinned `pipelex` 0.64.0**: up from `==0.63.0`, exactly, because the caller a validation is done for is a required argument of the runtime's bundle-validator seam from that release on, and the runtime now carries a run's caller context as `extras`, which the `analytics_groups` wire field maps onto. Nothing else on the wire moves and the `.pipelex/` config schema did not move, so no migration is required.
+- **`POST /v1/codegen` stamps `engine_version` `0.64.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.63.0` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
+
+## [v0.27.1] - 2026-09-23
+
+### Added
+
+- **`analytics_groups` on `POST /v1/execute` and `POST /v1/start`**: a run request may carry an opaque mapping of group type to group key, such as `{"organization": "org_acme"}`, which the runtime stamps on every span of the run as `pipelex.run.analytics_groups` and which the deployment's own PostHog stream, in `identified` mode, attaches to each capture as PostHog groups. It follows the runtime's own rules — lowercase snake_case group types, group keys from `A-Za-z0-9_-`, at most five entries — and a mapping outside them is refused with a `422` whose `error_type` is `InvalidAnalyticsGroups`; omitting it leaves the run in no group.
+
+### Changed
+
+- **Pinned `pipelex` 0.63.0**: up from `==0.62.0`, exactly, for the run-scoped analytics groups and per-caller telemetry that `analytics_groups` rides on. A deployment reporting to its own PostHog or OpenTelemetry backend now sees each run under its caller — the run's `user_id` becomes the PostHog `distinct_id` and is written on every span as `pipelex.run.user_id` — while a single-tenant deployment, whose runs all carry the shared `single-tenant` id, keeps reporting under its configured identity. Nothing on the wire moves and the `.pipelex/` config schema did not move, so no migration is required.
+- **`POST /v1/codegen` stamps `engine_version` `0.63.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.62.0` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
+
+### Fixed
+
+- **A run route's `422` names the extension field that failed**: every failure on `pipeline_run_id`, `callback_urls`, `orchestration_mode` or `storage_scope` used to answer `error_type` `InvalidCallbackUrls`, including a traversal in `storage_scope` on a request that carried no callback at all. An invalid `storage_scope` now answers `InvalidStorageScope`, an invalid `callback_urls` still answers `InvalidCallbackUrls`, and a failure on any other field, or on more than one at once, carries the generic `ValidationError`.
+
+## [v0.27.0] - 2026-09-21
+
+### Changed
+
+- **Pinned `pipelex` 0.62.0**: up from `==0.61.0`, exactly, for the shipped model deck's move onto the models the Pipelex Gateway serves from Azure. Nothing on the wire moves — the committed `docs/openapi/pipelex-api.openapi.yaml` changes only in its `info.version` — and the `.pipelex/` config schema did not move, so no migration is required.
+- **The vendored model deck resolves only to models the Pipelex Gateway serves from Azure (Breaking)**: this image serves the `.pipelex/inference/` tree it ships rather than the installed wheel's kit, and that deck had not been re-synced since v0.14.0, so every previous pin move left the roster untouched. Every default alias and preset keeps its name, but the language ladder is now the GPT-5.6 range — the premium tier and `@best-gpt` resolve to `gpt-5.6-sol`, the general and large-context tiers to `gpt-5.6-terra`, the small tiers to `gpt-5.6-luna`, where they previously resolved to `claude-4.7-opus`, `claude-4.6-sonnet`, the Gemini `*-latest` pair and `gpt-4o-mini` — and image generation's tiers resolve to `gpt-image-2` in place of `nano-banana` and `nano-banana-2`. `GET /v1/models` answers this deck, so its `aliases` and `waterfalls` change with it, and `$engineering-codebase-analysis` reaches its model through `@default-large-context-code` rather than a provider-named alias.
+- **A deployment holding its own provider key must declare the new handles (Breaking)**: the Pipelex Gateway resolves them from the remote config it fetches at boot, so the default deployment needs nothing, but the vendored `backends/` rosters declare none of the GPT-5.6 range. Such a deployment still starts — `missing_presets_reaction` is `log`, and an alias satisfies the deck's membership check without its target being declared — and then answers `500` on the first `/execute` that takes a default tier. Declare the handles in the backend file, or keep the previous models by naming them in an `x_custom_llm_deck.toml`, which `pipelex update` never touches.
+- **The vendored deck declares `temperature = 1` throughout (Breaking)**: every model in the GPT-5.6 range fixes its temperature at 1, so every preset states that value in place of one the worker would override while warning on every call, and `[llm.choice_defaults].default_temperature` is 1 for the same reason. Presets are therefore distinguished by their model tier and their reasoning effort alone, so `$writing-factual` and `$writing-creative` now issue the same call. A method that needs a temperature of its own must write an inline LLM settings table — `model = { model = "gpt-4o", temperature = 0.8 }`.
+- **The vendored Gateway roster reference agrees with the deck again**: `backends/pipelex_gateway_models.md` and its plain twin are generated from the served remote config and had never been refreshed since this repo was created, so they advertised `gpt-5.2` and carried no `gpt-5.6-*` handle at all while the deck resolved every tier to one. Both are re-synced, so the reference an operator opens to pick a handle now matches what the deck runs on.
+- **`POST /v1/codegen` stamps `engine_version` `0.62.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.61.0` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
+
+### Fixed
+
+- **The vendored deck no longer aliases a handle no enabled backend declares**: `@best-claude` and `@default-premium` both resolved to `claude-4.7-opus`, which the vendored `backends/anthropic.toml` does not declare — it stops at `claude-4.6-opus`. The re-synced deck removes the dangling target.
+
+### Removed
+
+- **`best-claude`, `best-gemini` and `best-mistral` are gone from the vendored deck (Breaking)**: an alias naming a provider cannot honestly resolve to a GPT model, and the image deck's `best-gemini` goes with them. A method referencing one now fails validation with the usual alias-not-found error; declare it in an `x_custom_llm_deck.toml` to keep it.
+
+## [v0.26.1] - 2026-09-20
+
+### Changed
+
+- **Pinned `pipelex` 0.61.0**: up from `==0.60.0`, exactly, for a set of fixes to the way generated and remote images are fetched and stored, which are the changes that actually reach a run here. Nothing on the wire moves — the committed `docs/openapi/pipelex-api.openapi.yaml` is unchanged — and the `.pipelex/` config schema did not move either, so no migration is required. The model roster is unaffected as well: 0.61.0 revises the handles in pipelex's own bundled kit, but this server reads the vendored `.pipelex/inference/` it ships rather than that kit, so `GET /v1/models` answers exactly what it answered under 0.60.0.
+- **`POST /v1/codegen` stamps `engine_version` `0.61.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.60.0` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
+
+### Fixed
+
+- **A generated image is stored and reported under its real media type**: `pipelex` resolved a generated image's mime type to mint its storage key but never handed that type to the storage provider, so S3 stored every generated image untyped and served it back as `binary/octet-stream`; an image fetched from a remote URL now also keeps the type that URL served instead of falling through to a hardcoded `image/jpeg`. A caller that trusts the `mime_type` on an image a run returns, or that serves the stored object straight to a browser, now gets the type the bytes actually are.
+- **A remote image that fails to download no longer fails the whole run**: the upstream fallback for an unreachable remote image — log the warning, keep the URL — guarded on exception types the fetch never raised, so a 404 or a timeout on an image input propagated out and failed the run instead. A fetch given no explicit timeout also had no timeout at all, leaving a hanging server to block the caller indefinitely. Both are fixed in `pipelex` 0.61.0 and `POST /v1/execute` inherits them.
+
 ## [v0.26.0] - 2026-09-19
 
 ### Changed

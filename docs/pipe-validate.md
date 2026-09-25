@@ -23,6 +23,7 @@ Validate MTHDS content by parsing, loading, and dry-running pipes without execut
 - `render` (list[str], optional, default `[]`): opt-in *rendered text* to attach to the verdict — see [Opt-in extras](#opt-in-extras-render-and-views)
 - `views` (list[str], optional, default `[]`): opt-in *structured views* to attach to the verdict — see [Opt-in extras](#opt-in-extras-render-and-views)
 - `orchestration_mode` (string | null, optional): per-request backend override for the validation dispatch — see [Where validation runs](#where-validation-runs). Honored only when the deployment allows it; a forbidden override is a 403
+- `analytics_groups` (object | null, optional): **Pipelex-API extension.** The groups the caller belongs to, as a mapping of group type to group key, with the same rules as on a run — see [Who the validation is done for](#who-the-validation-is-done-for). A mapping outside those rules is a 422 whose `error_type` is `InvalidAnalyticsGroups`
 
 **Response (the verdict union):**
 
@@ -63,7 +64,7 @@ The 200 body is one of two arms, discriminated on the mandatory `is_valid` field
 - `is_valid` (`true`): the discriminant of the valid arm — always `true` on this report
 - `bundle_blueprint` (object): the batch's primary blueprint — the first file declaring `main_pipe`, else the first file
 - `pipe_io_contracts` (object): per-pipe input/output contracts, keyed by the namespaced `pipe_ref` (`domain.code`); each entry carries the JSON Schema of every declared input and the output's concept + multiplicity (`single` | `variable`)
-- `graph_spec` (object | null): best-effort execution graph of the declared `main_pipe`, dry-run against the validated library; `null` when the batch declares no `main_pipe` or the graph dry-run degrades
+- `graph_spec` (object | null): best-effort execution graph of the pipe a selector-less run of this request would execute — the pipe [`default_pipe_ref`](#the-effective-entry-pipe) names — dry-run against the validated library; `null` when no entry pipe is determined or the graph dry-run degrades
 - `validated_pipes` (list): per-pipe sweep outcomes — `{pipe_ref, status}` entries with status `SUCCESS` | `FAILURE` | `SKIPPED`
 - `pending_signatures` (list[str]): namespaced refs of pipes still declared as signatures (contract-only pipes — `inputs`/`output` with no `type` and no implementation) in the assembled library — what remains to implement
 - `is_runnable` (boolean): `pending_signatures` is empty — whether the validated library is complete enough to run
@@ -108,11 +109,11 @@ The 200 body is one of two arms, discriminated on the mandatory `is_valid` field
 - `is_runnable` (`false`): an invalid bundle is never runnable
 - `message` (string): the human-readable verdict summary (the caller-facing pipelex error message)
 
-**What This Endpoint Does:**
+## What This Endpoint Does
 
-The route wraps the runtime's protocol `validate`: parse → load → dry-run-sweep every pipe → build the per-pipe IO contracts → best-effort graph of the `main_pipe` → assemble the canonical report. The runner returns the verdict as a value — the canonical report on the valid arm, or a structured `ErrorReport` (a bundle the caller can fix) on the invalid arm — and the route maps the invalid verdict to the 200 invalid arm by matching the returned value, never by catching a transport error. A bundle that declares no `main_pipe` validates normally and simply carries `graph_spec: null` — there is no main-pipe precondition.
+The route wraps the runtime's protocol `validate`: parse → load → dry-run-sweep every pipe → build the per-pipe IO contracts → best-effort graph of the entry pipe → assemble the canonical report. The runner returns the verdict as a value — the canonical report on the valid arm, or a structured `ErrorReport` (a bundle the caller can fix) on the invalid arm — and the route maps the invalid verdict to the 200 invalid arm by matching the returned value, never by catching a transport error. A bundle that declares no `main_pipe`, when no manifest names one either, validates normally and simply carries `graph_spec: null` — there is no main-pipe precondition.
 
-**The effective entry pipe:**
+## The effective entry pipe
 
 `default_pipe_ref` states which pipe this request's closure would run if the caller named none. It applies the run routes' own precedence, minus the request selector `/validate` does not have:
 
@@ -123,11 +124,13 @@ It is `null` when no entry pipe is determined — no blueprint declares `main_pi
 
 The field exists because the canonical report is **manifest-blind**: `bundle_blueprint` is the batch's primary blueprint, so for a package whose `METHODS.toml` entry differs from — or exists without — a bundle-level `main_pipe`, a consumer deriving the entry pipe from `bundle_blueprint.main_pipe` alone gets the wrong pipe, or none. Reading `default_pipe_ref` is how a client projects an entry signature that matches what [`POST /v1/execute`](pipe-run.md#running-a-method-by-address-method_ref) and `POST /v1/start` actually default to.
 
+The graph follows the same precedence: on a `method_ref` request whose manifest names a `main_pipe`, the route hands that pipe to the runtime as the graph target, so `graph_spec` draws the pipe `default_pipe_ref` names — including for a package whose bundles declare no `main_pipe` at all, whose entry pipe only the manifest states. A manifest `main_pipe` the closure does not resolve leaves both fields `null` rather than graphing the closure's own `main_pipe`, which no run by that address executes. The target travels with the dispatch, so a validation sent to a worker is graphed the same way.
+
 It states the **run** default, which is looser than the `/build/*` routes' rule on one point: a closure whose domains each declare a `main_pipe` cannot be defaulted on `/build/*` (a `422`), but `/execute` and `/start` run its first declaring blueprint happily — so this field names that pipe rather than reporting `null`.
 
 The field rides the valid arm only. The invalid arm assembles no library, so there is no entry pipe to name and the field is absent, like the other structural artifacts.
 
-**Opt-in extras (`render` and `views`):**
+## Opt-in extras (`render` and `views`)
 
 The verdict body is lean by default: a request that sends neither list gets exactly the structured contract described above, byte-identical to a request that omits both fields. This matters because the highest-frequency callers of `/validate` — editor hooks, CI gates, agent loops — read a handful of fields and discard the rest, and should never pay for bytes they throw away.
 
@@ -145,11 +148,11 @@ Both lists share the same mechanics, and both are deliberately typed as plain `l
 
 Neither axis is part of the verdict contract: a machine consumer branches on the structured fields, and an extra is a presentation or a projection layered on top. That is what keeps adding a token, or changing what one renders, a non-breaking change.
 
-**Sourcing submitted files:**
+## Sourcing submitted files
 
 The submit path carries bundle text, not file paths, so by default the runtime cannot tell the client which file an error belongs to — `source` comes back `null`. Send `mthds_sources` parallel to `mthds_contents` to fix this: each source is the logical identity of that content (e.g. the file's path relative to the submitted directory), and the runtime threads it onto the corresponding `blueprint.source`. The source then rides back on both arms — `bundle_blueprint.source` on the valid arm, and `validation_errors[].source` on the invalid arm — so a multi-file editor client can map a cross-file diagnostic to the file that owns it. Omit `mthds_sources` (or send `null`) and behavior is exactly as before. The list, when present, must be the same length as `mthds_contents`; a mismatch is a request-shape 422 (it is the caller's wiring bug, caught before the validation sweep runs).
 
-**Where validation runs:**
+## Where validation runs
 
 Validation is **`orchestration_mode`-aware**, the same way `/start` is: the runner resolves the effective backend (the deployment default plus the optional per-request `orchestration_mode` override) and dispatches through the bundle-validator registry. Validation is inherently blocking, so there is no delivery axis here — only the backend varies. On the orchestrator-agnostic base — and for `orchestration_mode: direct` — the whole job runs **in-process in one library load on the API side**. On an orchestrator flavor whose mode is selected (e.g. `temporal`), the whole job is **dispatched to a worker** instead, and the API side assembles the same canonical report from the worker's result without loading a library. Either way the verdict is byte-identical: the backend changes, the contract does not. A per-request override the deployment forbids is refused with a 403.
 
@@ -157,11 +160,15 @@ Validation is **`orchestration_mode`-aware**, the same way `/start` is: the runn
 
 The graph is best-effort: a bundle that validates but whose graph dry-run fails still returns 200 on the valid arm with `graph_spec: null`.
 
-**No-verdict (non-2xx) responses:**
+## Who the validation is done for
+
+A validation is not a run, but it still emits telemetry: the sweep's `pipe_dry_run` event and every dry run it performs. The route hands the runtime the caller it is working for — the authenticated user, exactly as a run states it (the single-tenant placeholder when the deployment has no user model), and the request's `analytics_groups`, or none — and the runtime attributes that telemetry to them rather than to the deployment's configured identity. The caller travels with the dispatch, so a validation sent to a worker is attributed the same way. How each telemetry stream then treats the caller is the runtime's decision, described with [`analytics_groups` on a run](pipe-run.md#host-supplied-run-context-storage_scope-and-analytics_groups).
+
+## No-verdict (non-2xx) responses
 
 Only conditions where the endpoint could not produce a verdict are non-2xx, rendered as [RFC 7807 problem documents](error-responses.md):
 
-- **422** — a malformed request body, an `mthds_sources` / `mthds_contents` length mismatch, or both/neither of `mthds_contents` / `method_ref` (request-shape errors caught before the runtime).
+- **422** — a malformed request body, an `mthds_sources` / `mthds_contents` length mismatch, both/neither of `mthds_contents` / `method_ref`, or a malformed `analytics_groups` (`error_type` `InvalidAnalyticsGroups`) — request-shape errors caught before the runtime.
 - **401 / 403** — unauthenticated / forbidden (including a per-request `orchestration_mode` override the deployment does not allow).
 - **`method_ref` resolution failures** — a selector that could not be resolved produced no verdict, so it is never rendered as `is_valid: false`: a malformed reference or a failed fetch is a **422**, no matching package in the repository a **404**, and the custom-Python policy (the sandbox gate, the structures refusal) a **403** — the same statuses and `error_type`s as on the run routes (see the [error table](pipe-run.md#running-a-method-by-address-method_ref)).
 - **5xx** — a server fault (including a host-wiring programmer error, surfaced as `PipelexUnexpectedError`).

@@ -558,6 +558,32 @@ def _summarize_request_validation_error(exc: RequestValidationError) -> str:
     return "; ".join(parts) or "Request validation failed"
 
 
+# The `error_type` a FastAPI-validated body failing on exactly one of these fields carries,
+# so a client branches on the same value whichever route refused the field. `/execute` and
+# `/start` read their extras by hand and classify them the same way in `api.routes.pipelex.pipeline`.
+_BODY_FIELD_ERROR_TYPES: dict[str, ErrorType] = {
+    "analytics_groups": ErrorType.INVALID_ANALYTICS_GROUPS,
+}
+
+
+def _request_validation_error_type(exc: RequestValidationError) -> ErrorType:
+    """Classify a request validation failure by the body field that failed.
+
+    Only a failure confined to one classified body field gets that field's type; anything
+    else — several fields, a query parameter, a model-level validator — keeps the generic
+    `ValidationError`, because naming one field would hide the others.
+    """
+    failed_fields: set[str] = set()
+    for error in exc.errors():
+        location = tuple(error.get("loc", ()))
+        if len(location) < 2 or location[0] != "body":
+            return ErrorType.VALIDATION_ERROR
+        failed_fields.add(str(location[1]))
+    if len(failed_fields) != 1:
+        return ErrorType.VALIDATION_ERROR
+    return _BODY_FIELD_ERROR_TYPES.get(failed_fields.pop(), ErrorType.VALIDATION_ERROR)
+
+
 async def handle_request_validation_error(request: Request, exc: Exception) -> Response:
     """Translate FastAPI's automatic request validation failure into RFC 7807.
 
@@ -575,7 +601,7 @@ async def handle_request_validation_error(request: Request, exc: Exception) -> R
     """
     validation_error = cast("RequestValidationError", exc)
     document = build_problem_document_from_api_error(
-        ErrorType.VALIDATION_ERROR,
+        _request_validation_error_type(validation_error),
         _summarize_request_validation_error(validation_error),
         422,
         instance=request.url.path,

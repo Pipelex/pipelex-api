@@ -1,6 +1,6 @@
 from typing import Annotated, Literal, Union
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from mthds.package.manifest.schema import MTHDS_STANDARD_VERSION
 from pipelex.base_exceptions import PipelexUnexpectedError
@@ -19,6 +19,7 @@ from pipelex.mthds_parsing.pipelex_bundle_blueprint import PipelexBundleBlueprin
 from pipelex.pipeline.bundle_validator import DryRunOutput, DryRunStatus
 from pipelex.pipeline.exceptions import ValidateBundleError
 from pipelex.pipeline.validate_bundle import validate_bundle
+from pipelex.system.caller_identity import CallerIdentity
 from pipelex.tools.misc.package_utils import get_package_version
 from pipelex.tools.typing.pydantic_utils import empty_list_factory_of
 from pydantic import BaseModel, Field
@@ -33,12 +34,13 @@ from api.routes.pipelex.crate_ops import (
     selected_files,
     teardown_current_library,
 )
-from api.schemas.models import ALLOW_SIGNATURES_DESCRIPTION, MthdsPipeRequest
+from api.routes.pipelex.pipeline import get_request_user_id
+from api.schemas.models import ALLOW_SIGNATURES_DESCRIPTION, CallerAnalyticsGroupsMixin, MthdsPipeRequest
 
 router = APIRouter(tags=["build"])
 
 
-class BuildRunnerRequest(MthdsPipeRequest):
+class BuildRunnerRequest(MthdsPipeRequest, CallerAnalyticsGroupsMixin):
     """The runner-script request: the shared closure + pipe selectors, plus the sweep's `allow_signatures`.
 
     Alone among the `/build/*` projections this route keeps `allow_signatures`, because alone among
@@ -133,7 +135,7 @@ def _output_is_list(blueprints: list[PipelexBundleBlueprint], *, pipe_ref: str) 
     # envelope accepts but no server-side method registry resolves yet (shared with /resolve, /codegen).
     responses={404: PROBLEM_404_METHOD_PACKAGE, 501: PROBLEM_501_METHOD_REF},
 )
-async def build_runner(request_data: BuildRunnerRequest) -> JSONResponse:
+async def build_runner(request: Request, request_data: BuildRunnerRequest) -> JSONResponse:
     """Generate a Python runner script for a pipe, riding the codegen types projection.
 
     The one `/build/*` projection that is **not** static: a runner script is a promise the pipe can
@@ -168,6 +170,8 @@ async def build_runner(request_data: BuildRunnerRequest) -> JSONResponse:
             mthds_sources=[item.source for item in selection.files],
             allow_signatures=request_data.allow_signatures,
             dry_run_pipe_codes=[request_data.pipe_ref] if request_data.pipe_ref else None,
+            # The sweep is done for the caller, so its dry runs and `pipe_dry_run` event name them.
+            caller_identity=CallerIdentity.make_from_host(user_id=get_request_user_id(request), extras=request_data.analytics_groups),
         )
     except ValidateBundleError as validate_error:
         return invalid_crate_report_response(validate_error.to_error_report())

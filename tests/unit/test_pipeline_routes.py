@@ -15,13 +15,13 @@ from pipelex.cogt.usage.cost_category import CostCategory
 from pipelex.cogt.usage.token_category import TokenCategory
 from pipelex.pipeline.pipeline_response import PipelexRunResultStart, RunState
 from pipelex.system.job_metadata import JobMetadata, RunMetadata
+from pipelex.system.storage_scope import SINGLE_TENANT_USER_ID
 from pytest_mock import MockerFixture
 
 import api.routes.pipelex.pipeline as pipeline_module
 from api.exception_handlers import register_exception_handlers
 from api.middleware import REQUEST_ID_HEADER, RequestIdMiddleware
 from api.routes.pipelex.pipeline import router as pipeline_router
-from api.security import SINGLE_TENANT_USER_ID
 from tests.unit._constants import VALID_MTHDS
 
 
@@ -396,8 +396,9 @@ class TestStorageScopeReachesTheRun:
 
     Every failure on this path is SILENT by construction, which is why the
     constructor kwarg is asserted rather than just the status code.
-    `_validate_extras` is a key ALLOWLIST, so a field missing from it is dropped
-    with no error; the run then falls back to the caller's own id, writes under
+    The route hands the validated extras to `ApiRunner` field by field, so a
+    keyword left out there is dropped with no error; the run then falls back to
+    the caller's own id, writes under
     the wrong prefix, and still answers 202. On the hosted platform that is
     exactly the org-scoped storage bug — one tenant's output under another
     tenant's key — reported as success.
@@ -436,4 +437,7 @@ class TestStorageScopeReachesTheRun:
         response = client.post("/v1/start", json={"pipe_code": "echo", "storage_scope": bad_scope})
         assert response.status_code == 422
         assert response.headers["content-type"] == "application/problem+json"
+        # Classified by the field that failed: this used to answer `InvalidCallbackUrls`
+        # on a request that carried no callback at all.
+        assert response.json()["error_type"] == "InvalidStorageScope"
         start_mock.assert_not_awaited()

@@ -20,6 +20,7 @@ from pipelex.core.pipes.pipe_output import PipeOutput
 from pipelex.methods.fetching import MethodProvenance
 from pipelex.pipeline.pipeline_response import PipelexRunResultExecute, PipelexRunResultStart
 from pipelex.reporting.usage_records import TokensUsageRecord
+from pipelex.system.run_extras import validate_run_extras
 from pipelex.system.storage_scope import validate_storage_scope
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.functional_validators import SkipValidation
@@ -184,9 +185,9 @@ class RunRequest(BaseModel):
         if request_body.get("pipe_code") is not None or mthds_contents or has_bundle or request_body.get("method_ref") is not None:
             return
         # `PipelineApiExtras` is defined below in this module — resolved at call time, which is
-        # always after import. It is the allowlist of API-server-only keys the routes DO handle
-        # (pipeline_run_id, callback_urls, orchestration_mode, storage_scope), so naming one of
-        # them as "not handled" would be a lie.
+        # always after import. Its fields are the API-server-only keys the routes DO handle —
+        # `_validate_extras` validates the body against this very model — so naming one of them
+        # as "not handled" would be a lie.
         handled_keys = set(cls.model_fields) | set(PipelineApiExtras.model_fields) | {"mthds_content"}
         unhandled_keys = sorted(key for key in request_body if key not in handled_keys)
         if not unhandled_keys:
@@ -249,6 +250,47 @@ _STORAGE_SCOPE_DESCRIPTION = (
     "tenants MUST send this."
 )
 
+_ANALYTICS_GROUPS_DESCRIPTION = (
+    "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the host-supplied groups this run's "
+    'telemetry belongs to, as a mapping of group type to group key (e.g. `{"organization": "org_acme"}`). '
+    "The runtime never reads a key by name: it carries the mapping on the run as its `extras` and stamps it on every span as "
+    "`pipelex.run.extras`, so every OpenTelemetry exporter receives it, and the deployment's own "
+    "PostHog stream, in `identified` mode, forwards it as the capture's groups. What Pipelex's own Gateway telemetry "
+    "stream receives is the runtime's decision, not this server's: the pinned runtime attributes it the same way, "
+    "with the run's `user_id` and these groups. Group types are lowercase snake_case starting with a letter, at most 32 characters; group keys "
+    "are 1 to 128 characters from `[A-Za-z0-9_-]`; at most five entries. Omit it and the run belongs to no "
+    "group, which is right for a single-tenant deployment."
+)
+
+_CALLER_ANALYTICS_GROUPS_DESCRIPTION = (
+    "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the host-supplied groups the caller of this request "
+    'belongs to, as a mapping of group type to group key (e.g. `{"organization": "org_acme"}`), exactly as a run '
+    "request states them. The work this request does is not a run, but it still emits telemetry — the validation "
+    "sweep's `pipe_dry_run` event and its dry runs — and that telemetry is attributed to the caller: the "
+    "authenticated user and these groups. Same rules and same 422 `InvalidAnalyticsGroups` refusal as on "
+    "`/execute` and `/start`. Omit it and the caller belongs to no group."
+)
+
+
+class CallerAnalyticsGroupsMixin(BaseModel):
+    """The optional `analytics_groups` of a request whose work is done for a caller without being a run.
+
+    `/validate` and `/build/runner` dry-run the submitted pipes, and the runtime attributes that
+    telemetry to the caller it is handed (`pipelex.system.caller_identity.CallerIdentity`). The user
+    comes from the trusted auth layer, as on a run; the groups come from the body, as on a run, and are
+    refused at the wire with the runtime's own rules.
+    """
+
+    analytics_groups: dict[str, str] | None = Field(default=None, description=_CALLER_ANALYTICS_GROUPS_DESCRIPTION)
+
+    @field_validator("analytics_groups")
+    @classmethod
+    def _validate_caller_analytics_groups(cls, value: dict[str, str] | None) -> dict[str, str] | None:
+        if value is None:
+            return None
+        return validate_run_extras(value=value)
+
+
 _ORCHESTRATION_MODE_DESCRIPTION = (
     "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — request the orchestration mode (the backend) "
     "for this run. An OPEN string token: `direct` (in-process, the base default), `temporal`, and any other "
@@ -282,12 +324,17 @@ def _is_disallowed_host(host: str) -> bool:
 
 
 class PipelineApiExtras(BaseModel):
-    """Validates the API-server-only fields on `/start` requests.
+    """Validates the API-server-only fields on `/execute` and `/start` requests.
 
     `pipeline_run_id` is the protocol's optional start arg; `callback_urls` is
     THIS server's extension (the MTHDS Protocol defines no completion channel —
     extension args are defined and handled by the implementation that owns
     them). The upstream protocol models don't know about `callback_urls`.
+
+    `storage_scope` and `analytics_groups` are the host-computed run context:
+    data a multi-tenant host knows about its own tenancy and sends in the body,
+    as opposed to the caller's identity, which arrives on a trusted header. The
+    runtime carries both opaquely and validates both again at its own seam.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -296,6 +343,7 @@ class PipelineApiExtras(BaseModel):
     callback_urls: list[str] | None = Field(default=None, max_length=MAX_CALLBACK_URLS)
     orchestration_mode: str | None = Field(default=None, description=_ORCHESTRATION_MODE_DESCRIPTION)
     storage_scope: str | None = Field(default=None, description=_STORAGE_SCOPE_DESCRIPTION)
+    analytics_groups: dict[str, str] | None = Field(default=None, description=_ANALYTICS_GROUPS_DESCRIPTION)
 
     @field_validator("storage_scope")
     @classmethod
@@ -311,6 +359,22 @@ class PipelineApiExtras(BaseModel):
         if value is None:
             return None
         return validate_storage_scope(value=value)
+
+    @field_validator("analytics_groups")
+    @classmethod
+    def _validate_analytics_groups(cls, value: dict[str, str] | None) -> dict[str, str] | None:
+        """Refuse a malformed mapping at the WIRE, with the runtime's own rules.
+
+        The runtime validates the mapping again at the top of `pipeline_run_setup`
+        and on `RunMetadata`, so this is not the only gate. It is the one that
+        answers with a 422 naming the field before a method is fetched or a
+        library loaded. The rules are imported rather than restated: a second
+        spelling of the charset here would drift from the one the runtime
+        enforces, and the drift would surface as a 500 from inside the run.
+        """
+        if value is None:
+            return None
+        return validate_run_extras(value=value)
 
     @field_validator("callback_urls")
     @classmethod
@@ -353,18 +417,21 @@ class PipelexApiStartRequest(StartRequest):
     )
     orchestration_mode: str | None = Field(default=None, description=_ORCHESTRATION_MODE_DESCRIPTION)
     storage_scope: str | None = Field(default=None, description=_STORAGE_SCOPE_DESCRIPTION)
+    analytics_groups: dict[str, str] | None = Field(default=None, description=_ANALYTICS_GROUPS_DESCRIPTION)
 
 
 class PipelexApiExecuteRequest(RunRequest):
-    """Documented body of `POST /execute` — the protocol's `RunRequest` plus THIS server's `orchestration_mode` extension.
+    """Documented body of `POST /execute` — the protocol's `RunRequest` plus THIS server's run extensions.
 
     Used only to publish the OpenAPI request schema: `/execute` reads the body through the raw
     `Request` (kajson decoding), so FastAPI cannot infer the body type; this model documents the
-    per-request `orchestration_mode` override the route actually honors (parsed by `PipelineApiExtras`).
+    extensions the route actually honors (`orchestration_mode`, `storage_scope`, `analytics_groups`,
+    all parsed by `PipelineApiExtras`).
     """
 
     orchestration_mode: str | None = Field(default=None, description=_ORCHESTRATION_MODE_DESCRIPTION)
     storage_scope: str | None = Field(default=None, description=_STORAGE_SCOPE_DESCRIPTION)
+    analytics_groups: dict[str, str] | None = Field(default=None, description=_ANALYTICS_GROUPS_DESCRIPTION)
 
 
 class PipeOutputWire(PipeOutput):

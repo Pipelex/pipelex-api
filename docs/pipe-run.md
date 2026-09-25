@@ -38,6 +38,8 @@ Execute a Pipelex pipeline with flexible inputs and wait for completion.
 - `bundle_b64` (string, optional): **Pipelex-API extension.** Base64-encoded zip of a whole method bundle — see [Shipping a method bundle](#shipping-a-method-bundle-custom-pipefunc). Mutually exclusive with `files`.
 - `files` (dict[str, str], optional): **Pipelex-API extension.** The same bundle as a `{relative_path: text}` map (the unzipped equivalent of `bundle_b64`). Mutually exclusive with `bundle_b64`.
 - `method_ref` (string, optional): **Pipelex-API extension.** Run a published method by address instead of inline source — see [Running a method by address](#running-a-method-by-address-method_ref). Mutually exclusive with `mthds_contents` and with a method bundle; `pipe_code` may accompany it to override the package's `main_pipe`.
+- `storage_scope` (string, optional): **Pipelex-API extension.** The prefix every object this run writes lands under — see [Host-supplied run context](#host-supplied-run-context-storage_scope-and-analytics_groups).
+- `analytics_groups` (dict[str, str], optional): **Pipelex-API extension.** The groups this run's telemetry belongs to, such as `{"organization": "org_acme"}` — see [Host-supplied run context](#host-supplied-run-context-storage_scope-and-analytics_groups).
 
 **Validation Rules:**
 
@@ -115,6 +117,8 @@ Start a pipeline execution and get its `pipeline_run_id` back with a `202` ack.
 - `bundle_b64` (string, optional): **Pipelex-API extension.** Base64-encoded zip of a whole method bundle — see [Shipping a method bundle](#shipping-a-method-bundle-custom-pipefunc). Mutually exclusive with `files`.
 - `files` (dict[str, str], optional): **Pipelex-API extension.** The same bundle as a `{relative_path: text}` map (the unzipped equivalent of `bundle_b64`). Mutually exclusive with `bundle_b64`.
 - `method_ref` (string, optional): **Pipelex-API extension.** Run a published method by address instead of inline source — see [Running a method by address](#running-a-method-by-address-method_ref). Mutually exclusive with `mthds_contents` and with a method bundle; `pipe_code` may accompany it to override the package's `main_pipe`.
+- `storage_scope` (string, optional): **Pipelex-API extension.** The prefix every object this run writes lands under — see [Host-supplied run context](#host-supplied-run-context-storage_scope-and-analytics_groups).
+- `analytics_groups` (dict[str, str], optional): **Pipelex-API extension.** The groups this run's telemetry belongs to, such as `{"organization": "org_acme"}` — see [Host-supplied run context](#host-supplied-run-context-storage_scope-and-analytics_groups).
 
 **Validation Rules:**
 
@@ -270,6 +274,34 @@ Both `/execute` and `/start` accept **`method_ref`** — a globally resolvable a
 **Environment knobs.** The cache: `MAX_METHOD_CACHE_CLONES` (default 64), `MAX_METHOD_CACHE_TOTAL_KIB` (default 512 MiB), `MAX_METHOD_CACHE_AGE_HOURS` (default 24), `METHOD_CACHE_DIR` (default: a fixed directory under the system temp dir). The fetch itself is bounded by the pipelex runtime's fetched-package ceilings: `PIPELEX_MAX_FETCHED_PACKAGE_FILES` (default 256), `PIPELEX_MAX_FETCHED_PACKAGE_TOTAL_KIB` (default 8 MiB), and the manifest-scan bounds `PIPELEX_MAX_SCANNED_MANIFESTS` (default 100 manifests considered per fetched repository) and `PIPELEX_MAX_MANIFEST_FILE_KIB` (default 256 KiB per `METHODS.toml` read during package location). All are read once at process start.
 
 `method_ref` also selects the method on the tooling routes: natively on [`POST /v1/validate`](pipe-validate.md), and as the closure selector on [`/resolve` and `/codegen`](codegen.md) (address form resolved; the registry form stays a `501`).
+
+---
+
+## Host-supplied run context: `storage_scope` and `analytics_groups`
+
+Both `/execute` and `/start` accept two optional fields that describe the run's tenancy rather than its method. Both are **Pipelex-API extensions**, and both are **data the host computes**, which is why they ride in the body: the caller's *identity* arrives separately, on the trusted `X-User-Id` header or the bearer token (see [Authentication](index.md#authentication)), because it is something a proxy vouches for rather than something the caller chooses. The runtime carries both fields opaquely and never reads a value by name, so it has no notion of what an organization or a tenant is.
+
+```json
+{
+  "pipe_code": "your_pipeline_code",
+  "inputs": { "input_name": "..." },
+  "storage_scope": "org_acme/method_42/run_7",
+  "analytics_groups": { "organization": "org_acme" }
+}
+```
+
+**`storage_scope`** is the prefix every object the run writes lands under: one to three path-safe segments, onto which the runtime composes its own leaves (`assets/`, `generated/`, `results/`, `payloads/`). Omit it and the run is scoped to the caller's own id, which is right for a single-tenant deployment and wrong for a multi-tenant one: a host serving many tenants must send it. Each segment is one or more characters from `A-Za-z0-9_-`, so an empty segment, a leading or trailing slash, a `.` or `..`, or a fourth segment is refused with a `422` whose `error_type` is `InvalidStorageScope`.
+
+**`analytics_groups`** names the entities the run's telemetry belongs to, as a mapping of group type to group key. The runtime carries it on the run as its opaque `extras` and stamps it on every span of the run as the attribute `pipelex.run.extras`, so every OpenTelemetry exporter receives it, and the deployment's own PostHog stream, when `telemetry.toml` sets `mode = "identified"`, attaches it to each capture as PostHog groups. That is what lets a generation made for one of your customers appear inside that customer's organization instead of under one identity for the whole deployment. What Pipelex's own Gateway telemetry stream receives is the runtime's decision, not this server's; the runtime this server pins attributes that stream the same way, with the run's `user_id` and these groups. The rules are the runtime's own, imported rather than restated here:
+
+- A **group type** (a key of the mapping) is lowercase snake_case starting with a letter, at most 32 characters, such as `organization`.
+- A **group key** (a value) is 1 to 128 characters from `A-Za-z0-9_-`. Whitespace, control characters and separators are refused, because the key is quoted into log lines and capture payloads.
+- The mapping holds **at most five** entries, since a telemetry backend registers only a small fixed number of group types per project.
+- It is **optional**. Omitting it, sending `null` or sending `{}` all mean the run belongs to no group, which misattributes nothing.
+
+A mapping outside these rules is refused with a `422` whose `error_type` is `InvalidAnalyticsGroups`, before any method is fetched or any library loaded. A body that fails on more than one of the extension fields at once answers with the generic `ValidationError`, and its `detail` names every field that failed.
+
+The caller's id is the run's person on that same stream, with one exception: a deployment with no user model attributes every run to the literal `single-tenant`, which the runtime declines as a person and replaces with the `user_id` configured in `telemetry.toml`. The groups do not depend on it, so a single-tenant deployment that sends `analytics_groups` still has them on every capture.
 
 ---
 

@@ -13,6 +13,7 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pipelex import log
 from pipelex.system.environment import get_optional_env
+from pipelex.system.storage_scope import SINGLE_TENANT_USER_ID
 from pydantic import BaseModel, Field
 
 from api.error_types import ErrorType
@@ -43,10 +44,10 @@ def is_safe_user_id(value: str) -> bool:
     return bool(value) and value not in (".", "..") and _PATH_UNSAFE_CHARS.search(value) is None
 
 
-# The caller id for a deployment that has declared it has NO user model:
-# `AUTH_MODE=none` with `TRUST_FORWARDED_IDENTITY_HEADERS` off. Such a server has
-# exactly one tenant by configuration, so one namespace is correct rather than
-# accidental.
+# `SINGLE_TENANT_USER_ID`, imported above from the runtime, is the caller id for
+# a deployment that has declared it has NO user model: `AUTH_MODE=none` with
+# `TRUST_FORWARDED_IDENTITY_HEADERS` off. Such a server has exactly one tenant by
+# configuration, so one namespace is correct rather than accidental.
 #
 # **This is not the `anonymous` sentinel under another name, and the difference
 # is the whole point.** `anonymous` was reached by FALLBACK — a deployment that
@@ -59,7 +60,13 @@ def is_safe_user_id(value: str) -> bool:
 #
 # A token may never bind it (`verify_jwt` below), or an authenticated caller
 # could land in the single-tenant namespace on a server that does have users.
-SINGLE_TENANT_USER_ID = "single-tenant"
+#
+# It is the runtime's constant rather than a literal of our own because the
+# runtime recognises it: every deployment configured this way sends the same
+# string, so telemetry declines it as a person and attributes the run to the
+# stream's configured fallback instead. A second spelling here would drift from
+# that one, and every single-tenant deployment would then merge onto one
+# PostHog person with nothing failing to say so.
 
 
 # `auto_error=False` so a missing/empty/non-Bearer `Authorization` header

@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from pipelex.base_exceptions import ErrorDomain, ErrorReport, PipelexConfigError, ValidationErrorCategory, ValidationErrorItem
 from pipelex.plugins.bundle_validator_registry import BundleValidatorRegistry
 from pipelex.runtime_bridge.exceptions import MissingBundleValidatorError
+from pipelex.system.caller_identity import CallerIdentity
 from pytest_mock import MockerFixture
 
 from api.api_config import ApiConfig
@@ -46,6 +47,8 @@ class _StubBundleValidator:
         mthds_sources: list[str] | None,
         allow_signatures: bool,
         library_dirs: Sequence[Path] | None,
+        caller_identity: CallerIdentity | None,
+        graph_pipe_code: str | None,
     ) -> ErrorReport:
         self.calls.append(
             {
@@ -53,6 +56,8 @@ class _StubBundleValidator:
                 "mthds_sources": mthds_sources,
                 "allow_signatures": allow_signatures,
                 "library_dirs": library_dirs,
+                "caller_identity": caller_identity,
+                "graph_pipe_code": graph_pipe_code,
             }
         )
         if self._error is not None:
@@ -152,6 +157,7 @@ class TestValidateDispatch:
                 mthds_sources=None,
                 allow_signatures=False,
                 requested_orchestration_mode=None,
+                graph_pipe_code=None,
             )
         assert exc_info.value.mode == "direct"
 
