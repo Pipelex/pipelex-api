@@ -20,7 +20,7 @@ dependencies = [
   # [tool.uv.sources] below. See the note there for why, and for what collapses it.
   # The extras deliberately leave out `cli`: the runner selects the `json` log sink and a Rich-free
   # pretty-print mode, so nothing it does on a request renders a terminal.
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]",
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]>=0.66.0",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",
@@ -89,8 +89,6 @@ required-version = ">=0.7.2"
 # Only `uv` reads this, so it steers `uv lock` / `uv sync` (and therefore the Docker build, which
 # runs `uv sync --frozen`) and nothing else. The image installs `git`, and the repository is public,
 # so the build needs no credentials to fetch it.
-[tool.uv.sources]
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "80896463d0af6db26a3f839ba26bf5137b55332b" }
 
 [tool.mypy]
 check_untyped_defs = true
