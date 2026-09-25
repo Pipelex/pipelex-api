@@ -90,7 +90,7 @@ required-version = ">=0.7.2"
 # runs `uv sync --frozen`) and nothing else. The image installs `git`, and the repository is public,
 # so the build needs no credentials to fetch it.
 [tool.uv.sources]
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "aa0ef6a2e0b699df3c508e42d3e85a280c494550" }
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "80896463d0af6db26a3f839ba26bf5137b55332b" }
 
 [tool.mypy]
 check_untyped_defs = true
