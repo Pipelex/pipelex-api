@@ -5,8 +5,15 @@
 ### Changed
 
 - **`POST /v1/validate` graphs a `method_ref` package's manifest entry pipe**: the valid arm's `graph_spec` is now drawn from the pipe `default_pipe_ref` names, so a package whose `METHODS.toml` names a `main_pipe` is graphed from that pipe rather than from its primary bundle's own `main_pipe`. A published method whose entry pipe only its manifest declares, which used to answer `graph_spec: null`, now carries its graph, and a manifest `main_pipe` the package does not resolve answers `null` rather than a graph of another pipe. Inline `mthds_contents` are graphed as before.
-- **Pinned `pipelex` 0.65.0**: up from `==0.64.1`, exactly. The runtime's bundle-validator seam now takes the pipe to graph, which the `POST /v1/validate` change above rides on, and an unknown model reference keeps its message under strict error disclosure: a `/v1/validate` or run of a method naming a model the deck does not know now answers its 422 with the model that was named and the "Did you mean" suggestions, instead of "An internal error occurred.". The `.pipelex/` config schema did not move, so no migration is required.
-- **`POST /v1/codegen` stamps `engine_version` `0.65.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.64.1` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
+- **Pinned `pipelex` 0.65.0**: up from `==0.64.2`, exactly. The runtime's bundle-validator seam now takes the pipe to graph, which the `POST /v1/validate` change above rides on. The `.pipelex/` config schema did not move, so no migration is required.
+- **`POST /v1/codegen` stamps `engine_version` `0.65.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.64.2` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
+
+## [v0.27.4] - 2026-09-24
+
+### Changed
+
+- **Pinned `pipelex` 0.64.2**: up from `==0.64.1`, exactly, a patch release that keeps the message of an unknown model reference under strict error disclosure. A `/v1/validate` or run of a method naming a model the deck does not know now answers its 422 with the model that was named and the "Did you mean" suggestions, instead of "An internal error occurred.". No wire, config or OpenAPI change.
+- **`POST /v1/codegen` stamps `engine_version` `0.64.2`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.64.1` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
 
 ## [v0.27.3] - 2026-09-24
 
