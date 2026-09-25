@@ -406,6 +406,7 @@ class ApiRunner(PipelexMTHDSProtocol):
         mthds_sources: list[str] | None,
         allow_signatures: bool,
         requested_orchestration_mode: str | None,
+        graph_pipe_code: str | None,
     ) -> PipelexValidationReport | ErrorReport:
         """Validate MTHDS bundles, returning the verdict as a value (the route maps it to a 200).
 
@@ -429,6 +430,11 @@ class ApiRunner(PipelexMTHDSProtocol):
         `library_dirs` is host context the in-process arm needs; a dispatched arm ignores it (the
         worker loads its own library). A bundle without a declared `main_pipe` validates fine and
         simply carries `graph_spec=None` (D2 — no precondition).
+
+        `graph_pipe_code` is the pipe the best-effort graph is drawn from, resolved the way a run
+        resolves its entry pipe; `None` keeps the runtime's default, the primary blueprint's
+        `main_pipe`. The route passes a fetched package manifest's `main_pipe`, so the graph shows
+        the pipe a selector-less run by that address executes.
         """
         # Resolve the effective mode FIRST — a per-request override the deployment policy forbids
         # is refused (403) here, before any validator dispatch / library load. Mirrors start().
@@ -445,6 +451,7 @@ class ApiRunner(PipelexMTHDSProtocol):
             # A validation is not a run, but its dry runs and its `pipe_dry_run` event are still
             # done for the caller this runner was built for — the user and groups a run would state.
             caller_identity=self.caller_identity,
+            graph_pipe_code=graph_pipe_code,
         )
         # The core seam types its valid arm at the protocol-level ValidationReport (a leaf type)
         # to stay import-acyclic in core; every registered validator in fact produces the canonical

@@ -48,6 +48,7 @@ class _StubBundleValidator:
         allow_signatures: bool,
         library_dirs: Sequence[Path] | None,
         caller_identity: CallerIdentity | None,
+        graph_pipe_code: str | None,
     ) -> ErrorReport:
         self.calls.append(
             {
@@ -56,6 +57,7 @@ class _StubBundleValidator:
                 "allow_signatures": allow_signatures,
                 "library_dirs": library_dirs,
                 "caller_identity": caller_identity,
+                "graph_pipe_code": graph_pipe_code,
             }
         )
         if self._error is not None:
@@ -155,6 +157,7 @@ class TestValidateDispatch:
                 mthds_sources=None,
                 allow_signatures=False,
                 requested_orchestration_mode=None,
+                graph_pipe_code=None,
             )
         assert exc_info.value.mode == "direct"
 

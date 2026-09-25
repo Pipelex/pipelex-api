@@ -11,7 +11,7 @@ info:
   license:
     name: Elastic License 2.0
     identifier: Elastic-2.0
-  version: 0.27.4
+  version: 0.27.5
 paths:
   /health:
     get:
@@ -902,29 +902,32 @@ paths:
         \ could be produced*.\n\nResponse contract:\n\n- **Valid verdict (200, `is_valid: true`):** the `ValidReport` arm\
         \ — the canonical report\n  (primary `bundle_blueprint`, `pipe_io_contracts` keyed by namespaced `pipe_ref`, per-pipe\n\
         \  `validated_pipes` sweep outcomes, `pending_signatures` + `is_runnable` runnability verdict,\n  best-effort `graph_spec`)\
-        \ plus the wire extras (`mthds_contents` echo, `message`,\n  `default_pipe_ref`). A bundle that declares no `main_pipe`\
-        \ validates fine and carries\n  `graph_spec=null`. Pending signatures are reported as `pending_signatures` +\n  `is_runnable:\
-        \ false`, never as an error. `default_pipe_ref` names the pipe a selector-less\n  run of this same request would execute\
-        \ — on a `method_ref` request that is the fetched\n  manifest's `main_pipe`, which the canonical report cannot see,\
-        \ so the field is the only\n  signal a consumer can project a by-address entry signature from.\n  The opt-in `views`\
-        \ tokens `input_form` and `output_form` additionally attach the per-pipe\n  input-form and output-form descriptors\
-        \ as same-named top-level fields, keyed like\n  `pipe_io_contracts`; without a token the matching field is absent\
-        \ and the body is\n  byte-identical to a request that omits `views`. They are separate tokens because they answer\n\
-        \  separate questions — a caller building a fill-in form wants the inputs, a caller rendering a\n  result or registering\
-        \ a tool signature with a return type wants the output.\n- **Invalid verdict (200, `is_valid: false`):** the `InvalidReport`\
-        \ arm — `validation_errors[]`\n  (the structured per-error diagnostics, built by pipelex's one shared builder, incl.\
-        \ the\n  `dry_run` residual item) + `message`, with the structural artifacts absent. The runner\n  returns this as\
-        \ a value (`ErrorReport` with `validation_errors`) regardless of backend — the\n  in-process arm from the bundle's\
-        \ `ValidateBundleError`, the dispatched arm recovered from the\n  worker — so the route maps it to a 200 by matching\
-        \ validation diagnostics, never by catching an\n  exception. Returned `ErrorReport`s without validation diagnostics\
-        \ are backend/config/runtime\n  faults and keep the global RFC 7807 problem response path.\n- **No verdict (non-2xx):**\
-        \ a malformed request body, an `mthds_sources` length mismatch, or\n  both/neither of `mthds_contents` / `method_ref`\
-        \ is a request-shape **422**; a forbidden\n  `orchestration_mode` override is a **403**; a host-wiring programmer\
-        \ error or a genuine\n  orchestrator fault is a **5xx**; auth is **401/403**. A `method_ref` **resolution failure**\n\
-        \  is also a no-verdict condition — never an `is_valid: false`: a malformed reference or a\n  failed fetch is a **422**,\
-        \ no matching package in the repository a **404**, and the\n  custom-Python policy (the sandbox gate, the structures\
-        \ refusal) a **403**, each with the\n  originating error class as `error_type`. All are RFC 7807 `application/problem+json`\n\
-        \  rendered by the global handler in `api.exception_handlers` — routes never shape them."
+        \ plus the wire extras (`mthds_contents` echo, `message`,\n  `default_pipe_ref`). The graph is drawn from the pipe\
+        \ a selector-less run of this request\n  would execute: on a `method_ref` request whose manifest names a `main_pipe`,\
+        \ that pipe;\n  otherwise the primary blueprint's `main_pipe`. A bundle that declares no `main_pipe`, with\n  no manifest\
+        \ naming one, validates fine and carries `graph_spec=null`, and so does a\n  manifest `main_pipe` the closure does\
+        \ not resolve. Pending signatures are reported as `pending_signatures` +\n  `is_runnable: false`, never as an error.\
+        \ `default_pipe_ref` names the pipe a selector-less\n  run of this same request would execute — on a `method_ref`\
+        \ request that is the fetched\n  manifest's `main_pipe`, which the canonical report cannot see, so the field is the\
+        \ only\n  signal a consumer can project a by-address entry signature from.\n  The opt-in `views` tokens `input_form`\
+        \ and `output_form` additionally attach the per-pipe\n  input-form and output-form descriptors as same-named top-level\
+        \ fields, keyed like\n  `pipe_io_contracts`; without a token the matching field is absent and the body is\n  byte-identical\
+        \ to a request that omits `views`. They are separate tokens because they answer\n  separate questions — a caller building\
+        \ a fill-in form wants the inputs, a caller rendering a\n  result or registering a tool signature with a return type\
+        \ wants the output.\n- **Invalid verdict (200, `is_valid: false`):** the `InvalidReport` arm — `validation_errors[]`\n\
+        \  (the structured per-error diagnostics, built by pipelex's one shared builder, incl. the\n  `dry_run` residual item)\
+        \ + `message`, with the structural artifacts absent. The runner\n  returns this as a value (`ErrorReport` with `validation_errors`)\
+        \ regardless of backend — the\n  in-process arm from the bundle's `ValidateBundleError`, the dispatched arm recovered\
+        \ from the\n  worker — so the route maps it to a 200 by matching validation diagnostics, never by catching an\n  exception.\
+        \ Returned `ErrorReport`s without validation diagnostics are backend/config/runtime\n  faults and keep the global\
+        \ RFC 7807 problem response path.\n- **No verdict (non-2xx):** a malformed request body, an `mthds_sources` length\
+        \ mismatch, or\n  both/neither of `mthds_contents` / `method_ref` is a request-shape **422**; a forbidden\n  `orchestration_mode`\
+        \ override is a **403**; a host-wiring programmer error or a genuine\n  orchestrator fault is a **5xx**; auth is **401/403**.\
+        \ A `method_ref` **resolution failure**\n  is also a no-verdict condition — never an `is_valid: false`: a malformed\
+        \ reference or a\n  failed fetch is a **422**, no matching package in the repository a **404**, and the\n  custom-Python\
+        \ policy (the sandbox gate, the structures refusal) a **403**, each with the\n  originating error class as `error_type`.\
+        \ All are RFC 7807 `application/problem+json`\n  rendered by the global handler in `api.exception_handlers` — routes\
+        \ never shape them."
       operationId: validate_mthds_v1_validate_post
       requestBody:
         content:

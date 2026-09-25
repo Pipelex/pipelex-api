@@ -318,8 +318,11 @@ async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSO
       (primary `bundle_blueprint`, `pipe_io_contracts` keyed by namespaced `pipe_ref`, per-pipe
       `validated_pipes` sweep outcomes, `pending_signatures` + `is_runnable` runnability verdict,
       best-effort `graph_spec`) plus the wire extras (`mthds_contents` echo, `message`,
-      `default_pipe_ref`). A bundle that declares no `main_pipe` validates fine and carries
-      `graph_spec=null`. Pending signatures are reported as `pending_signatures` +
+      `default_pipe_ref`). The graph is drawn from the pipe a selector-less run of this request
+      would execute: on a `method_ref` request whose manifest names a `main_pipe`, that pipe;
+      otherwise the primary blueprint's `main_pipe`. A bundle that declares no `main_pipe`, with
+      no manifest naming one, validates fine and carries `graph_spec=null`, and so does a
+      manifest `main_pipe` the closure does not resolve. Pending signatures are reported as `pending_signatures` +
       `is_runnable: false`, never as an error. `default_pipe_ref` names the pipe a selector-less
       run of this same request would execute — on a `method_ref` request that is the fetched
       manifest's `main_pipe`, which the canonical report cannot see, so the field is the only
@@ -371,7 +374,10 @@ async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSO
         with fetched_method_source(request_data.method_ref) as fetched:
             validated_contents = fetched.mthds_contents
             # The manifest's declared entry pipe outranks the closure's own in the run/build default
-            # chain, so it must reach `default_pipe_ref` — the report itself is manifest-blind.
+            # chain, so it must reach `default_pipe_ref` — the report itself is manifest-blind — and
+            # the graph arm, which would otherwise draw the primary blueprint's `main_pipe`: a
+            # different pipe when the two disagree, and no graph at all when the bundles declare none.
+            # The bare code is passed as is, so the graph arm resolves it exactly as the run does.
             manifest_main_pipe = fetched.main_pipe
             verdict = await ApiRunner(
                 library_dirs=fetched.library_dirs,
@@ -382,6 +388,7 @@ async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSO
                 mthds_sources=fetched.mthds_sources,
                 allow_signatures=request_data.allow_signatures,
                 requested_orchestration_mode=request_data.orchestration_mode,
+                graph_pipe_code=manifest_main_pipe,
             )
     elif request_data.mthds_contents is not None:
         validated_contents = request_data.mthds_contents
@@ -392,6 +399,7 @@ async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSO
             mthds_sources=request_data.mthds_sources,
             allow_signatures=request_data.allow_signatures,
             requested_orchestration_mode=request_data.orchestration_mode,
+            graph_pipe_code=None,
         )
     else:
         # Unreachable: the envelope's XOR validator already 422'd this shape. Kept for the type
