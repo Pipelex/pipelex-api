@@ -8,6 +8,10 @@
 - **Pinned `pipelex` 0.65.0**: up from `==0.64.2`, exactly. The runtime's bundle-validator seam now takes the pipe to graph, which the `POST /v1/validate` change above rides on. The `.pipelex/` config schema did not move, so no migration is required.
 - **`POST /v1/codegen` stamps `engine_version` `0.65.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.64.2` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
 
+### Fixed
+
+- **In-page links on the Pipe Validate docs page**: the page's topical sections are now headings, so the links to the effective entry pipe, the opt-in extras, sourcing submitted files, where validation runs and who the validation is done for land on their section instead of the top of the page, from that page and from Pipe Builder. The deployment resource note is back under where validation runs.
+
 ## [v0.27.4] - 2026-09-24
 
 ### Changed
