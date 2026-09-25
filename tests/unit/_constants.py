@@ -68,6 +68,21 @@ description = "A stub package whose manifest declares no entry pipe."
 pipes = ["echo"]
 """
 
+# A stub manifest naming `echo` as the entry pipe of a package whose only bundle is
+# `NO_MAIN_PIPE_MTHDS` (domain `nomain`): the manifest is then the only place the entry pipe is
+# declared, as in a published package whose bundles leave `main_pipe` to `METHODS.toml`.
+STUB_METHOD_MANIFEST_NOMAIN_ENTRY = """\
+[package]
+name = "documents"
+address = "github.com/pipelex/methods"
+version = "0.1.0"
+description = "A stub package whose entry pipe only its manifest declares."
+main_pipe = "echo"
+
+[exports.nomain]
+pipes = ["echo"]
+"""
+
 # A minimal, valid single-pipe bundle used across the build/validate/pipeline route tests.
 VALID_MTHDS = """\
 domain = "smoke"

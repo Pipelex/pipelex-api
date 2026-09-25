@@ -65,6 +65,7 @@ class _RecordingBundleValidator:
         allow_signatures: bool,  # noqa: ARG002
         library_dirs: Sequence[Path] | None,  # noqa: ARG002
         caller_identity: CallerIdentity | None,
+        graph_pipe_code: str | None,  # noqa: ARG002
     ) -> ErrorReport:
         self.caller_identities.append(caller_identity)
         return ErrorReport(

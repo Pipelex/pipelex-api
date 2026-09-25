@@ -64,7 +64,7 @@ The 200 body is one of two arms, discriminated on the mandatory `is_valid` field
 - `is_valid` (`true`): the discriminant of the valid arm — always `true` on this report
 - `bundle_blueprint` (object): the batch's primary blueprint — the first file declaring `main_pipe`, else the first file
 - `pipe_io_contracts` (object): per-pipe input/output contracts, keyed by the namespaced `pipe_ref` (`domain.code`); each entry carries the JSON Schema of every declared input and the output's concept + multiplicity (`single` | `variable`)
-- `graph_spec` (object | null): best-effort execution graph of the declared `main_pipe`, dry-run against the validated library; `null` when the batch declares no `main_pipe` or the graph dry-run degrades
+- `graph_spec` (object | null): best-effort execution graph of the pipe a selector-less run of this request would execute — the pipe [`default_pipe_ref`](#the-effective-entry-pipe) names — dry-run against the validated library; `null` when no entry pipe is determined or the graph dry-run degrades
 - `validated_pipes` (list): per-pipe sweep outcomes — `{pipe_ref, status}` entries with status `SUCCESS` | `FAILURE` | `SKIPPED`
 - `pending_signatures` (list[str]): namespaced refs of pipes still declared as signatures (contract-only pipes — `inputs`/`output` with no `type` and no implementation) in the assembled library — what remains to implement
 - `is_runnable` (boolean): `pending_signatures` is empty — whether the validated library is complete enough to run
@@ -111,7 +111,7 @@ The 200 body is one of two arms, discriminated on the mandatory `is_valid` field
 
 **What This Endpoint Does:**
 
-The route wraps the runtime's protocol `validate`: parse → load → dry-run-sweep every pipe → build the per-pipe IO contracts → best-effort graph of the `main_pipe` → assemble the canonical report. The runner returns the verdict as a value — the canonical report on the valid arm, or a structured `ErrorReport` (a bundle the caller can fix) on the invalid arm — and the route maps the invalid verdict to the 200 invalid arm by matching the returned value, never by catching a transport error. A bundle that declares no `main_pipe` validates normally and simply carries `graph_spec: null` — there is no main-pipe precondition.
+The route wraps the runtime's protocol `validate`: parse → load → dry-run-sweep every pipe → build the per-pipe IO contracts → best-effort graph of the entry pipe → assemble the canonical report. The runner returns the verdict as a value — the canonical report on the valid arm, or a structured `ErrorReport` (a bundle the caller can fix) on the invalid arm — and the route maps the invalid verdict to the 200 invalid arm by matching the returned value, never by catching a transport error. A bundle that declares no `main_pipe`, when no manifest names one either, validates normally and simply carries `graph_spec: null` — there is no main-pipe precondition.
 
 **The effective entry pipe:**
 
@@ -123,6 +123,8 @@ The route wraps the runtime's protocol `validate`: parse → load → dry-run-sw
 It is `null` when no entry pipe is determined — no blueprint declares `main_pipe`, or a manifest names a pipe the closure does not declare, or declares in several domains. In those last two cases a selector-less run by that address would fail to resolve the manifest's pipe too, so the field says nothing rather than naming the closure's pipe, which no such run would execute.
 
 The field exists because the canonical report is **manifest-blind**: `bundle_blueprint` is the batch's primary blueprint, so for a package whose `METHODS.toml` entry differs from — or exists without — a bundle-level `main_pipe`, a consumer deriving the entry pipe from `bundle_blueprint.main_pipe` alone gets the wrong pipe, or none. Reading `default_pipe_ref` is how a client projects an entry signature that matches what [`POST /v1/execute`](pipe-run.md#running-a-method-by-address-method_ref) and `POST /v1/start` actually default to.
+
+The graph follows the same precedence: on a `method_ref` request whose manifest names a `main_pipe`, the route hands that pipe to the runtime as the graph target, so `graph_spec` draws the pipe `default_pipe_ref` names — including for a package whose bundles declare no `main_pipe` at all, whose entry pipe only the manifest states. A manifest `main_pipe` the closure does not resolve leaves both fields `null` rather than graphing the closure's own `main_pipe`, which no run by that address executes. The target travels with the dispatch, so a validation sent to a worker is graphed the same way.
 
 It states the **run** default, which is looser than the `/build/*` routes' rule on one point: a closure whose domains each declare a `main_pipe` cannot be defaulted on `/build/*` (a `422`), but `/execute` and `/start` run its first declaring blueprint happily — so this field names that pipe rather than reporting `null`.
 
