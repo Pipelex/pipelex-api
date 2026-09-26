@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **Pinned `pipelex` 0.66.1**: up from `==0.66.0`, exactly. The release makes loading a library cheaper, since `are_classes_equivalent` settles most comparisons without generating a JSON schema, and it adds `load_from_crate(..., is_crate_prevalidated=True)`, which this server does not call. Nothing on the wire, in the configuration or in the logs moves.
+
 ## [v0.28.0] - 2026-09-25
 
 ### Highlights
