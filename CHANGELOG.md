@@ -1,6 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [v0.29.0] - 2026-09-27
+
+### Highlights
+
+**A caught error reaches the caller with its reason and its place.** A run of an invalid bundle is refused before any pipe runs with the same located validation items `/validate` gives, a failed run names the pipe that failed and its root fault, and a run the caller's own method refuses keeps its explanation under STRICT disclosure.
 
 ### Added
 
