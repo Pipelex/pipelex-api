@@ -334,8 +334,8 @@ async def validate_mthds(request: Request, request_data: ValidateRequest) -> JSO
       separate questions — a caller building a fill-in form wants the inputs, a caller rendering a
       result or registering a tool signature with a return type wants the output.
     - **Invalid verdict (200, `is_valid: false`):** the `InvalidReport` arm — `validation_errors[]`
-      (the structured per-error diagnostics, built by pipelex's one shared builder, incl. the
-      `dry_run` residual item) + `message`, with the structural artifacts absent. The runner
+      (the structured per-error diagnostics, built by pipelex's one shared builder, incl. one
+      located `dry_run` item per pipe whose dry run failed) + `message`, with the structural artifacts absent. The runner
       returns this as a value (`ErrorReport` with `validation_errors`) regardless of backend — the
       in-process arm from the bundle's `ValidateBundleError`, the dispatched arm recovered from the
       worker — so the route maps it to a 200 by matching validation diagnostics, never by catching an
@@ -449,8 +449,9 @@ def _invalid_report_response(error_report: ErrorReport, *, requested_formats: se
 
     The `validation_errors[]` come straight from pipelex's one shared builder via
     `ValidateBundleError.to_error_report()`, so the hosted invalid arm carries the same typed
-    items the agent CLI emits (including the `dry_run` residual item — the structured-info
-    invariant guarantees this list is non-empty on every invalid verdict that reaches the wire,
+    items the agent CLI emits (including one located `dry_run` item per pipe whose dry run failed —
+    the structured-info invariant, which the parse-level `blueprint_validation` residual makes total,
+    guarantees this list is non-empty on every invalid verdict that reaches the wire,
     since the empty-`mthds_contents` edge case is a request-shape 422 via `min_length=1`).
     `message` is the caller-facing summary the error report already carries.
     """

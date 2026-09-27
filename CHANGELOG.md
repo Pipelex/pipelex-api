@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Validation items carry more locators**: a TOML syntax error's item carries the 1-based `line` and `column` the parser stopped at, an `unresolved_concept` item carries `declared_concepts`, and the new `unknown_model` item carries `model_reference` (the reference as the bundle wrote it), `model_type` and `suggestions` (the model deck's close matches of that kind), with an `unsafe` rename fix when there is exactly one. The OpenAPI artifact publishes the new fields and the new `unknown_model` value of `PipeValidationErrorType`.
+- **A run graph marks a list-valued stuff**: every io item of a `graph_spec` carries `multiplicity`, `true` when the stuff is a list, a fixed-count one included, and `null` otherwise, so a renderer can show a `Document[]` input or a `Record[]` output as a list. The schema also admits a positive integer, which the runtime does not emit.
+
+### Changed
+
+- **Pinned `pipelex` 0.67.0 (Breaking)**: up from `==0.66.1`, exactly, the release that carries the located error reporting the entries below describe. The `.pipelex/` config shipped here already sits at the current schema, so no migration is required. The next step of an invalid-bundle verdict, its `user_action.detail`, now reads "Edit the bundle as each validation error says: apply its suggested fix where it has one, after confirming an unsafe one".
+- **The run routes refuse an invalid bundle with its validation verdict (Breaking)**: `POST /v1/execute` and `POST /v1/start` answer every refusal of the bundle while it loads, before any pipe runs, with the `422` `ValidateBundleError` problem document carrying the same located `validation_errors` `POST /v1/validate` gives, which STRICT disclosure keeps. A misspelled concept or a wiring mismatch used to answer a `500`, a TOML fault a `422` without items, and an unknown model the raw model-choice error. An entry pipe the bundle does not declare still answers its own `PipeNotFoundError`.
+- **A failed run reports its root fault, located at the failing pipe (Breaking)**: a run failure's problem document carries the `error_type`, `title`, `type`, `error_domain` and status of the innermost Pipelex error rather than the run-level wrapper's, and its `detail` opens with `Pipe '<pipe>' failed (<entry pipe> → … → <pipe>):`, so a consumer branching on `error_type == "PipelineExecutionError"` branches on the root fault's type. A run the caller's own method refuses, such as a `PipeCondition` whose outcome is `fail`, a `PipeParallel` branch whose multiplicity does not fit its field, a step missing a required input or an inline model the deck does not define, answers a `422` with a `detail` STRICT disclosure keeps, where it answered `500` with `An internal error occurred.`. The completion webhook's `error` carries the same report.
+- **Every load-time refusal is an item of the validation verdict (Breaking)**: `POST /v1/validate`, `POST /v1/resolve`, `POST /v1/codegen` and `POST /v1/build/*` answer any refusal of the submitted bundle, an unknown model and a pipe factory's refusal included, as a `200` `is_valid: false` verdict with a located item, where some of them escaped as a no-verdict problem document.
+- **A failing dry run is one located `dry_run` item per failing pipe (Breaking)**: an invalid verdict's `validation_errors` carries one `dry_run` item per pipe whose dry run failed, with the `pipe_code`, `domain_code` and `source` of the innermost pipe that failed, where it carried a single message-only item for the whole sweep. Its message is the failure's own when that is caller-facing and its title otherwise, so a configuration fault met during a dry run no longer reaches the caller through the verdict.
+- **`POST /v1/codegen` stamps `engine_version` `0.67.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.66.1` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
+
+### Fixed
+
+- **A verdict names no path on the server**: an item located inside a package a method depends on by address names the bundle by the package's address and its path inside it, and an item located in one of the server's own library directories carries no `source` or `field_path` naming its file, so STRICT disclosure no longer hands a caller a path on the host.
+
 ## [v0.28.1] - 2026-09-27
 
 ### Changed

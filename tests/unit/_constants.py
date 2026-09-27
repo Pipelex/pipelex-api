@@ -232,6 +232,91 @@ prompt      = "List the key findings in $doc."
 """,
 ]
 
+# VALID_MTHDS with its output concept misspelled: the load refuses it as an `unresolved_concept`
+# item located on `pipe.echo.output`. A run of it used to escape the load as a raw 500.
+MISSPELLED_CONCEPT_MTHDS = """\
+domain = "smoke"
+main_pipe = "echo"
+
+[pipe.echo]
+type = "PipeLLM"
+description = "Echo"
+inputs = { text = "Text" }
+output = "Summry"
+prompt = "@text"
+"""
+
+# VALID_MTHDS naming a model the model deck does not define: the load refuses it as an
+# `unknown_model` item located on `pipe.echo.model`. A run of it used to raise the raw
+# `PipeOperatorModelChoiceError`, with no validation item.
+UNKNOWN_MODEL_MTHDS = """\
+domain = "smoke"
+main_pipe = "echo"
+
+[pipe.echo]
+type = "PipeLLM"
+description = "Echo"
+inputs = { text = "Text" }
+output = "Text"
+model = "no-such-model-in-any-deck"
+prompt = "@text"
+"""
+
+# A bundle that loads but whose run fails one step down, in a live run and a dry run alike since no
+# pipe calls a model: `review_topic` runs the parallel `analyze_topic`, whose branch `draft_idea` gives
+# one `Idea` for the field `ideas`, which `TopicReview` declares as a list. The combine of the branch
+# results refuses it at `analyze_topic`, and the refusal is the caller's own method to fix.
+MISMATCHED_PARALLEL_MTHDS = """\
+domain      = "brainstorm"
+description = "A parallel feeding a single branch into a list field"
+main_pipe   = "review_topic"
+
+[concept.Idea]
+description = "One idea about a topic"
+refines     = "Text"
+
+[concept.Overview]
+description = "A one-line overview"
+refines     = "Text"
+
+[concept.TopicReview]
+description = "Ideas and an overview"
+
+[concept.TopicReview.structure]
+ideas    = { type = "list", item_type = "concept", item_concept_ref = "Idea", description = "The ideas", required = true }
+overview = { type = "concept", concept_ref = "Overview", description = "The overview", required = true }
+
+[pipe.review_topic]
+type        = "PipeSequence"
+description = "Review a topic"
+inputs      = { topic = "Text" }
+output      = "TopicReview"
+steps       = [ { pipe = "analyze_topic", result = "review" } ]
+
+[pipe.analyze_topic]
+type        = "PipeParallel"
+description = "Draft the idea and the overview at the same time"
+inputs      = { topic = "Text" }
+output      = "TopicReview"
+branches    = [
+  { pipe = "draft_idea", result = "ideas" },
+  { pipe = "write_overview", result = "overview" },
+]
+
+[pipe.draft_idea]
+type        = "PipeCompose"
+description = "Draft one idea about the topic"
+inputs      = { topic = "Text" }
+output      = "Idea"
+template    = "An idea worth exploring about $topic"
+
+[pipe.write_overview]
+type        = "PipeCompose"
+description = "Write a one-line overview"
+output      = "Overview"
+template    = "One idea."
+"""
+
 # A bundle whose PipeSequence references an unimplemented PipeSignature step. It loads and wires
 # cleanly, so the only thing that rejects it in strict mode is the signature pre-pass — isolating
 # the `allow_signatures` behavior from any other validation failure.

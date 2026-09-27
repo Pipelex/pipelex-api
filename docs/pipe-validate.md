@@ -43,8 +43,8 @@ The 200 body is one of two arms, discriminated on the mandatory `is_valid` field
   },
   "pipe_io_contracts": {
     "my_domain.my_pipe": {
-      "inputs": { "text": { "concept_ref": "native.Text", "json_schema": { "...": "..." } } },
-      "output": { "concept_ref": "MyResult", "multiplicity": "single" }
+      "inputs": { "text": { "concept_ref": "native.Text", "presence": "plain", "multiplicity": "single", "item_count": null, "json_schema": { "...": "..." } } },
+      "output": { "concept_ref": "my_domain.MyResult", "multiplicity": "single", "item_count": null, "optional": false, "json_schema": { "...": "..." } }
     }
   },
   "graph_spec": { "...": "..." },
@@ -63,7 +63,7 @@ The 200 body is one of two arms, discriminated on the mandatory `is_valid` field
 
 - `is_valid` (`true`): the discriminant of the valid arm — always `true` on this report
 - `bundle_blueprint` (object): the batch's primary blueprint — the first file declaring `main_pipe`, else the first file
-- `pipe_io_contracts` (object): per-pipe input/output contracts, keyed by the namespaced `pipe_ref` (`domain.code`); each entry carries the JSON Schema of every declared input and the output's concept + multiplicity (`single` | `variable`)
+- `pipe_io_contracts` (object): per-pipe input/output contracts, keyed by the namespaced `pipe_ref` (`domain.code`). Each input carries its `concept_ref`, `presence`, `multiplicity` (`single` | `variable` | `fixed`), `item_count` and the JSON Schema of its content; the output carries its fully qualified `concept_ref`, `multiplicity`, `item_count`, `optional` and the JSON Schema of its payload. `item_count` is the exact count on `fixed`, always greater than one since `Concept[1]` reads as `single`, and `null` otherwise, so an output declared `Text[3]` reports `"multiplicity": "fixed", "item_count": 3`
 - `graph_spec` (object | null): best-effort execution graph of the pipe a selector-less run of this request would execute — the pipe [`default_pipe_ref`](#the-effective-entry-pipe) names — dry-run against the validated library; `null` when no entry pipe is determined or the graph dry-run degrades
 - `validated_pipes` (list): per-pipe sweep outcomes — `{pipe_ref, status}` entries with status `SUCCESS` | `FAILURE` | `SKIPPED`
 - `pending_signatures` (list[str]): namespaced refs of pipes still declared as signatures (contract-only pipes — `inputs`/`output` with no `type` and no implementation) in the assembled library — what remains to implement
@@ -97,17 +97,17 @@ The 200 body is one of two arms, discriminated on the mandatory `is_valid` field
   ],
   "pending_signatures": [],
   "is_runnable": false,
-  "message": "Validation error(s): ..."
+  "message": "Value error, Invalid main pipe syntax 'Not A Valid Pipe Code!'. Must be in snake_case."
 }
 ```
 
 **Response Fields (invalid arm):**
 
 - `is_valid` (`false`): the discriminant of the invalid arm
-- `validation_errors` (list): the structured per-error diagnostics a client maps to per-line problems — built by pipelex's one shared builder, so they are byte-for-byte the same items the agent CLI emits. Each item carries a `category` (the closed set `blueprint_validation` | `pipe_factory` | `pipe_validation` | `dry_run`), a `message`, and the locators the runtime can attribute (`error_type`, `pipe_code` / `concept_code` / `domain_code`, `field_path` / `field_name`, and `source`). Absent locators are omitted, not null. An item may also carry a **`suggested_fix`** — a structured, deterministic repair (`fix_code`, `description`, `safety: safe|unsafe`, and the `ops[]` of semantic TOML patch operations to apply). It is present only when the fix planner derived one from the typed error data; a client that ignores it behaves exactly as before. See [Error Responses → Structured validation errors](error-responses.md#structured-validation-errors) and [→ Suggested fixes](error-responses.md#suggested-fixes) for every field. The array is **never empty on an invalid verdict** (the structured-info invariant is total): a dry-run residual failure becomes one `dry_run` item carrying the message (graph-level, so usually no `source`), and a parse-level failure with no attributable locator (a raw TOML-syntax error, an empty blueprint, an elaborator failure) becomes one `blueprint_validation` residual item carrying the message (no `source`)
+- `validation_errors` (list): the structured per-error diagnostics a client maps to per-line problems — built by pipelex's one shared builder, so they are byte-for-byte the same items the agent CLI emits. Each item carries a `category` (the closed set `blueprint_validation` | `pipe_factory` | `pipe_validation` | `dry_run`), a `message`, and the locators the runtime can attribute (`error_type`, `pipe_code` / `concept_code` / `domain_code`, `field_path` / `field_name`, and `source`). Absent locators are omitted, not null. An item may also carry a **`suggested_fix`** — a structured, deterministic repair (`fix_code`, `description`, `safety: safe|unsafe`, and the `ops[]` of semantic TOML patch operations to apply). It is present only when the fix planner derived one from the typed error data; a client that ignores it behaves exactly as before. See [Error Responses → Structured validation errors](error-responses.md#structured-validation-errors) and [→ Suggested fixes](error-responses.md#suggested-fixes) for every field. The array is **never empty on an invalid verdict** (the structured-info invariant is total): a failing dry run becomes one `dry_run` item per failing pipe, located at the innermost pipe that failed (its `pipe_code`, `domain_code` and, when known, `source`), a TOML syntax error carries the `line` and `column` the parser stopped at, and a parse-level failure with no attributable locator (an empty blueprint, an elaborator failure) becomes one `blueprint_validation` residual item carrying the message (no `source`). Every refusal of the bundle while it loads is an item of the verdict, an unknown model included (an `unknown_model` item on the pipe's `model` field), never a no-verdict `5xx`
 - `pending_signatures` (list[str]): best-effort outstanding signatures (empty on the invalid arm, since no library was assembled)
 - `is_runnable` (`false`): an invalid bundle is never runnable
-- `message` (string): the human-readable verdict summary (the caller-facing pipelex error message)
+- `message` (string): the human-readable verdict summary: the lone item's message when there is one item, `N validation errors (first: <the first item's message>)` when there are several, and the parser's own message for a parse-level failure
 
 ## What This Endpoint Does
 

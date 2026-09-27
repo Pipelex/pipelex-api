@@ -22,7 +22,12 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pipelex.base_exceptions import PipelexConfigError, ValidationErrorCategory
-from pipelex.core.exceptions import PipeFactoryErrorData, PipelexBundleBlueprintValidationErrorData, PipesAndConceptValidationErrorData
+from pipelex.core.exceptions import (
+    DryRunFailureErrorData,
+    PipeFactoryErrorData,
+    PipelexBundleBlueprintValidationErrorData,
+    PipesAndConceptValidationErrorData,
+)
 from pipelex.pipeline.exceptions import ValidateBundleError
 from pipelex.validation_error_types import PipeFactoryErrorType, PipeValidationErrorType
 from pytest_mock import MockerFixture
@@ -30,7 +35,7 @@ from pytest_mock import MockerFixture
 from api.exception_handlers import register_exception_handlers
 from api.routes import router as api_router
 from api.routes.pipelex.pipeline import ApiRunner
-from tests.unit._constants import INVALID_MAIN_PIPE_MTHDS, VALID_MTHDS
+from tests.unit._constants import INVALID_MAIN_PIPE_MTHDS, UNKNOWN_MODEL_MTHDS, VALID_MTHDS
 
 # Structural artifacts that exist only on the valid arm — the invalid arm must NOT carry them.
 _STRUCTURAL_FIELDS = ("bundle_blueprint", "pipe_io_contracts", "graph_spec", "validated_pipes")
@@ -147,6 +152,30 @@ class TestValidateErrors:
         assert any(item["category"] == ValidationErrorCategory.BLUEPRINT_VALIDATION for item in sourced)
         assert any("TOML syntax error" in item["message"] for item in sourced)
 
+    def test_unknown_model_is_a_located_item_of_the_invalid_verdict(self):
+        # A model the deck does not define is refused while the pipe is built. That refusal is an
+        # item of the verdict like any other, located on the pipe's `model` field and carrying the
+        # reference as written, not a no-verdict fault.
+        client = _build_client()
+        response = client.post(
+            "/v1/validate",
+            json={"mthds_contents": [UNKNOWN_MODEL_MTHDS], "mthds_sources": ["echo.mthds"]},
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["is_valid"] is False
+        items: list[dict[str, Any]] = body["validation_errors"]
+        assert len(items) == 1, items
+        item = items[0]
+        assert item["category"] == ValidationErrorCategory.PIPE_VALIDATION
+        assert item["error_type"] == "unknown_model"
+        assert item["pipe_code"] == "echo"
+        assert item["source"] == "echo.mthds"
+        assert item["field_path"] == "pipe.echo.model"
+        assert item["model_reference"] == "no-such-model-in-any-deck"
+        assert item["model_type"] == "llm"
+
     def test_all_categories_project_onto_invalid_report(self, mocker: MockerFixture):
         # Every structured category lands on the 200 InvalidReport, and collectively the items cover
         # the full ValidationErrorItem field set (so a dropped field would fail here, not silently
@@ -186,12 +215,20 @@ class TestValidateErrors:
             }
         ), f"missing fields: {populated}"
 
-    def test_dry_run_residual_becomes_single_dry_run_item(self, mocker: MockerFixture):
-        # A dry-run failure with no structured locator becomes ONE `dry_run` item carrying the
-        # message — the structured-info invariant (never a bare detail with an empty list). It is
-        # graph-level, so it carries no `source`.
-        residual = ValidateBundleError(message="Dry run failed: boom.", dry_run_error_message="Dry run failed: boom.")
-        mocker.patch.object(ApiRunner, "validate_verdict", new=mocker.AsyncMock(return_value=residual.to_error_report()))
+    def test_dry_run_failures_become_one_located_item_per_failing_pipe(self, mocker: MockerFixture):
+        # A failing dry run is one `dry_run` item per failing pipe, located at the innermost pipe
+        # that failed (its `pipe_code`, `domain_code` and `source`), never one item holding the whole
+        # sweep. A failure the sweep could not locate still becomes its own item carrying only the
+        # message — the structured-info invariant (never a bare detail with an empty list) — and so
+        # carries no locator.
+        failing_dry_run = ValidateBundleError(
+            message="Dry run failed.",
+            dry_run_failures=[
+                DryRunFailureErrorData(pipe_code="summarize", domain_code="legal", source="pipe.mthds", message="Pipe 'summarize' failed: boom."),
+                DryRunFailureErrorData(message="Dry run failed: unlocated."),
+            ],
+        )
+        mocker.patch.object(ApiRunner, "validate_verdict", new=mocker.AsyncMock(return_value=failing_dry_run.to_error_report()))
         client = _build_client()
         response = client.post("/v1/validate", json={"mthds_contents": [VALID_MTHDS]})
 
@@ -199,12 +236,17 @@ class TestValidateErrors:
         body = response.json()
         assert body["is_valid"] is False
         items: list[dict[str, Any]] = body["validation_errors"]
-        assert len(items) == 1, items
-        dry_run_item = items[0]
-        assert dry_run_item["category"] == ValidationErrorCategory.DRY_RUN
-        assert dry_run_item["error_type"] == "DryRunError"
-        assert dry_run_item["message"] == "Dry run failed: boom."
-        assert "source" not in dry_run_item
+        assert len(items) == 2, items
+        assert all(item["category"] == ValidationErrorCategory.DRY_RUN for item in items)
+        assert all(item["error_type"] == "DryRunError" for item in items)
+        located_item, unlocated_item = items
+        assert located_item["pipe_code"] == "summarize"
+        assert located_item["domain_code"] == "legal"
+        assert located_item["source"] == "pipe.mthds"
+        assert located_item["message"] == "Pipe 'summarize' failed: boom."
+        assert unlocated_item["message"] == "Dry run failed: unlocated."
+        for locator in ("pipe_code", "domain_code", "source"):
+            assert locator not in unlocated_item, unlocated_item
 
     def test_non_verdict_failure_is_not_a_200_verdict(self, mocker: MockerFixture):
         # The runner returns a produced verdict (valid report | invalid ErrorReport) as a value; only
