@@ -46,15 +46,19 @@ When a bundle fails validation, the `ValidateBundleError` carries a `validation_
 | `category` | The failure family — one of `blueprint_validation`, `pipe_factory`, `pipe_validation`, `dry_run`. |
 | `message` | Human-readable description of this specific error. |
 | `error_type` | Finer error subtype within the category, when the source error provides one. |
-| `source` | The owning file of the error — present on `pipe_validation` and `blueprint_validation` items that the runtime could attribute to a file. On the in-memory submit path it is the matching `mthds_sources[i]` (see [Sourcing submitted files](pipe-validate.md)); `null` when the caller sent no sources. Absent for `pipe_factory` and `dry_run` errors (the latter is graph-level), and absent on the parse-level `blueprint_validation` residual (a raw TOML-syntax error, an empty blueprint, or an elaborator failure), which carries the failure message but no file attribution — see the note below. |
-| `pipe_code`, `concept_code`, `domain_code` | The pipe / concept / domain the error is about, when applicable. |
+| `source` | The owning file of the error, when the runtime could attribute it to one: on `blueprint_validation` and `pipe_validation` items, and on a `dry_run` item, where it is the file of the pipe whose dry run failed. On the in-memory submit path it is the matching `mthds_sources[i]` (see [Sourcing submitted files](pipe-validate.md)), so it is absent when the caller sent no sources. Absent on `pipe_factory` items and on the parse-level residual described below. Beside a server's own library directories, an item never names one of their files. |
+| `pipe_code`, `concept_code`, `domain_code` | The pipe / concept / domain the error is about, when applicable. On a `dry_run` item they name the innermost pipe that failed, not the controller the failure passed through. |
 | `field_path`, `field_name` | The offending field within the bundle, when the error localizes to one. |
 | `variable_names`, `missing_concept_code`, `missing_pipe_code`, `declared_concepts` | Extra context for specific failure shapes (undefined variables, an unresolved concept or pipe reference, the set of concepts that were declared). |
+| `line`, `column` | The 1-based position where the TOML parser stopped, on a TOML syntax error. |
+| `model_reference`, `model_type`, `suggestions` | On an `unknown_model` item — a pipe naming a model the deployment's model deck does not define — the reference as the bundle wrote it, the kind of model the pipe needs (`llm`, `extract`, …), and the deck's close matches of that kind. With exactly one suggestion the item also carries an `unsafe` `suggested_fix` renaming the model. |
 | `suggested_fix` | A structured, deterministic fix for this error — present only when the fix planner derived one. See [Suggested fixes](#suggested-fixes). |
 
 Items carry only the fields that apply to their category — absent fields are omitted, not null. `validation_errors` is **retained under STRICT disclosure** (it describes the caller's own submitted bundle, not server internals). It is present only on `ValidateBundleError`; other error types omit it.
 
-Every invalid verdict carries a **non-empty** `validation_errors` array — the structured-info invariant is total. A parse-level failure the runtime cannot attribute to a known pipe/concept/field — a raw TOML-syntax error, an empty blueprint, or an elaborator failure — still becomes one `blueprint_validation` residual item carrying the failure message (no `source`, no `error_type` at this layer), so the array is never empty on an invalid verdict. The richer, locator-bearing items appear only when the runtime could attribute the failure; the human-readable summary (the `detail` on a run-route 422, the `message` on a diagnostic-route 200 invalid verdict) stays available alongside, but a consumer can always read at least one structured item.
+Every invalid verdict carries a **non-empty** `validation_errors` array — the structured-info invariant is total. A parse-level failure the runtime cannot attribute to a known pipe/concept/field — an empty blueprint, an elaborator failure — still becomes one `blueprint_validation` residual item carrying the failure message (no `source`, no `error_type` at this layer), so the array is never empty on an invalid verdict. A TOML syntax error is an item of the same category without an `error_type`, which carries the `line` and `column` the parser stopped at and the `source` when the caller sent one. A failing dry run is one `dry_run` item per failing pipe, located at the innermost pipe that failed. The richer, locator-bearing items appear only when the runtime could attribute the failure; the human-readable summary (the `detail` on a run-route 422, the `message` on a diagnostic-route 200 invalid verdict) stays available alongside, but a consumer can always read at least one structured item.
+
+On the run routes, **every refusal of the bundle while it loads is this verdict**, and the load happens before any pipe runs: a misspelled concept, a wiring mismatch, an unknown model, a TOML fault or a refusal raised while a pipe is built all answer the same **422** carrying the same items validating the bundle gives. None of them reaches a run as a `500`. An entry pipe the bundle does not declare keeps its own `PipeNotFoundError`.
 
 ## Suggested fixes
 
@@ -88,7 +92,7 @@ A validation error item may carry a `suggested_fix`: a deterministic repair the 
 
 - `fix_code` — the kebab-case rule id that produced the fix (`match-sequence-output`, `sync-controller-inputs`, `strip-native-concept-redecl`, `strip-namespace`, …). Stable; use it to allow-list or suppress rules.
 - `description` — human-readable summary of what the fix does.
-- `safety` — `safe` or `unsafe`. Only apply an `unsafe` fix behind an explicit opt-in: it resolves an ambiguity the runtime could not resolve on the caller's behalf.
+- `safety` — `safe` or `unsafe`. Only apply an `unsafe` fix behind an explicit opt-in: it is a likely correction, such as the one close match for an unknown model, that a person or an agent must confirm, and `pipelex fix bundle` never applies one on its own.
 - `source` — the file the ops target, when known. **An applier must only apply ops to the file they target** — in a multi-file library the ops are meaningless against any other file.
 - `ops` — the semantic TOML patch operations, in order.
 
@@ -109,6 +113,34 @@ For `ensure_table` and `delete_table`, `table_path` addresses the table itself r
 `value` is a TOML scalar (string, integer, float, boolean) or a flat scalar mapping, which a fix that must create a whole table at once — a missing `inputs` mapping, say — writes as an inline table.
 
 **The ops are the machine contract; any rendered diff is presentation.** Apply them with a style-preserving TOML editor rather than reconstructing the file from a diff: that is what keeps the caller's formatting, comments, and key order intact.
+
+## Run failures: the root fault, located at the failing pipe
+
+When a run fails, the problem document describes the **root fault**, the innermost Pipelex error on the cause chain, never the run-level wrapper around it: `error_type`, `title` and `type` are the root fault's, and so are `error_domain`, the HTTP status and whether STRICT disclosure keeps the `detail`. The `detail` names the pipe that failed and its path from the entry pipe, `Pipe '<failing pipe>' failed (<entry pipe> → … → <failing pipe>): <the fault's own message>`, and `user_action` names the next step for that pipe. A consumer that branched on `error_type == "PipelineExecutionError"` branches on the root fault's type instead.
+
+So a run the caller's own method refuses reads its reason even under STRICT: a `PipeCondition` whose outcome is `fail`, a `PipeParallel` branch whose multiplicity does not match its output field, a step started without a required input, or a model named inline that the deck does not define all answer a **422** in the `input` domain, with a `detail` that says what to change. A model the deck names but does not serve stays a redacted `config` failure, since the deployment, not the caller, has to fix it.
+
+```http
+HTTP/1.1 422 Unprocessable Entity
+Content-Type: application/problem+json
+
+{
+  "type": "https://docs.pipelex.com/latest/errors/stuff-factory-error/",
+  "title": "Stuff factory",
+  "status": 422,
+  "detail": "Pipe 'analyze_topic' failed (review_topic → analyze_topic): PipeParallel 'analyze_topic' cannot combine its branch results into its output 'TopicReview'. Branch 'draft_idea' gives result 'ideas' as a single 'Idea', but field 'ideas' of 'TopicReview' holds a list. Declare the field as a single concept in the structure of 'TopicReview', with type 'concept' and concept_ref 'Idea', or make branch 'draft_idea' output 'Idea[]'.",
+  "instance": "/v1/execute",
+  "error_type": "StuffFactoryError",
+  "error_domain": "input",
+  "user_action": {
+    "kind": "change_input",
+    "detail": "Branch 'draft_idea' gives result 'ideas' as a single 'Idea', but field 'ideas' of 'TopicReview' holds a list. Declare the field as a single concept in the structure of 'TopicReview', with type 'concept' and concept_ref 'Idea', or make branch 'draft_idea' output 'Idea[]'."
+  },
+  "request_id": "9f2c1ab3-…"
+}
+```
+
+The failure of a `/start` run reaches its completion webhook as the same report, under the payload's `error` key (see [Async callbacks](#async-callbacks-webhook-payload)).
 
 ## Status codes
 
@@ -146,7 +178,7 @@ The `ERROR_DISCLOSURE` env var controls how much of the originating error makes 
 
 - `verbose` (default) — renders the full `ErrorReport`. Use in dev, staging, and any deployment where the caller is trusted.
 - `strict` — redacts `detail` and provider fields for errors that do not author caller-facing messages. Specifically:
-    - `detail` is preserved only for error classes flagged as authoring caller-facing messages (today: `MthdsParserError`, `ValidateBundleError`). Everything else has `detail` replaced with a generic title-derived string.
+    - `detail` is preserved only when the error authored a caller-facing message: the bundle's validation verdict (`ValidateBundleError`), a parse error (`MthdsParserError`), and a failure the runtime classifies as the caller's own, such as a pipe refused while it is built or a run that the submitted method itself refuses (see [Run failures](#run-failures-the-root-fault-located-at-the-failing-pipe)). Everything else has `detail` replaced with a generic title-derived string.
     - `model`, `provider`, `provider_metadata` are always stripped — they have no business on a caller-facing surface.
     - The redaction is keyed on the **provenance of the message** (`_authors_caller_facing_message` ClassVar), not on `error_domain`. A `RuntimeError` raised `from` an `INPUT`-domain cause does not leak the wrapper's internal message.
 
@@ -194,13 +226,13 @@ X-Request-ID: 9f2c1ab3-…
   "type": "https://docs.pipelex.com/latest/errors/validate-bundle-error/",
   "title": "Validate bundle",
   "status": 422,
-  "detail": "Validation error(s):\n\nValue errors: 'main_pipe': Value error, Invalid main pipe syntax 'Not A Valid Pipe Code!'. Must be in snake_case.",
+  "detail": "Value error, Invalid main pipe syntax 'Not A Valid Pipe Code!'. Must be in snake_case.",
   "instance": "/v1/execute",
   "error_type": "ValidateBundleError",
   "error_domain": "input",
   "user_action": {
     "kind": "change_input",
-    "detail": "Check the validation_errors array for specific issues"
+    "detail": "Edit the bundle as each validation error says: apply its suggested fix where it has one, after confirming an unsafe one"
   },
   "request_id": "9f2c1ab3-…",
   "validation_errors": [
