@@ -202,7 +202,7 @@ API-authored errors (`ValidationError`, `BadRequest`, `Unauthenticated`, etc.) f
 
 ## Request correlation
 
-Every response carries `X-Request-ID`. The middleware respects an inbound `X-Request-ID` header if present, otherwise mints one. It also binds that id onto the Pipelex runtime's log context for the duration of the request, so every record emitted underneath carries it as a `request_id` field — the server's own error lines and the runtime's lines from inside a run alike. The same id rides onto `JobMetadata.request_id`, so on a distributed-execution flavor it correlates with every orchestrator worker-side record too. What those lines look like and which fields they carry is in [Logging](logging.md).
+Every response carries `X-Request-ID`. The middleware respects an inbound `X-Request-ID` header if present, otherwise mints one. It also binds that id onto the Pipelex runtime's log context for the duration of the request, so every record emitted underneath carries it as a `request_id` field — the server's own error lines and the runtime's lines from inside a run alike. Both run routes, `POST /v1/execute` and `POST /v1/start`, also put the id on the run's metadata, so when a run is dispatched to a worker, the worker's lines for it carry the same id. What those lines look like, which fields they carry and the one path that does not carry the id yet are in [Logging](logging.md).
 
 When opening an issue, include the `request_id` from the response (or response headers) and the timestamp.
 

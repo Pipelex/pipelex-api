@@ -8,6 +8,10 @@
 - **A log line's trace keys name the host's span, and the runtime's span moves under `pipelex.*` (Breaking)**: `trace_id`, `span_id` and `trace_flags` now name the process's current OpenTelemetry span, which this server does not open, so they are absent unless the deployment runs it under OpenTelemetry instrumentation of its own. A line the runtime emits from inside a traced run carries the runtime's span as `pipelex.trace_id` and `pipelex.span_id` instead, so a query that joined lines to the runtime's exported spans on `trace_id` now joins on `pipelex.trace_id`.
 - **`POST /v1/codegen` stamps `engine_version` `0.68.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.67.0` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
 
+### Fixed
+
+- **A distributed `POST /v1/execute` run's worker lines carry the request id**: the route now puts the request id it resolved on the run's metadata, as `POST /v1/start` already did, so on a deployment whose `orchestration_mode` dispatches to a worker, such as `temporal`, every line the worker writes for the run carries the `request_id` the response echoes. The logging page now says how the id reaches a worker's lines, and that a `POST /v1/validate` dispatched to a worker does not carry it yet.
+
 ## [v0.29.0] - 2026-09-27
 
 ### Highlights

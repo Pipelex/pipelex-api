@@ -309,8 +309,8 @@ class ApiRunner(PipelexMTHDSProtocol):
         `extra` is the protocol's generic extension slot; this runner's wire
         extras are parsed by the route layer, so nothing reaches it — a
         non-empty value is an in-process misuse and is rejected. `request_id`
-        is an API-layer extra threaded into `JobMetadata.request_id` for log
-        correlation. `requested_orchestration_mode` is the optional per-request backend override
+        is an API-layer extra threaded into `RunMetadata.request_id` for log
+        correlation, so it reaches the job a worker is handed. `requested_orchestration_mode` is the optional per-request backend override
         (`PipelineApiExtras.orchestration_mode`); it is resolved against the deployment's
         `api.toml` policy and a forbidden override is refused with a 403.
         """
@@ -751,6 +751,7 @@ async def execute(request: Request) -> JSONResponse:
             output_name=run_request.output_name,
             output_multiplicity=run_request.output_multiplicity,
             dynamic_output_concept_ref=run_request.dynamic_output_concept_ref,
+            request_id=request_id_of(request),
             requested_orchestration_mode=extras.orchestration_mode,
         )
     # The response dump carries the full internal usage models on
