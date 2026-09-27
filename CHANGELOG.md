@@ -1,6 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [v0.30.0] - 2026-09-28
+
+### Highlights
+
+**A run dispatched to a worker keeps the caller's request id.** On `pipelex` 0.68.0, the lines a worker writes while it runs a `POST /v1/execute` run carry the `request_id` the response echoes, and the runtime's own span moves under `pipelex.*` on every log line.
 
 ### Changed
 
