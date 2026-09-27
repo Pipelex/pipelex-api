@@ -6,7 +6,8 @@ orchestrator the registry holds for it with `DeliveryMode.BLOCKING`, and rehydra
 JSON-safe output back into the full PipeOutput the `/execute` response wraps — exercising the real
 serialize -> rehydrate round-trip (`serialize_completed_output` -> `hydrate_working_memory`), including
 the `graph_spec` and `pipe_io_artifacts` `strict=False` re-validation branches. Also pins the policy-gated per-request override
-(symmetric with `/start`) and the no-orchestrator case (`MissingOrchestratorError`). The boot slot is
+(symmetric with `/start`), the no-orchestrator case (`MissingOrchestratorError`), and the request id reaching the job the
+orchestrator is handed, which is the payload a Temporal worker deserializes and binds its log context from. The boot slot is
 never used — every mode dispatches through the per-call registry. (Delivery is endpoint-set, never
 requestable, so `/execute` has no fire-and-forget refusal — that axis is `/start`'s.)
 """
@@ -40,6 +41,7 @@ from pytest_mock import MockerFixture
 
 from api.api_config import ApiConfig
 from api.exception_handlers import register_exception_handlers
+from api.middleware import REQUEST_ID_HEADER, RequestIdMiddleware
 from api.routes import router as api_router
 from api.routes.pipelex.pipeline import ApiRunner
 from tests.unit._constants import VALID_MTHDS
@@ -53,7 +55,8 @@ class _StubOrchestrator:
     Returning via `serialize_completed_output` is the point — it produces the real JSON-safe
     `PipelexPipeRunOutput` (the same shape that crosses the Temporal worker boundary), so the route
     exercises the production serialize -> rehydrate round-trip instead of a hand-built payload. It
-    records each dispatch so a test can assert `/execute` drove the blocking `execute` arm. `start` (the
+    records each dispatch so a test can assert `/execute` drove the blocking `execute` arm, and what the
+    dispatched job's `RunMetadata` carries, since that is all a worker ever learns of the request. `start` (the
     fire-and-forget arm) is present only to satisfy the protocol — `/execute` never calls it.
     """
 
@@ -72,7 +75,13 @@ class _StubOrchestrator:
         self.supports_fire_and_forget = supports_fire_and_forget
 
     async def execute(self, *, pipe_job: PipeJob, delivery_assignment: DeliveryAssignment | None) -> PipelexPipeRunOutput:
-        self.calls.append({"pipe_code": pipe_job.pipe.code, "delivery_assignment": delivery_assignment})
+        self.calls.append(
+            {
+                "pipe_code": pipe_job.pipe.code,
+                "delivery_assignment": delivery_assignment,
+                "request_id": pipe_job.job_metadata.run_metadata.request_id,
+            }
+        )
         # A completed run always delivers a main stuff (pipelex invariant; enforced by
         # `resolve_main_stuff_root_key` in both `serialize_completed_output` and `from_pipe_output`).
         # This stub is an echo: promote the job's input stuff to the run's main stuff via the
@@ -129,11 +138,12 @@ def _echo_pipe_io_artifacts() -> PipeIOArtifacts:
     )
 
 
-def _build_client() -> TestClient:
+def _build_client(*, with_request_id_middleware: bool = False) -> TestClient:
+    """Wire the real routes; `with_request_id_middleware` wraps the app the way `api.main` does."""
     app = FastAPI()
     app.include_router(api_router, prefix="/v1")
     register_exception_handlers(app)
-    return TestClient(app)
+    return TestClient(RequestIdMiddleware(app) if with_request_id_middleware else app)
 
 
 def _register_stub(mocker: MockerFixture, *, mode: str, stub: _StubOrchestrator) -> None:
@@ -306,6 +316,48 @@ class TestExecuteDispatch:
         assert response.status_code == 403, response.text
         assert response.headers["content-type"].startswith("application/problem+json")
         assert response.json()["error_type"] == "OrchestrationModeOverrideForbidden"
+
+    def test_inbound_request_id_reaches_the_dispatched_job(self, mocker: MockerFixture) -> None:
+        """On a `temporal` deployment, the inbound `X-Request-ID` rides the job the orchestrator is handed.
+
+        A worker never sees the request: it binds its log context from the deserialized job's
+        `RunMetadata.request_id`, and the middleware's in-process binding does not cross to it. So
+        the proof is the payload, not the runner call — a route that passed the id to a runner which
+        dropped it would still leave every worker line of the run without one.
+        """
+        _force_config(mocker, mode="temporal", allow_override=False)
+        stub = _StubOrchestrator()
+        _register_stub(mocker, mode="temporal", stub=stub)
+        inbound_request_id = "01HNJZ4XR7K3Q9D8MWAQ7FY2E5"
+
+        client = _build_client(with_request_id_middleware=True)
+        response = client.post(
+            "/v1/execute",
+            json={"pipe_code": "echo", "mthds_contents": [VALID_MTHDS], "inputs": {"text": "hello"}},
+            headers={REQUEST_ID_HEADER: inbound_request_id},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.headers[REQUEST_ID_HEADER] == inbound_request_id
+        assert len(stub.calls) == 1
+        assert stub.calls[0]["request_id"] == inbound_request_id
+
+    def test_minted_request_id_reaches_the_dispatched_job(self, mocker: MockerFixture) -> None:
+        """Without an inbound header, the job carries the id the middleware minted, which the response echoes."""
+        stub = _StubOrchestrator()
+        _register_stub(mocker, mode="direct", stub=stub)
+
+        client = _build_client(with_request_id_middleware=True)
+        response = client.post(
+            "/v1/execute",
+            json={"pipe_code": "echo", "mthds_contents": [VALID_MTHDS], "inputs": {"text": "hello"}},
+        )
+
+        assert response.status_code == 200, response.text
+        minted_request_id = response.headers[REQUEST_ID_HEADER]
+        assert minted_request_id
+        assert len(stub.calls) == 1
+        assert stub.calls[0]["request_id"] == minted_request_id
 
     @pytest.mark.asyncio
     async def test_missing_orchestrator_for_resolved_mode_raises(self, mocker: MockerFixture) -> None:

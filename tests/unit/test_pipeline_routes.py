@@ -334,8 +334,8 @@ class TestPipelineRoutes:
         # The middleware stores the inbound `X-Request-ID` on `request.state`; the route reads it
         # back via `request_id_of(request)` and passes it as
         # `request_id=` to `ApiRunner.start`, which forwards it to
-        # `pipeline_run_setup(...)` so it lands on `JobMetadata.request_id`.
-        # Without this hop the worker's `WorkflowLog` would carry `None`.
+        # `pipeline_run_setup(...)` so it lands on `RunMetadata.request_id`.
+        # Without this hop the worker's lines for the run would carry no `request_id`.
         client, _, start_mock = _build_client(mocker, with_request_id_middleware=True)
         inbound_request_id = "01HNJZ4XR7K3Q9D8MWAQ7FY2E5"
         response = client.post(
@@ -347,6 +347,22 @@ class TestPipelineRoutes:
         assert response.headers[REQUEST_ID_HEADER] == inbound_request_id
         start_mock.assert_awaited_once()
         assert start_mock.await_args.kwargs["request_id"] == inbound_request_id
+
+    def test_execute_propagates_request_id_to_runner(self, mocker: MockerFixture):
+        # The `/execute` twin of the `/start` hop above: `ApiRunner.execute` forwards the id to the
+        # runtime's `execute`, which puts it on `RunMetadata.request_id`. On a Temporal deployment
+        # the whole run happens on a worker, which reads the id from that payload and nowhere else.
+        client, execute_mock, _ = _build_client(mocker, with_request_id_middleware=True)
+        inbound_request_id = "01HNJZ4XR7K3Q9D8MWAQ7FY2E5"
+        response = client.post(
+            "/v1/execute",
+            json={"pipe_code": "echo", "mthds_contents": [VALID_MTHDS], "inputs": {"text": "hello"}},
+            headers={REQUEST_ID_HEADER: inbound_request_id},
+        )
+        assert response.status_code == 200
+        assert response.headers[REQUEST_ID_HEADER] == inbound_request_id
+        execute_mock.assert_awaited_once()
+        assert execute_mock.await_args.kwargs["request_id"] == inbound_request_id
 
     @pytest.mark.parametrize(
         "bad_url",
