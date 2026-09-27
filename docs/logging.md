@@ -25,7 +25,8 @@ These keys come from the sink itself and are on every line written by the proces
 | `logger` | The module that emitted it |
 | `message` | The human-readable summary |
 | `exception` | The traceback, when the record carries one |
-| `trace_id`, `span_id`, `trace_flags` | The trace context, in lowercase hex, when the record was logged inside a span, which is the case for a line the runtime emits from inside a traced run |
+| `trace_id`, `span_id`, `trace_flags` | The process's current OpenTelemetry span, in lowercase hex, when there is one. This server opens no spans of its own, so these keys appear only when the deployment runs it under OpenTelemetry instrumentation of its own |
+| `pipelex.trace_id`, `pipelex.span_id` | The Pipelex runtime's own span, in lowercase hex, on a line the runtime emits from inside a traced run. These are the keys that join a line to the spans the runtime exports |
 
 `request_id` comes from the request-scoped context the request-id middleware binds, so **every** record emitted while a request is in flight carries it. The example above is one of the server's own lines, but a line the Pipelex runtime emits from inside a pipeline run carries the same id, which is what ties the two together without any call site passing it along. The value is the one echoed in the response's `X-Request-ID` header and in the problem document's `request_id` member, so a caller reporting a failure hands you the key to its log lines.
 

@@ -219,6 +219,7 @@ class ApiRunner(PipelexMTHDSProtocol):
         dynamic_output_concept_ref: str | None = None,
         extra: dict[str, Any] | None = None,
         delivery_assignment: DeliveryAssignment | None = None,
+        request_id: str | None = None,
         requested_orchestration_mode: str | None = None,
     ) -> PipelexRunResultExecute:
         """Execute a method synchronously, dispatching by the resolved `orchestration_mode`.
@@ -238,8 +239,10 @@ class ApiRunner(PipelexMTHDSProtocol):
         The orchestrator is injected as this runner's `_pipe_run` so the inherited base `execute`
         keeps the entire run lifecycle (library setup/teardown, tracer close, pipeline-manager
         cleanup, telemetry, error mapping); only the dispatch backend and the output rehydration
-        (`_OrchestratorPipeRun`) change. `requested_orchestration_mode` is the optional per-request
-        backend override (`PipelineApiExtras.orchestration_mode`).
+        (`_OrchestratorPipeRun`) change. `request_id` is an API-layer extra threaded into
+        `RunMetadata.request_id` for log correlation, so it reaches the job a worker is handed.
+        `requested_orchestration_mode` is the optional per-request backend override
+        (`PipelineApiExtras.orchestration_mode`).
         """
         # Resolve the effective orchestration mode FIRST — a per-request override the deployment
         # policy forbids is refused (403) here, before any library load / run registration. Mirrors start().
@@ -262,6 +265,7 @@ class ApiRunner(PipelexMTHDSProtocol):
             dynamic_output_concept_ref=dynamic_output_concept_ref,
             extra=extra,
             delivery_assignment=delivery_assignment,
+            request_id=request_id,
         )
 
     @override
