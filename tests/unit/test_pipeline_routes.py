@@ -334,8 +334,8 @@ class TestPipelineRoutes:
         # The middleware stores the inbound `X-Request-ID` on `request.state`; the route reads it
         # back via `request_id_of(request)` and passes it as
         # `request_id=` to `ApiRunner.start`, which forwards it to
-        # `pipeline_run_setup(...)` so it lands on `JobMetadata.request_id`.
-        # Without this hop the worker's `WorkflowLog` would carry `None`.
+        # `pipeline_run_setup(...)` so it lands on `RunMetadata.request_id`.
+        # Without this hop the worker's lines for the run would carry no `request_id`.
         client, _, start_mock = _build_client(mocker, with_request_id_middleware=True)
         inbound_request_id = "01HNJZ4XR7K3Q9D8MWAQ7FY2E5"
         response = client.post(

@@ -10,7 +10,7 @@
 
 ### Fixed
 
-- **A distributed `POST /v1/execute` run's worker lines carry the request id**: the route now puts the request id it resolved on the run's metadata, as `POST /v1/start` already did, so on a deployment whose `orchestration_mode` dispatches to a worker, such as `temporal`, every line the worker writes for the run carries the `request_id` the response echoes. The logging page now says how the id reaches a worker's lines, and that a `POST /v1/validate` dispatched to a worker does not carry it yet.
+- **A distributed `POST /v1/execute` run's worker lines carry the request id**: the route now puts the request id it resolved on the run's metadata, as `POST /v1/start` already did, so on a deployment whose `orchestration_mode` dispatches to a worker, such as `temporal`, the lines the worker writes while it runs the run's workflow and activities carry the `request_id` the response echoes. The logging page now says how the id reaches a worker's lines, and that a `POST /v1/validate` dispatched to a worker does not carry it yet.
 
 ## [v0.29.0] - 2026-09-27
 
