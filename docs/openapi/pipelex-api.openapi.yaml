@@ -915,19 +915,19 @@ paths:
         \ to a request that omits `views`. They are separate tokens because they answer\n  separate questions — a caller building\
         \ a fill-in form wants the inputs, a caller rendering a\n  result or registering a tool signature with a return type\
         \ wants the output.\n- **Invalid verdict (200, `is_valid: false`):** the `InvalidReport` arm — `validation_errors[]`\n\
-        \  (the structured per-error diagnostics, built by pipelex's one shared builder, incl. the\n  `dry_run` residual item)\
-        \ + `message`, with the structural artifacts absent. The runner\n  returns this as a value (`ErrorReport` with `validation_errors`)\
-        \ regardless of backend — the\n  in-process arm from the bundle's `ValidateBundleError`, the dispatched arm recovered\
-        \ from the\n  worker — so the route maps it to a 200 by matching validation diagnostics, never by catching an\n  exception.\
-        \ Returned `ErrorReport`s without validation diagnostics are backend/config/runtime\n  faults and keep the global\
-        \ RFC 7807 problem response path.\n- **No verdict (non-2xx):** a malformed request body, an `mthds_sources` length\
-        \ mismatch, or\n  both/neither of `mthds_contents` / `method_ref` is a request-shape **422**; a forbidden\n  `orchestration_mode`\
-        \ override is a **403**; a host-wiring programmer error or a genuine\n  orchestrator fault is a **5xx**; auth is **401/403**.\
-        \ A `method_ref` **resolution failure**\n  is also a no-verdict condition — never an `is_valid: false`: a malformed\
-        \ reference or a\n  failed fetch is a **422**, no matching package in the repository a **404**, and the\n  custom-Python\
-        \ policy (the sandbox gate, the structures refusal) a **403**, each with the\n  originating error class as `error_type`.\
-        \ All are RFC 7807 `application/problem+json`\n  rendered by the global handler in `api.exception_handlers` — routes\
-        \ never shape them."
+        \  (the structured per-error diagnostics, built by pipelex's one shared builder, incl. one\n  located `dry_run` item\
+        \ per pipe whose dry run failed) + `message`, with the structural artifacts absent. The runner\n  returns this as\
+        \ a value (`ErrorReport` with `validation_errors`) regardless of backend — the\n  in-process arm from the bundle's\
+        \ `ValidateBundleError`, the dispatched arm recovered from the\n  worker — so the route maps it to a 200 by matching\
+        \ validation diagnostics, never by catching an\n  exception. Returned `ErrorReport`s without validation diagnostics\
+        \ are backend/config/runtime\n  faults and keep the global RFC 7807 problem response path.\n- **No verdict (non-2xx):**\
+        \ a malformed request body, an `mthds_sources` length mismatch, or\n  both/neither of `mthds_contents` / `method_ref`\
+        \ is a request-shape **422**; a forbidden\n  `orchestration_mode` override is a **403**; a host-wiring programmer\
+        \ error or a genuine\n  orchestrator fault is a **5xx**; auth is **401/403**. A `method_ref` **resolution failure**\n\
+        \  is also a no-verdict condition — never an `is_valid: false`: a malformed reference or a\n  failed fetch is a **422**,\
+        \ no matching package in the repository a **404**, and the\n  custom-Python policy (the sandbox gate, the structures\
+        \ refusal) a **403**, each with the\n  originating error class as `error_type`. All are RFC 7807 `application/problem+json`\n\
+        \  rendered by the global handler in `api.exception_handlers` — routes never shape them."
       operationId: validate_mthds_v1_validate_post
       requestBody:
         content:

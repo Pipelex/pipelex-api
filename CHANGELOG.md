@@ -5,7 +5,7 @@
 ### Added
 
 - **Validation items carry more locators**: a TOML syntax error's item carries the 1-based `line` and `column` the parser stopped at, an `unresolved_concept` item carries `declared_concepts`, and the new `unknown_model` item carries `model_reference` (the reference as the bundle wrote it), `model_type` and `suggestions` (the model deck's close matches of that kind), with an `unsafe` rename fix when there is exactly one. The OpenAPI artifact publishes the new fields and the new `unknown_model` value of `PipeValidationErrorType`.
-- **A run graph marks a list-valued stuff**: every io item of a `graph_spec` carries `multiplicity`, `true` for a variable-length list, a positive integer for a fixed count and `null` for a single value, so a renderer can show a `Document[]` input or a `Record[]` output as a list.
+- **A run graph marks a list-valued stuff**: every io item of a `graph_spec` carries `multiplicity`, `true` when the stuff is a list, a fixed-count one included, and `null` otherwise, so a renderer can show a `Document[]` input or a `Record[]` output as a list. The schema also admits a positive integer, which the runtime does not emit.
 
 ### Changed
 
