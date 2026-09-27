@@ -169,7 +169,9 @@ class RequestIdMiddleware:
     puts `request_id` on *every* record emitted underneath — the API's own
     error lines, and equally the ones pipelex emits from inside a run — as an
     attribute a structured sink indexes, with no call site having to pass it
-    and no message having to interpolate it.
+    and no message having to interpolate it. The binding is in-process only: a
+    run dispatched to a worker gets the id from its `RunMetadata`, where the
+    run routes put it by passing `request_id_of(request)` to the runner.
 
     Applied in `api.main` by wrapping the whole FastAPI app
     (`app = RequestIdMiddleware(app)`), NOT via `app.add_middleware()`.
