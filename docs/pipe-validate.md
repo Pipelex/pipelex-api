@@ -43,8 +43,8 @@ The 200 body is one of two arms, discriminated on the mandatory `is_valid` field
   },
   "pipe_io_contracts": {
     "my_domain.my_pipe": {
-      "inputs": { "text": { "concept_ref": "native.Text", "json_schema": { "...": "..." } } },
-      "output": { "concept_ref": "MyResult", "multiplicity": "single" }
+      "inputs": { "text": { "concept_ref": "native.Text", "presence": "plain", "multiplicity": "single", "item_count": null, "json_schema": { "...": "..." } } },
+      "output": { "concept_ref": "my_domain.MyResult", "multiplicity": "single", "item_count": null, "optional": false, "json_schema": { "...": "..." } }
     }
   },
   "graph_spec": { "...": "..." },
@@ -63,7 +63,7 @@ The 200 body is one of two arms, discriminated on the mandatory `is_valid` field
 
 - `is_valid` (`true`): the discriminant of the valid arm — always `true` on this report
 - `bundle_blueprint` (object): the batch's primary blueprint — the first file declaring `main_pipe`, else the first file
-- `pipe_io_contracts` (object): per-pipe input/output contracts, keyed by the namespaced `pipe_ref` (`domain.code`); each entry carries the JSON Schema of every declared input and the output's concept + multiplicity (`single` | `variable`)
+- `pipe_io_contracts` (object): per-pipe input/output contracts, keyed by the namespaced `pipe_ref` (`domain.code`). Each input carries its `concept_ref`, `presence`, `multiplicity` (`single` | `variable` | `fixed`), `item_count` and the JSON Schema of its content; the output carries its fully qualified `concept_ref`, `multiplicity`, `item_count`, `optional` and the JSON Schema of its payload. `item_count` is the exact count on `fixed`, always greater than one since `Concept[1]` reads as `single`, and `null` otherwise, so an output declared `Text[3]` reports `"multiplicity": "fixed", "item_count": 3`
 - `graph_spec` (object | null): best-effort execution graph of the pipe a selector-less run of this request would execute — the pipe [`default_pipe_ref`](#the-effective-entry-pipe) names — dry-run against the validated library; `null` when no entry pipe is determined or the graph dry-run degrades
 - `validated_pipes` (list): per-pipe sweep outcomes — `{pipe_ref, status}` entries with status `SUCCESS` | `FAILURE` | `SKIPPED`
 - `pending_signatures` (list[str]): namespaced refs of pipes still declared as signatures (contract-only pipes — `inputs`/`output` with no `type` and no implementation) in the assembled library — what remains to implement
