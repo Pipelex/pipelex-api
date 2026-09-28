@@ -7,7 +7,7 @@ serves until these files move with it. `pipelex update` refreshes only the numbe
 script owns the whole tree, under four rules:
 
 - `inference/backends/` mirrors the kit's directory: every kit file byte for byte, and no other
-  file. The `*.bak*` copies `pipelex migrate` leaves behind are local scratch and are ignored.
+  file. What `pipelex migrate` leaves beside the files it rewrites is never counted or deleted.
 - `inference/routing_profiles.toml` is the kit's, byte for byte.
 - `inference/backends.toml` is the kit's except for each backend's `enabled` switch, which is this
   image's own choice: the switch is carried over from the current file, and a backend the kit adds
@@ -40,6 +40,7 @@ from pipelex.cogt.models.deck_manifest import (
     write_manifest,
 )
 from pipelex.kit.paths import get_kit_configs_dir
+from pipelex.migration.backup import BACKUP_INFIX, RESCUE_INFIX
 from pydantic import BaseModel, ConfigDict, Field
 
 _BACKENDS_DIR = "backends"
@@ -48,9 +49,11 @@ _BACKENDS_TOML = "backends.toml"
 _ROUTING_PROFILES_TOML = "routing_profiles.toml"
 _HANDLED_KIT_ENTRIES = frozenset({_BACKENDS_DIR, _DECK_DIR, _BACKENDS_TOML, _ROUTING_PROFILES_TOML})
 
-# `pipelex migrate` writes `<file>.bak.<timestamp>` beside each file it rewrites; .gitignore drops
-# them, and so does the mirror.
-_SCRATCH_NAME = re.compile(r"\.bak(\.|$)")
+# `pipelex migrate` can leave three kinds of file beside each file it rewrites: `<file>.bak.<stamp>`
+# backups, `<file>.rescue.<stamp>` copies whose removal pipelex leaves to the user, and the
+# `.<file>.pipelex-fix-<label>.<random>.tmp` staging files a crash can strand. The mirror neither
+# counts nor deletes any of them, nor a hand-made `*.bak`, nor a Finder `.DS_Store`.
+_MIGRATION_LEFTOVER_MARKERS = (BACKUP_INFIX, RESCUE_INFIX, ".pipelex-fix-")
 _IGNORED_NAMES = frozenset({".DS_Store"})
 
 _TABLE_HEADER = re.compile(r"^\[([^\[\]]+)\]")
@@ -93,7 +96,9 @@ class SyncPlan(BaseModel):
 
 
 def _is_mirrored_name(name: str) -> bool:
-    return name not in _IGNORED_NAMES and _SCRATCH_NAME.search(name) is None
+    if name in _IGNORED_NAMES or name.endswith(".bak"):
+        return False
+    return not any(marker in name for marker in _MIGRATION_LEFTOVER_MARKERS)
 
 
 def _compare_file(*, target: Path, expected: bytes | None, plan: SyncPlan) -> None:
@@ -196,7 +201,9 @@ def plan_sync(config_dir: Path) -> SyncPlan:
     kit_inference_dir = Path(str(get_kit_configs_dir())) / "inference"
     vendored_inference_dir = config_dir / "inference"
     plan = SyncPlan()
-    plan.unhandled_kit_entries = sorted(entry.name for entry in kit_inference_dir.iterdir() if entry.name not in _HANDLED_KIT_ENTRIES)
+    plan.unhandled_kit_entries = sorted(
+        entry.name for entry in kit_inference_dir.iterdir() if entry.name not in _HANDLED_KIT_ENTRIES and _is_mirrored_name(entry.name)
+    )
     _plan_backends_dir(kit_dir=kit_inference_dir / _BACKENDS_DIR, vendored_dir=vendored_inference_dir / _BACKENDS_DIR, plan=plan)
     routing_profiles = (kit_inference_dir / _ROUTING_PROFILES_TOML).read_bytes()
     _compare_file(target=vendored_inference_dir / _ROUTING_PROFILES_TOML, expected=routing_profiles, plan=plan)
