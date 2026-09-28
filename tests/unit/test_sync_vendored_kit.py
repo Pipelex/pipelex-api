@@ -84,12 +84,28 @@ enabled = false
         assert switches["pipelex_gateway"] is True
         assert switches["internal"] is True
 
+    def test_a_table_without_a_switch_is_read_as_on(self, tmp_path: Path) -> None:
+        backends_toml = tmp_path / "backends.toml"
+        backends_toml.write_text("[acme]\napi_key = 'x'\n\n[other]\nenabled = false\n", encoding="utf-8")
+        assert sync_vendored_kit.read_enabled_switches(backends_toml) == {"acme": True, "other": False}
+
+    def test_a_backend_new_in_the_kit_arrives_disabled(self, vendored_copy: Path) -> None:
+        inference_dir = vendored_copy / "inference"
+        backends_toml = inference_dir / "backends.toml"
+        backends_toml.write_text(_without_table(backends_toml.read_text(encoding="utf-8"), "minimax"), encoding="utf-8")
+        (inference_dir / "backends" / "minimax.toml").unlink()
+        plan = sync_vendored_kit.plan_sync(vendored_copy)
+        rendered = next(drift.content for drift in plan.drifts if drift.path == backends_toml)
+        assert '[minimax]\ndisplay_name = "MiniMax"\nenabled = false\n' in rendered.decode("utf-8")
+
     @pytest.mark.parametrize(
         ("backends_toml_text", "reason"),
         [
             (None, "is missing"),
             ("[pipelex_gateway\nenabled = true\n", "is not valid TOML"),
-            ("", "holds no `enabled` switch"),
+            ("", "holds no backend table"),
+            ("[pipelex_gateway]\nenabled = 'yes'\n", "is not a boolean"),
+            ("[pipelex_gateway]\nenabled = true\n", "has no table for"),
         ],
     )
     def test_sync_stops_when_the_switch_record_is_unusable(self, vendored_copy: Path, backends_toml_text: str | None, reason: str) -> None:
@@ -99,3 +115,22 @@ enabled = false
             backends_toml.write_text(backends_toml_text, encoding="utf-8")
         with pytest.raises(sync_vendored_kit.SwitchSourceError, match=reason):
             sync_vendored_kit.plan_sync(vendored_copy)
+
+    def test_sync_stops_when_a_vendored_backend_lost_its_table(self, vendored_copy: Path) -> None:
+        backends_toml = vendored_copy / "inference" / "backends.toml"
+        backends_toml.write_text(_without_table(backends_toml.read_text(encoding="utf-8"), "internal"), encoding="utf-8")
+        with pytest.raises(sync_vendored_kit.SwitchSourceError, match=r"has no table for internal,"):
+            sync_vendored_kit.plan_sync(vendored_copy)
+
+
+def _without_table(toml_text: str, table_name: str) -> str:
+    """Cut one table, from its header to the next one, out of a TOML document."""
+    kept_lines: list[str] = []
+    skipping = False
+    for line in toml_text.splitlines(keepends=True):
+        if line.startswith("["):
+            skipping = line.startswith(f"[{table_name}]")
+        if not skipping:
+            kept_lines.append(line)
+    assert len(kept_lines) < len(toml_text.splitlines())
+    return "".join(kept_lines)

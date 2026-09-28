@@ -10,9 +10,10 @@ script owns the whole tree, under four rules:
   file. What `pipelex migrate` leaves beside the files it rewrites is never counted or deleted.
 - `inference/routing_profiles.toml` is the kit's, byte for byte.
 - `inference/backends.toml` is the kit's except for each backend's `enabled` switch, which is this
-  image's own choice: the switch is carried over from the current file, and a backend the kit adds
-  arrives disabled. The current file is the only record of those choices, so when it is missing,
-  unreadable or holds no switch at all, both modes stop rather than invent one.
+  image's own choice: the switch is carried over from the current file, read the way pipelex reads
+  it (a table with no `enabled` key is on), and a backend the kit adds arrives disabled. The current
+  file is the only record of those choices, so when it is missing or unreadable, or lacks the table
+  of a backend whose file is already vendored, both modes stop rather than invent a switch.
 - `inference/deck/`: the numbered files are the kit's, with the `.kit_manifest.json` pipelex keeps
   for them. The `x_custom_*` overrides are this repository's and are never touched.
 
@@ -128,17 +129,17 @@ def _plan_backends_dir(*, kit_dir: Path, vendored_dir: Path, plan: SyncPlan) -> 
 
 
 def read_enabled_switches(backends_toml: Path) -> dict[str, bool]:
-    """Read each backend's `enabled` switch from the vendored backends.toml.
+    """Read each backend's `enabled` switch from the vendored backends.toml, as pipelex reads it.
 
     Args:
         backends_toml: The vendored `inference/backends.toml`, the only record of this image's switches.
 
     Returns:
-        The switch per backend name.
+        The switch per backend table. A table with no `enabled` key is on, which is pipelex's default.
 
     Raises:
-        SwitchSourceError: The file is missing, is not valid TOML, or holds no switch at all. Rendering
-            from it would switch every backend off, including the ones this image serves through.
+        SwitchSourceError: The file is missing, is not valid TOML, holds no backend table, or sets an
+            `enabled` that is not a boolean. Rendering from it would invent this image's switches.
     """
     if not backends_toml.is_file():
         msg = f"{backends_toml} is missing, and it is the only record of which backends this image enables. Restore it from git and run again."
@@ -152,11 +153,15 @@ def read_enabled_switches(backends_toml: Path) -> dict[str, bool]:
     for backend_name, table in document.items():
         if not isinstance(table, dict):
             continue
-        switch = cast("dict[str, object]", table).get("enabled")
-        if isinstance(switch, bool):
-            switches[backend_name] = switch
+        switch = cast("dict[str, object]", table).get("enabled", True)
+        if not isinstance(switch, bool):
+            msg = (
+                f"{backends_toml} sets `enabled` on [{backend_name}] to {switch!r}, which is not a boolean, so this image's switch for it is unknown."
+            )
+            raise SwitchSourceError(msg)
+        switches[backend_name] = switch
     if not switches:
-        msg = f"{backends_toml} holds no `enabled` switch, so which backends this image enables is unknown. Restore it from git and run again."
+        msg = f"{backends_toml} holds no backend table, so which backends this image enables is unknown. Restore it from git and run again."
         raise SwitchSourceError(msg)
     return switches
 
@@ -200,10 +205,19 @@ def render_backends_toml(*, kit_text: str, enabled_switches: dict[str, bool]) ->
     return "".join(rendered_lines)
 
 
-def _plan_backends_toml(*, kit_file: Path, vendored_file: Path, plan: SyncPlan) -> None:
+def _plan_backends_toml(*, kit_file: Path, vendored_file: Path, vendored_backends_dir: Path, plan: SyncPlan) -> None:
     kit_text = kit_file.read_text(encoding="utf-8")
     enabled_switches = read_enabled_switches(vendored_file)
     kit_backends = _table_names(kit_text)
+    # A kit backend with no table here is new only if its backend file is new too. One whose file is
+    # already vendored had a table, so the switch record was cut short and its switch is unknown.
+    unrecorded_backends = sorted(name for name in kit_backends - set(enabled_switches) if (vendored_backends_dir / f"{name}.toml").is_file())
+    if unrecorded_backends:
+        msg = (
+            f"{vendored_file} has no table for {', '.join(unrecorded_backends)}, whose backend files are already vendored, "
+            "so this image's switch for them is unknown. Restore the file from git and run again."
+        )
+        raise SwitchSourceError(msg)
     plan.dropped_backend_switches = {name: value for name, value in enabled_switches.items() if name not in kit_backends}
     rendered = render_backends_toml(kit_text=kit_text, enabled_switches=enabled_switches)
     _compare_file(target=vendored_file, expected=rendered.encode("utf-8"), plan=plan)
@@ -231,7 +245,12 @@ def plan_sync(config_dir: Path) -> SyncPlan:
     _plan_backends_dir(kit_dir=kit_inference_dir / _BACKENDS_DIR, vendored_dir=vendored_inference_dir / _BACKENDS_DIR, plan=plan)
     routing_profiles = (kit_inference_dir / _ROUTING_PROFILES_TOML).read_bytes()
     _compare_file(target=vendored_inference_dir / _ROUTING_PROFILES_TOML, expected=routing_profiles, plan=plan)
-    _plan_backends_toml(kit_file=kit_inference_dir / _BACKENDS_TOML, vendored_file=vendored_inference_dir / _BACKENDS_TOML, plan=plan)
+    _plan_backends_toml(
+        kit_file=kit_inference_dir / _BACKENDS_TOML,
+        vendored_file=vendored_inference_dir / _BACKENDS_TOML,
+        vendored_backends_dir=vendored_inference_dir / _BACKENDS_DIR,
+        plan=plan,
+    )
     _plan_deck(vendored_deck_dir=vendored_inference_dir / _DECK_DIR, plan=plan)
     return plan
 
