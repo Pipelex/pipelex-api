@@ -1,6 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [v0.31.0] - 2026-09-28
+
+### Highlights
+
+**Run inputs take the values their concept declares, and own-key backends offer today's models.** On `pipelex` 0.69.0, an `Anything` input accepts a string, a number, a boolean or an object and a `JSON` input an object, where most of them used to be refused, and the image's own-key backend files are now the pinned release's, so a deployment that switches one on is offered the current model roster. A deployment that mounts its own `.pipelex/` renames its Bedrock handle to `bedrock_aioboto` and replaces any model handle that went.
 
 ### Changed
 
