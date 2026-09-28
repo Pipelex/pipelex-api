@@ -43,6 +43,8 @@ make fui              # Fix unused imports
 make agent-check      # fix-unused-imports + format + lint + pyright + mypy — silent on success (use this)
 make agent-test       # Run unit tests — silent on success, output only on failure (use this)
 make cleanderived     # Remove compiled files, caches, logs — run when the pyright/mypy cache is stale
+make kit-sync         # Re-sync the vendored .pipelex/inference/ tree from the installed pipelex kit — after every pipelex bump
+make kit-check        # Fail if that tree drifts from the kit (part of `make check`, and run by CI)
 make tp               # Run unit tests with prints visible
 make test             # Run unit tests (sequential)
 make gha-tests        # Tests for GitHub Actions (no inference)

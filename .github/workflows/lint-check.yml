@@ -52,6 +52,9 @@ jobs:
       - name: Check committed OpenAPI artifact for drift
         run: make openapi-check
 
+      - name: Check the vendored pipelex inference tree for drift
+        run: make kit-check
+
 # --------------------------------------------------------------------------
 # 2.  Aggregator job — the *single* required status check
 # --------------------------------------------------------------------------
