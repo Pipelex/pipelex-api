@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **Pinned `pipelex` 0.69.0 (Breaking)**: up from `==0.68.0`, exactly, the release that moves structured output to `instructor` 1.17 and the provider SDKs with it, so the image now carries `mistralai` 2.x and `aiobotocore` 3.x in place of `aioboto3`. Under `instructor` 1.17 the `instructor/openai_structured_outputs` structure method sends a non-strict tool schema, so OpenAI no longer enforces the schema itself; pipelex still validates the response and re-asks on a mismatch.
+- **The Bedrock SDK handle is `bedrock_aioboto` (Breaking)**: the shipped `.pipelex/inference/backends/bedrock.toml` now sets `sdk = "bedrock_aioboto"`, and a deployment that mounts its own `.pipelex/` still setting `sdk = "bedrock_aioboto3"` keeps booting but fails every call to those Bedrock models. `pipelex migrate` names such a file without rewriting it, so replace the handle by hand, in `[defaults]` and in any model table that overrides it.
+- **`Anything` and `JSON` run inputs are read by what they declare (Breaking)**: on `POST /v1/execute` and `POST /v1/start`, a bare string at an `Anything` input becomes a `native.Anything` value rather than `native.Text`, a bare string at a `JSON` input is refused, an item holding `concept` and `content` keys inside a bare `Anything[]` or `JSON[]` list is refused, an explicit single value at a fixed-count `Concept[N]` input raises `MultiplicityCountMismatchError`, and `NaN` or an infinity at a `Number`, `JSON` or `Anything` input is refused. A value the fallback cannot build, such as a list of plain objects at a `Dynamic` input, now answers `StructureValidationError` naming the input and its concept instead of `StuffFactoryError`.
+- **The `json_schema` of an `Anything` value excludes arrays and `null`**: in the `pipe_io_contracts` that `POST /v1/validate` and `POST /v1/execute` return, the `json_schema` of a single `Anything` input or output now carries `"not": {"type": ["array", "null"]}`, and so does the `items` schema of an `Anything[]` input, so a form or validator generated from it refuses what the run refuses.
+- **`POST /v1/build/inputs` renders a `JSON` input as the bare object (Breaking)**: the compact template of a `JSON` input is the object itself, where it was the envelope `{"concept": "native.JSON", "content": {"json_obj": …}}`.
+- **`POST /v1/codegen` stamps `engine_version` `0.69.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.68.0` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
+
+### Fixed
+
+- **`Anything` and `JSON` inputs take the values they declare**: an `Anything` input accepts a string, a number, a boolean or an object, and `Anything[]` a list of them, where all but a bare string used to be refused, while `null` and a list at a single `Anything` input, and a `null` or nested-list item of an `Anything[]` list, are refused with a `422`; a `JSON` input accepts an object and `JSON[]` a list of objects, which used to be refused with an error naming neither the input nor its concept.
+- **Structured output on Gemini works with enum fields and honours the prompt settings**: on a deployment that enables the `google` backend, a structured call whose schema has an enum field no longer fails on every attempt, and the system prompt, temperature and token limit now reach Gemini.
+- **A structured-output call keeps its provider error and re-asks when the model returns no tool call**: a rate limit, timeout or refused connection inside a structured call keeps its category and retryability instead of reading as an unknown error, and a response carrying no tool call or no JSON is re-asked instead of failing at once.
+- **A model the inference gateway refuses reads as a configuration fault**: the gateway's `model_not_allowed_error` refusal is now a `config` error whose `user_action` is `change_model` naming the model handle, where it told the caller to review the prompt, parameters and inputs; the status stays `500`.
+
 ## [v0.30.0] - 2026-09-28
 
 ### Highlights
