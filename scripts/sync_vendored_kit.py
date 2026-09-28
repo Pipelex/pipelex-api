@@ -11,7 +11,8 @@ script owns the whole tree, under four rules:
 - `inference/routing_profiles.toml` is the kit's, byte for byte.
 - `inference/backends.toml` is the kit's except for each backend's `enabled` switch, which is this
   image's own choice: the switch is carried over from the current file, and a backend the kit adds
-  arrives disabled.
+  arrives disabled. The current file is the only record of those choices, so when it is missing,
+  unreadable or holds no switch at all, both modes stop rather than invent one.
 - `inference/deck/`: the numbered files are the kit's, with the `.kit_manifest.json` pipelex keeps
   for them. The `x_custom_*` overrides are this repository's and are never touched.
 
@@ -71,6 +72,10 @@ class KitShapeError(Exception):
     """The kit no longer has the shape these rules were written for."""
 
 
+class SwitchSourceError(Exception):
+    """The vendored backends.toml cannot say which backends this image enables."""
+
+
 class Drift(BaseModel):
     """One vendored file that differs from what the kit says it should be."""
 
@@ -123,10 +128,26 @@ def _plan_backends_dir(*, kit_dir: Path, vendored_dir: Path, plan: SyncPlan) -> 
 
 
 def read_enabled_switches(backends_toml: Path) -> dict[str, bool]:
-    """Read each backend's `enabled` switch from a backends.toml, or nothing when it is absent."""
+    """Read each backend's `enabled` switch from the vendored backends.toml.
+
+    Args:
+        backends_toml: The vendored `inference/backends.toml`, the only record of this image's switches.
+
+    Returns:
+        The switch per backend name.
+
+    Raises:
+        SwitchSourceError: The file is missing, is not valid TOML, or holds no switch at all. Rendering
+            from it would switch every backend off, including the ones this image serves through.
+    """
     if not backends_toml.is_file():
-        return {}
-    document = tomllib.loads(backends_toml.read_text(encoding="utf-8"))
+        msg = f"{backends_toml} is missing, and it is the only record of which backends this image enables. Restore it from git and run again."
+        raise SwitchSourceError(msg)
+    try:
+        document = tomllib.loads(backends_toml.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        msg = f"{backends_toml} is not valid TOML ({exc}), so this image's `enabled` switches cannot be read from it."
+        raise SwitchSourceError(msg) from exc
     switches: dict[str, bool] = {}
     for backend_name, table in document.items():
         if not isinstance(table, dict):
@@ -134,6 +155,9 @@ def read_enabled_switches(backends_toml: Path) -> dict[str, bool]:
         switch = cast("dict[str, object]", table).get("enabled")
         if isinstance(switch, bool):
             switches[backend_name] = switch
+    if not switches:
+        msg = f"{backends_toml} holds no `enabled` switch, so which backends this image enables is unknown. Restore it from git and run again."
+        raise SwitchSourceError(msg)
     return switches
 
 
@@ -243,10 +267,11 @@ def main() -> int:
 
     config_dir: Path = args.config_dir
     kit_version = compute_kit_manifest().kit_version
+    mode = "drift check" if args.check else "sync"
     try:
         plan = plan_sync(config_dir)
-    except KitShapeError as exc:
-        print(f"Vendored kit sync FAILED against pipelex {kit_version}: {exc}")
+    except (KitShapeError, SwitchSourceError) as exc:
+        print(f"Vendored kit {mode} FAILED against pipelex {kit_version}: {exc}")
         return 1
 
     if args.check:

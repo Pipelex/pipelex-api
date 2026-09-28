@@ -200,12 +200,7 @@ cleanenv:
 	find . -type d -wholename './.venv' -exec rm -rf {} + && \
 	echo "Cleaned up virtual env and dependency lock files";
 
-cleanconfig:
-	$(call PRINT_TITLE,"Erasing config files and directories")
-	@find . -type d -wholename './.pipelex' -exec rm -rf {} + && \
-	echo "Cleaned up .pipelex";
-
-cleanall: cleanderived cleanenv cleanconfig
+cleanall: cleanderived cleanenv
 	@echo "Cleaned up all derived files and directories";
 
 ##########################################################################################

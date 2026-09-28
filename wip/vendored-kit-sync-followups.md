@@ -1,11 +1,11 @@
 # `scripts/sync_vendored_kit.py` — review follow-ups
 
-**Status:** deferred from the round-1 review of the branch that introduced `make kit-sync` and `make kit-check`. Neither finding was verified; both are recorded as a reviewer wrote them, with the reason they were not fixed then.
+**Status:** one improvement deferred from the round-2 review of the branch that introduced `make kit-sync` and `make kit-check`. It was not verified; it is recorded as the reviewer wrote it, with the reason it was not fixed then.
 
-## A missing `backends.toml` syncs every backend off, silently
+## `scripts/` is outside the type checkers' scope
 
-Raised by the official code-review, as a low-severity note, at `read_enabled_switches`. When `.pipelex/inference/backends.toml` does not exist, the function returns no switches, and `render_backends_toml` writes every backend disabled, `pipelex_gateway` and `internal` included. Someone who deletes the file to "reset it" and runs `make kit-sync` gets an image with no language-model backend on, and `make kit-check` passes, because it reads the switches from that same file. The docstring states the behaviour and the file is tracked, so only a deliberate deletion reaches it; the fix would be to refuse, in sync mode, when the file is absent, naming the switches it would otherwise have had to invent.
+Raised by cubic, as a P3, at `render_backends_toml`. `pyproject.toml` points pyright at `api` and `tests` and mypy at the same two packages, so neither checks `scripts/sync_vendored_kit.py` or `scripts/export_openapi.py` on `make agent-check`. The sync script was clean under pyright when checked by hand, and its switch logic is now covered by `tests/unit/test_sync_vendored_kit.py`, which loads it from its path. Bringing `scripts/` into both checkers is a repo-wide configuration change, larger than the review's `defects` bar admitted.
 
-## A malformed `backends.toml` fails with a raw traceback
+## Fixed in the same branch
 
-Raised by the same reviewer. `tomllib.loads` in `read_enabled_switches` raises `TOMLDecodeError` uncaught, so the maintainer sees a traceback rather than a one-line message. The traceback names the line and column, which is enough for a maintainer tool; a caught error naming the file would only be friendlier.
+Round 1 deferred two findings on `read_enabled_switches`, and round 2 fixed both after three reviewers raised the first one again. A missing `backends.toml` used to sync every backend off, `pipelex_gateway` and `internal` included, after which `make kit-check` passed; `make cleanall` reached that state, because its `cleanconfig` step deleted the tracked `.pipelex/` directory. A malformed `backends.toml` failed with a raw traceback. Both modes of the script now stop without writing when the file is missing, is not valid TOML, or holds no `enabled` switch, and `make cleanall` no longer touches `.pipelex/`.
