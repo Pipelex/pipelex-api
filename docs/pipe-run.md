@@ -307,7 +307,7 @@ The caller's id is the run's person on that same stream, with one exception: a d
 
 ## Input Format: PipelineInputs
 
-The `inputs` field accepts several shapes. Pipelex picks how to interpret each value from its structure — pass a string and you get `TextContent`, pass a dict with `concept` and `content` keys and you get explicit concept resolution, etc. The cases below enumerate every supported form.
+The `inputs` field accepts several shapes. Pipelex picks how to interpret each value from its structure — pass a string to a `Text` input and you get `TextContent`, pass a dict with `concept` and `content` keys and you get explicit concept resolution, etc. The cases below enumerate every supported form.
 
 ### How Input Formatting Works
 
@@ -351,7 +351,9 @@ The simplest case - just provide a string directly:
 }
 ```
 
-**Result:** Automatically becomes `TextContent` with concept `native.Text`
+**Result:** At a `Text` input, automatically becomes `TextContent` with concept `native.Text`
+
+The input's declaration decides the reading for two native concepts. At an `Anything` input, the string becomes a `native.Anything` value holding the text; an `Anything` input takes any JSON value this way, a number, a boolean, an object or a date included. At a `JSON` input, a string is refused: a `JSON` input reads a JSON object literally, and a `JSON[]` input a list of objects. `NaN` and the infinities are refused at `Number`, `JSON` and `Anything` inputs, since JSON cannot carry them.
 
 ### 1.2: List of Strings (Text List)
 
