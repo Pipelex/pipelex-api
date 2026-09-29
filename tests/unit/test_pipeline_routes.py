@@ -78,7 +78,9 @@ class TestPipelineRoutes:
         """
         client, execute_mock, _ = _build_client(mocker)
         tokens_usage = LLMTokensUsage(
-            job_metadata=JobMetadata(run_metadata=RunMetadata(user_id="user-1", storage_scope="user-1", pipeline_run_id="plr-1"), pipe_code="echo"),
+            job_metadata=JobMetadata(
+                run_metadata=RunMetadata(user_id="user-1", storage_scope="user-1", read_scope=None, pipeline_run_id="plr-1"), pipe_code="echo"
+            ),
             inference_model_name="test-model",
             inference_model_id="test-model-id",
             nb_tokens_by_category={TokenCategory.INPUT: 10, TokenCategory.OUTPUT: 5},
@@ -126,20 +128,14 @@ class TestPipelineRoutes:
         assert response.json()["error_type"] == "InvalidJSON"
 
     def test_execute_rejects_recursion_error(self, mocker: MockerFixture):
-        # A `RecursionError` raised inside `kajson.loads` (e.g. from a deeply-
-        # nested JSON array exhausting the interpreter's recursion budget) is a
-        # caller-input failure and must map to 422 InvalidJSON, not escape to the
-        # catch-all 500 handler. Mocked rather than crafted because whether
-        # `json.JSONDecoder` recurses on a given input depends on the C accelerator
-        # availability — the mock pins the post-catch contract regardless.
+        # A deeply nested JSON array exhausts the parser's recursion budget and raises
+        # `RecursionError` inside `json.loads`. That is a caller-input failure and must map
+        # to 422 InvalidJSON, not escape to the catch-all 500 handler.
         client, _, _ = _build_client(mocker)
-        mocker.patch(
-            "api.routes.pipelex.pipeline.kajson.loads",
-            side_effect=RecursionError("maximum recursion depth exceeded"),
-        )
+        depth = 100_000
         response = client.post(
             "/v1/execute",
-            content=b'{"any": "valid-json-here"}',
+            content=b'{"inputs": ' + b"[" * depth + b"]" * depth + b"}",
             headers={"content-type": "application/json"},
         )
         assert response.status_code == 422
@@ -150,47 +146,87 @@ class TestPipelineRoutes:
         # The opaque-500 sentinel must never appear for a caller-input failure.
         assert problem["error_type"] != "InternalServerError"
 
+    @pytest.mark.parametrize("route", ["/v1/execute", "/v1/start"])
+    def test_run_routes_never_instantiate_a_class_the_body_names(self, mocker: MockerFixture, route: str):
+        """The kajson remote-code-execution gadget: a body naming `subprocess.Popen` used to make
+        the runner import it and call it with the body's arguments at decode time. The run body is
+        now plain JSON, so the marker is refused with a 422 and nothing is ever called.
+        """
+        client, execute_mock, start_mock = _build_client(mocker)
+        popen_mock = mocker.patch("subprocess.Popen")
+        response = client.post(
+            route,
+            json={
+                "pipe_code": "echo",
+                "mthds_contents": [VALID_MTHDS],
+                "inputs": {"text": {"__class__": "Popen", "__module__": "subprocess", "args": ["touch", "pipelex-api-rce-probe"]}},
+            },
+        )
+        assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
+        problem = response.json()
+        assert problem["error_type"] == "ReservedObjectKey"
+        assert problem["error_domain"] == "input"
+        popen_mock.assert_not_called()
+        execute_mock.assert_not_awaited()
+        start_mock.assert_not_awaited()
+
     @pytest.mark.parametrize(
-        ("label", "body"),
+        ("label", "body", "reserved_key"),
         [
-            # KajsonDecoderError — bad module name.
-            ("bad_module", b'{"__class__": "X", "__module__": "no_such_module_xyz"}'),
-            # KajsonDecoderError — class not found in an importable module.
-            ("class_not_in_module", b'{"__class__": "NoSuchClass", "__module__": "json"}'),
-            # KajsonDecoderError — enum value mismatch.
-            (
-                "enum_bad_value",
-                b'{"__class__": "ErrorType", "__module__": "api.error_types", "_value_": "not_a_real_value"}',
-            ),
-            # Unwrapped KeyError — `__class__` present without `__module__`.
-            ("missing_module_marker", b'{"__class__": "X"}'),
-            # Unwrapped KeyError — same leak nested inside an outer object.
-            ("nested_missing_module_marker", b'{"outer": {"__class__": "X"}}'),
-            # Unwrapped AttributeError — generic-typed class whose base also resolves to nothing.
-            ("generic_base_missing", b'{"__class__": "Foo[Bar]", "__module__": "json"}'),
-            # Unwrapped TypeError — `__class__` is not a string.
-            ("class_not_a_string", b'{"__class__": 42, "__module__": "json"}'),
+            ("top_level_marker", {"__class__": "X", "__module__": "json", "pipe_code": "echo"}, "__class__"),
+            ("module_key_alone_in_an_input", {"pipe_code": "echo", "inputs": {"doc": {"__module__": "subprocess"}}}, "__module__"),
+            ("marker_inside_a_list_item", {"pipe_code": "echo", "inputs": {"docs": [{"text": "a"}, {"__class__": "Popen"}]}}, "__class__"),
+            ("kajson_class_source_key", {"pipe_code": "echo", "__kajson_class_source__": "class X: pass"}, "__kajson_class_source__"),
+            ("any_kajson_prefixed_key", {"pipe_code": "echo", "inputs": {"doc": {"__kajson_hint": 1}}}, "__kajson_hint"),
+            ("marker_inside_an_extension_field", {"pipe_code": "echo", "analytics_groups": {"__class__": "X"}}, "__class__"),
         ],
     )
-    def test_execute_rejects_crafted_kajson_payloads(self, mocker: MockerFixture, label: str, body: bytes):
-        """Every documented kajson decode failure — and the bare `KeyError` /
-        `AttributeError` / `TypeError` that escape kajson's `__class__` /
-        `__module__` handling on crafted markers — is a caller mistake and
-        must map to a 422 RFC 7807 problem document, never an opaque 500.
+    def test_execute_refuses_reserved_object_keys(self, mocker: MockerFixture, label: str, body: dict[str, Any], reserved_key: str):
+        """A key a kajson decoder reads as a class marker is refused at any depth of the body, the
+        extension fields included, even though the body is parsed as plain JSON: accepted as data,
+        it would come back to life when the runtime round-trips the inputs through kajson.
         """
-        client, _, _ = _build_client(mocker)
-        response = client.post(
-            "/v1/execute",
-            content=body,
-            headers={"content-type": "application/json"},
-        )
+        client, execute_mock, _ = _build_client(mocker)
+        response = client.post("/v1/execute", json=body)
         assert response.status_code == 422, label
         assert response.headers["content-type"] == "application/problem+json", label
         problem = response.json()
-        assert problem["error_type"] == "InvalidJSON", label
+        assert problem["error_type"] == "ReservedObjectKey", label
         assert problem["error_domain"] == "input", label
-        # The opaque-500 sentinel must never appear for a crafted body.
-        assert problem["error_type"] != "InternalServerError", label
+        assert f"'{reserved_key}'" in problem["detail"], label
+        execute_mock.assert_not_awaited()
+
+    def test_execute_bounds_the_reserved_key_it_echoes(self, mocker: MockerFixture):
+        """Any key starting with `__kajson` is refused, so the caller picks its length. The `detail`
+        names it cut to the correlation-field bound, since the detail is also logged as a field.
+        """
+        client, _, _ = _build_client(mocker)
+        long_key = "__kajson" + "k" * 100_000
+        response = client.post("/v1/execute", json={"pipe_code": "echo", "inputs": {"doc": {long_key: 1}}})
+        assert response.status_code == 422
+        problem = response.json()
+        assert problem["error_type"] == "ReservedObjectKey"
+        assert "'__kajsonkkkk" in problem["detail"]
+        assert "…'" in problem["detail"]
+        assert len(problem["detail"]) < 1_000
+
+    def test_execute_accepts_marker_lookalikes_as_plain_data(self, mocker: MockerFixture):
+        """Only the reserved keys themselves are refused: a value that mentions `__class__`, and a
+        key that merely resembles a marker, are data and reach the runner exactly as sent.
+        """
+        client, execute_mock, _ = _build_client(mocker)
+        inputs = {
+            "text": "__class__ and __module__ are only words here",
+            "doc": {"__classic__": "not a marker", "kajson": "neither is this"},
+        }
+        response = client.post(
+            "/v1/execute",
+            json={"pipe_code": "echo", "mthds_contents": [VALID_MTHDS], "inputs": inputs},
+        )
+        assert response.status_code == 200
+        execute_mock.assert_awaited_once()
+        assert execute_mock.await_args.kwargs["inputs"] == inputs
 
     def test_start_happy_path_returns_202(self, mocker: MockerFixture):
         client, _, start_mock = _build_client(mocker)

@@ -257,6 +257,19 @@ API_KEY=your-strong-secret
 
 Clients now need `Authorization: Bearer your-strong-secret`.
 
+### Documents on an intranet host, or egress through a proxy
+
+When a run fetches a URL that a value carries (a document to extract, a prompt image for a provider that does not take URLs, a generated image a provider returned as a link), the runtime refuses a host that is `localhost`, a cloud metadata alias, or that resolves to a private, loopback, link-local or metadata address, on the first request and on every redirect hop. The pipe fails with `SsrfBlockedError` naming the host. The guarded fetch also connects directly, ignoring `HTTP_PROXY` and `HTTPS_PROXY`. The image ships with the guard on, which is right for any deployment that runs methods it did not write.
+
+A deployment whose documents live on an intranet host, or whose only way out is an HTTP proxy, turns it off in a `pipelex_override.toml`:
+
+```toml
+[runtime.network]
+is_fetch_ssrf_guard_enabled = false
+```
+
+Webhook delivery stays guarded whatever this says.
+
 ### Customizing Pipelex (storage, tracing, inference, model decks, …)
 
 Write a `pipelex_override.toml` (or env-specific `pipelex_<env>.toml`) with the keys you want to change. Reference any provider credentials from env vars via `${VAR}` so they stay out of the file. Mount it into the container as shown above. Refer to https://docs.pipelex.com for the full set of available keys and their semantics.

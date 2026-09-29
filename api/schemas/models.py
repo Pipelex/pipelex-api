@@ -15,13 +15,12 @@ from urllib.parse import urlparse
 from mthds.protocol.exceptions import PipelineRequestError
 from mthds.protocol.pipe_output import VariableMultiplicity
 from mthds.protocol.pipeline_inputs import PipelineInputs
-from mthds.protocol.working_memory import WorkingMemoryAbstract
 from pipelex.core.pipes.pipe_output import PipeOutput
 from pipelex.methods.fetching import MethodProvenance
 from pipelex.pipeline.pipeline_response import PipelexRunResultExecute, PipelexRunResultStart
 from pipelex.reporting.usage_records import TokensUsageRecord
 from pipelex.system.run_extras import validate_run_extras
-from pipelex.system.storage_scope import validate_storage_scope
+from pipelex.system.storage_scope import validate_read_scope, validate_storage_scope
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.functional_validators import SkipValidation
 
@@ -63,8 +62,9 @@ class RunRequest(BaseModel):
     Attributes:
         pipe_code: Code of the pipe to execute.
         mthds_contents: List of MTHDS bundle contents to load.
-        inputs: Inputs in PipelineInputs format — Pydantic validation is skipped
-            to preserve the flexible format (dicts, strings, StuffContent objects, etc.).
+        inputs: Inputs in PipelineInputs format, as plain JSON — Pydantic validation is
+            skipped to preserve the flexible format (strings, lists, objects); the runtime
+            shapes each value against the entry pipe's declared input.
         output_name: Name of the output slot to write to.
         output_multiplicity: Output multiplicity setting.
         dynamic_output_concept_ref: Override for the dynamic output concept ref.
@@ -85,7 +85,7 @@ class RunRequest(BaseModel):
 
     pipe_code: str | None = None
     mthds_contents: list[str] | None = None
-    inputs: Annotated[PipelineInputs | WorkingMemoryAbstract[Any] | None, SkipValidation] = None
+    inputs: Annotated[PipelineInputs | None, SkipValidation] = None
     output_name: str | None = None
     output_multiplicity: VariableMultiplicity | None = None
     dynamic_output_concept_ref: str | None = None
@@ -250,6 +250,14 @@ _STORAGE_SCOPE_DESCRIPTION = (
     "tenants MUST send this."
 )
 
+_READ_SCOPE_DESCRIPTION = (
+    "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the host-supplied prefix every stored object "
+    "this run reads must lie under, and on a scoped run no local path is read at all. One to three "
+    "path-safe segments, which must be the `storage_scope` or one of its leading segments, since a run "
+    "reads back what it writes. Omit it and the run is scoped to the caller's own id when the deployment "
+    "identifies callers, and unscoped when it is single-tenant — a host serving many tenants MUST send this."
+)
+
 _ANALYTICS_GROUPS_DESCRIPTION = (
     "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the host-supplied groups this run's "
     'telemetry belongs to, as a mapping of group type to group key (e.g. `{"organization": "org_acme"}`). '
@@ -331,10 +339,10 @@ class PipelineApiExtras(BaseModel):
     extension args are defined and handled by the implementation that owns
     them). The upstream protocol models don't know about `callback_urls`.
 
-    `storage_scope` and `analytics_groups` are the host-computed run context:
-    data a multi-tenant host knows about its own tenancy and sends in the body,
-    as opposed to the caller's identity, which arrives on a trusted header. The
-    runtime carries both opaquely and validates both again at its own seam.
+    `storage_scope`, `read_scope` and `analytics_groups` are the host-computed run
+    context: data a multi-tenant host knows about its own tenancy and sends in the
+    body, as opposed to the caller's identity, which arrives on a trusted header. The
+    runtime carries them opaquely and validates them again at its own seam.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -343,7 +351,20 @@ class PipelineApiExtras(BaseModel):
     callback_urls: list[str] | None = Field(default=None, max_length=MAX_CALLBACK_URLS)
     orchestration_mode: str | None = Field(default=None, description=_ORCHESTRATION_MODE_DESCRIPTION)
     storage_scope: str | None = Field(default=None, description=_STORAGE_SCOPE_DESCRIPTION)
+    read_scope: str | None = Field(default=None, description=_READ_SCOPE_DESCRIPTION)
     analytics_groups: dict[str, str] | None = Field(default=None, description=_ANALYTICS_GROUPS_DESCRIPTION)
+
+    @field_validator("read_scope")
+    @classmethod
+    def _validate_read_scope(cls, value: str | None) -> str | None:
+        """Refuse a malformed read scope at the WIRE, with the runtime's own segment rule.
+
+        Its relation to the storage scope is checked once both are resolved, since either may
+        fall back to the caller's id (`api.routes.pipelex.pipeline._resolve_run_scopes`).
+        """
+        if value is None:
+            return None
+        return validate_read_scope(value=value)
 
     @field_validator("storage_scope")
     @classmethod
@@ -417,6 +438,7 @@ class PipelexApiStartRequest(StartRequest):
     )
     orchestration_mode: str | None = Field(default=None, description=_ORCHESTRATION_MODE_DESCRIPTION)
     storage_scope: str | None = Field(default=None, description=_STORAGE_SCOPE_DESCRIPTION)
+    read_scope: str | None = Field(default=None, description=_READ_SCOPE_DESCRIPTION)
     analytics_groups: dict[str, str] | None = Field(default=None, description=_ANALYTICS_GROUPS_DESCRIPTION)
 
 
@@ -424,13 +446,14 @@ class PipelexApiExecuteRequest(RunRequest):
     """Documented body of `POST /execute` — the protocol's `RunRequest` plus THIS server's run extensions.
 
     Used only to publish the OpenAPI request schema: `/execute` reads the body through the raw
-    `Request` (kajson decoding), so FastAPI cannot infer the body type; this model documents the
-    extensions the route actually honors (`orchestration_mode`, `storage_scope`, `analytics_groups`,
+    `Request` (plain JSON, parsed by the route), so FastAPI cannot infer the body type; this model documents the
+    extensions the route actually honors (`orchestration_mode`, `storage_scope`, `read_scope`, `analytics_groups`,
     all parsed by `PipelineApiExtras`).
     """
 
     orchestration_mode: str | None = Field(default=None, description=_ORCHESTRATION_MODE_DESCRIPTION)
     storage_scope: str | None = Field(default=None, description=_STORAGE_SCOPE_DESCRIPTION)
+    read_scope: str | None = Field(default=None, description=_READ_SCOPE_DESCRIPTION)
     analytics_groups: dict[str, str] | None = Field(default=None, description=_ANALYTICS_GROUPS_DESCRIPTION)
 
 

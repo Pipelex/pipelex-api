@@ -36,10 +36,18 @@ class ErrorType(StrEnum):
     BAD_REQUEST = "BadRequest"
     VALIDATION_ERROR = "ValidationError"
     INVALID_JSON = "InvalidJSON"
+    # A run request's body carries, at any depth, an object key a kajson decoder reads as a class
+    # marker: `__class__`, `__module__`, or anything starting with `__kajson`. A 422, not data: the
+    # run body is plain JSON, and such a key would make a later kajson round trip of the inputs
+    # import and instantiate whatever class the caller named.
+    RESERVED_OBJECT_KEY = "ReservedObjectKey"
     INVALID_CALLBACK_URLS = "InvalidCallbackUrls"
     # A run request's `storage_scope` extra is not one to three path-safe segments. A 422, not a
     # 500 from deep in the run: the value becomes a storage key prefix, so a `..` escapes the tenant.
     INVALID_STORAGE_SCOPE = "InvalidStorageScope"
+    # A run request's `read_scope` extra is not one to three path-safe segments, or the run's storage
+    # scope does not lie under it, so the run could not read back what it writes.
+    INVALID_READ_SCOPE = "InvalidReadScope"
     # A run request's `analytics_groups` extra is not a mapping of group type to group key within
     # the runtime's charset and entry cap (`pipelex.system.run_extras`).
     INVALID_ANALYTICS_GROUPS = "InvalidAnalyticsGroups"
@@ -52,8 +60,8 @@ class ErrorType(StrEnum):
     # A method carrying custom Python (`.py` in a bundle, or in a fetched `method_ref` package)
     # reached a deployment that is NOT sandbox-hosted. Running customer code in-process is
     # refused (403): custom code is a sandbox-hosted capability only. Use a sandbox-hosted
-    # deployment. (On a sandbox-hosted deployment, a fetched package declaring Python STRUCTURE
-    # classes is still refused — that is pipelex's `MethodStructuresRefusedError`, not this.)
+    # deployment. (On a sandbox-hosted deployment, a bundle or a fetched package declaring Python
+    # STRUCTURE classes is still refused — that is pipelex's `MethodStructuresRefusedError`, not this.)
     CUSTOM_CODE_REQUIRES_SANDBOX = "CustomCodeRequiresSandbox"
 
     # A caller selected a closure by a REGISTRY-FORM `method_ref` (not a `github.com/...`
