@@ -118,9 +118,12 @@ def _resolve_storage_scope(request: Request, *, requested: str | None) -> str:
 def _resolve_read_scope(request: Request, *, requested: str | None) -> str | None:
     """What this run may read — the host's value, the caller's own id, or everything.
 
-    The fallback mirrors the storage scope's (design DR2 of the read-scope campaign): a
-    deployment that identifies its callers confines each to their own id, which is also
-    where their writes land by default, and a single-tenant deployment runs unscoped. On a
+    A sent value is the host's and is taken as it is. The fallback mirrors the storage
+    scope's (design DR2 of the read-scope campaign): when the field is omitted, a deployment
+    that identifies its callers scopes the run to the caller's own id, which is also where
+    their writes land by default, and a single-tenant deployment runs unscoped. That default
+    bounds a caller only where the host writes the body: a caller reaching a `jwt`
+    deployment directly can send any read scope, as it can send any storage scope. On a
     multi-tenant host that forgets the field, the fallback fails closed: the host's own
     storage scope lies under no caller's id, so the run is refused rather than reading
     across tenants.
