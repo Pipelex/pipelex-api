@@ -1,6 +1,6 @@
 # Kajson deserialization of untrusted bodies — design flag
 
-> **Status:** flagged, not actioned. Filed during the `pipelex-api` Phase 3 review (2026-05-23) — `TODOS.md` question 10, part 2. Pre-existing — not introduced by Phase 3.
+> **Status:** resolved on 2026-09-29 by L-260929-e27ddf, superseding the "Why this is intentional" reasoning below. The run body is now parsed with `json.loads`, and any `__class__`, `__module__` or `__kajson…` key at any depth is refused with a 422 `ReservedObjectKey` (option 2 below, plus the refusal). The typed-inputs feature this note defended had no users: no SDK sends class markers, and a Python client serializes its objects to plain JSON. Filed during the `pipelex-api` Phase 3 review (2026-05-23) — `TODOS.md` question 10, part 2.
 
 ## What
 
