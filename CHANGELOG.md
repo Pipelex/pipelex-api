@@ -1,6 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [v0.32.0] - 2026-09-29
+
+### Highlights
+
+**The runner no longer trusts the run body or the methods it is handed.** `POST /v1/execute` and `POST /v1/start` parse their body as plain JSON, which closes a path by which any caller could make the runner import and instantiate a class. On `pipelex` 0.70.0, a run reads storage only under its read scope, every template renders in Jinja's sandbox, a URL fetch refuses private destinations, and a sandbox-hosted deployment refuses a bundle that declares Python structure classes. A multi-tenant host must now send `read_scope`, and a method that ran on 0.69.0 can now be refused, as the entries below describe.
 
 ### Changed
 
