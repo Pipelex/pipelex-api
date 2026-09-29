@@ -22,7 +22,7 @@ from pipelex.runtime_bridge.exceptions import MissingBundleValidatorError, Missi
 from pipelex.runtime_bridge.primitives.hydration import hydrate_working_memory
 from pipelex.runtime_hub import get_bundle_validator_registry, get_orchestrator_registry
 from pipelex.system.environment import get_required_env
-from pipelex.system.storage_scope import SINGLE_TENANT_USER_ID
+from pipelex.system.storage_scope import LOCAL_STORAGE_SCOPE, SINGLE_TENANT_USER_ID, validate_storage_scope_within_read_scope
 from pydantic import ValidationError
 from typing_extensions import override
 
@@ -113,6 +113,57 @@ def _resolve_storage_scope(request: Request, *, requested: str | None) -> str:
     still isolates its callers.
     """
     return requested or get_request_user_id(request)
+
+
+def _resolve_read_scope(request: Request, *, requested: str | None) -> str | None:
+    """What this run may read — the host's value, the caller's own id, or everything.
+
+    A sent value is the host's and is taken as it is. The fallback mirrors the storage
+    scope's (design DR2 of the read-scope campaign): when the field is omitted, a deployment
+    that identifies its callers scopes the run to the caller's own id, which is also where
+    their writes land by default, and a single-tenant deployment runs unscoped. That default
+    bounds a caller only where the host writes the body: a caller reaching a `jwt`
+    deployment directly can send any read scope, as it can send any storage scope. On a
+    multi-tenant host that forgets the field, the fallback fails closed: the host's own
+    storage scope lies under no caller's id, so the run is refused rather than reading
+    across tenants.
+    """
+    if requested is not None:
+        return requested
+    user: RequestUser | None = getattr(request.state, "user", None)
+    return user.user_id if user else None
+
+
+class _RunScopes(NamedTuple):
+    storage_scope: str
+    read_scope: str | None
+
+
+def _resolve_run_scopes(request: Request, *, extras: PipelineApiExtras) -> _RunScopes:
+    """Resolve the run's storage and read scopes, and refuse a pair the run could not work under.
+
+    The runtime refuses a storage scope outside the read scope, and the local storage
+    sentinel beside any read scope, with a bare `ValueError` from inside the run, which
+    would answer 500. Checking the resolved pair here answers the caller's mistake with a
+    422 naming the field, before any method is fetched or library loaded.
+    """
+    storage_scope = _resolve_storage_scope(request, requested=extras.storage_scope)
+    read_scope = _resolve_read_scope(request, requested=extras.read_scope)
+    if read_scope is not None:
+        if storage_scope == LOCAL_STORAGE_SCOPE:
+            raise_validation_error(
+                message=f"A run with a read_scope must pass its own storage_scope, not the local sentinel {LOCAL_STORAGE_SCOPE!r}.",
+                error_type=ErrorType.INVALID_READ_SCOPE,
+            )
+        try:
+            validate_storage_scope_within_read_scope(storage_scope=storage_scope, read_scope=read_scope)
+        except ValueError as exc:
+            origin = "sent" if extras.read_scope is not None else "defaulted to the caller's id"
+            raise_validation_error(
+                message=f"{exc} The read_scope {read_scope!r} was {origin}, and the storage_scope is {storage_scope!r}.",
+                error_type=ErrorType.INVALID_READ_SCOPE,
+            )
+    return _RunScopes(storage_scope=storage_scope, read_scope=read_scope)
 
 
 def _completion_signature(pipeline_run_id: str) -> str:
@@ -351,6 +402,7 @@ class ApiRunner(PipelexMTHDSProtocol):
             pipe_run_mode=self.pipe_run_mode,
             user_id=self.user_id,
             storage_scope=self.storage_scope,
+            read_scope=self.read_scope,
             # The base `execute` threads this itself; `start` builds its job
             # here, so a group left out of this call is dropped with no error
             # and the run's spans lose their groups while the ack still says 202.
@@ -543,6 +595,7 @@ def _decode_body(body: bytes) -> dict[str, Any]:
 _EXTRAS_FIELD_ERROR_TYPES: dict[str, ErrorType] = {
     "callback_urls": ErrorType.INVALID_CALLBACK_URLS,
     "storage_scope": ErrorType.INVALID_STORAGE_SCOPE,
+    "read_scope": ErrorType.INVALID_READ_SCOPE,
     "analytics_groups": ErrorType.INVALID_ANALYTICS_GROUPS,
 }
 
@@ -647,8 +700,8 @@ def _bundle_run_source(run_request: RunRequest) -> Generator[tuple[list[str] | N
     A method bundle KEEPS the proven run path rather than replacing it: its `.mthds`
     text travels as `mthds_contents` — so `main_pipe` resolves exactly as it does for a
     plain (non-bundle) run — and ONLY the non-`.mthds` files (custom PipeFunc `.py`,
-    `structures/*.py`, `requirements.txt`) are materialized into a temp `library_dirs`
-    entry for source capture. This mirrors "a normal run, plus the Python", instead of
+    `requirements.txt`) are materialized into a temp `library_dirs` entry, where the
+    load path reads them without importing them. This mirrors "a normal run, plus the Python", instead of
     handing the engine a bare directory with no `mthds_contents` (which never resolves
     `main_pipe`, since that is only derived from `mthds_contents`).
 
@@ -657,9 +710,11 @@ def _bundle_run_source(run_request: RunRequest) -> Generator[tuple[list[str] | N
     texts and no library dir. The temp dir (when created) is cleaned up on exit.
 
     Security gate (decision 5): a bundle that ships custom Python (`.py`) is only
-    honored on a sandbox-hosted deployment, where the load path captures the source
-    without importing it. On a non-hosted deployment, running that code would import
-    it in-process — refused with a 403 rather than executing untrusted code.
+    honored on a sandbox-hosted deployment, where the load path reads the source
+    without importing it and refuses, with a 403 `MethodStructuresRefusedError`, a
+    bundle whose Python declares a structure class; PipeFunc source is captured for
+    the sandbox. On a non-hosted deployment, running that code would import it
+    in-process — refused with a 403 rather than executing untrusted code.
     """
     if run_request.bundle_b64 is None and run_request.files is None:
         yield run_request.mthds_contents, None
@@ -738,7 +793,7 @@ def _run_source(run_request: RunRequest) -> Generator[_ResolvedRunSource, None, 
     response_model=PipelexApiExecuteResponse,
     # On top of the composite router's shared 401/413/422/500: the policy 403s (a forbidden
     # per-request `orchestration_mode` override, the custom-code sandbox gate, the structures
-    # refusal on a fetched package), the `method_ref` package-not-found 404, and the provider
+    # refusal on a bundle or a fetched package), the `method_ref` package-not-found 404, and the provider
     # rate-limit passthrough (429) — `/execute` is the only route that runs inference, so it is
     # the only one that can be rate-limited upstream. NO 409: unlike `/start`, `/execute` takes
     # no client-supplied `pipeline_run_id` (the base runner generates one per call), so a caller
@@ -770,10 +825,12 @@ async def execute(request: Request) -> JSONResponse:
     turns them into an RFC 7807 problem response.
     """
     run_request, extras = await _parse_request(request)
+    scopes = _resolve_run_scopes(request, extras=extras)
     with _run_source(run_request) as source:
         runner = ApiRunner(
             user_id=get_request_user_id(request),
-            storage_scope=_resolve_storage_scope(request, requested=extras.storage_scope),
+            storage_scope=scopes.storage_scope,
+            read_scope=scopes.read_scope,
             extras=extras.analytics_groups,
             library_dirs=source.library_dirs,
         )
@@ -809,7 +866,7 @@ async def execute(request: Request) -> JSONResponse:
     #   400 — the resolved orchestrator is blocking-only (the in-process `direct` base): refuse
     #         honestly rather than block-and-ack. Use `/execute`.
     #   403 — a per-request `orchestration_mode` override the deployment forbids, the
-    #         custom-code sandbox gate, or the structures refusal on a fetched package.
+    #         custom-code sandbox gate, or the structures refusal on a bundle or a fetched package.
     #   404 — a `method_ref` whose repository holds no matching package.
     #   409 — the submitted `pipeline_run_id` is still registered for an in-flight run.
     #   501 — an async-capable deployment whose async execution is not enabled.
@@ -855,6 +912,7 @@ async def start(
     The completion callback (`callback_urls` / storage delivery) fires on the async path.
     """
     run_request, extras = parsed
+    scopes = _resolve_run_scopes(request, extras=extras)
     # The run source is materialized only for the synchronous setup phase: `start` builds the
     # PipeJob (crate carrying the captured `python_sources`) before it enqueues, so the temp dir
     # (a bundle's, or a fetched package's) is no longer needed once `start` returns — cleanup on
@@ -862,7 +920,8 @@ async def start(
     with _run_source(run_request) as source:
         runner = ApiRunner(
             user_id=get_request_user_id(request),
-            storage_scope=_resolve_storage_scope(request, requested=extras.storage_scope),
+            storage_scope=scopes.storage_scope,
+            read_scope=scopes.read_scope,
             extras=extras.analytics_groups,
             library_dirs=source.library_dirs,
         )

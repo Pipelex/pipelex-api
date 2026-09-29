@@ -24,8 +24,9 @@ carrying ANY `.py` is refused with the same 403 the bundle transport uses
 (`CustomCodeRequiresSandbox`) — running it would import customer code in-process. On a
 sandbox-hosted deployment, PipeFunc `.py` is acceptable (captured as text, executed in the
 network-blocked sandbox) but a package declaring `StructuredContent` subclasses is refused
-loudly (`MethodStructuresRefusedError` → 403): structures are imported into the runner's own
-process, and the rule-naming error teaches authors to express types as MTHDS concepts.
+loudly (`MethodStructuresRefusedError` → 403): structure classes would have to be imported into
+the runner's own process, and the rule-naming error teaches authors to express types as MTHDS
+concepts. The library load refuses the same classes again, for a bundle as for a package.
 
 Everything a run needs is copied OUT of the cached clone before this module yields — the
 `.mthds` text into memory, the rest into a per-request temp directory — so cache eviction
