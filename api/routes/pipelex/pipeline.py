@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Any, NamedTuple, cast
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from kajson import kajson
-from kajson.exceptions import KajsonDecoderError
 from mthds.protocol.exceptions import PipelineRequestError
 from pipelex.config import get_config, is_pipe_func_sandbox_hosted
 from pipelex.core.pipes.pipe_output import PipeOutput
@@ -513,35 +512,56 @@ class ApiRunner(PipelexMTHDSProtocol):
         return cast("PipelexValidationReport | ErrorReport", verdict)
 
 
-def _decode_body(body: bytes) -> dict[str, Any]:
-    """kajson-decode the body and confirm it's a dict. Raises 422 if not.
+# The object keys a kajson decoder reads as class markers: `__class__` and `__module__` name a class to
+# import and instantiate, and kajson reserves every key starting with `__kajson` for itself. The same set
+# the hosted platform refuses before it forwards a run body.
+_RESERVED_OBJECT_KEYS = frozenset({"__class__", "__module__"})
+_RESERVED_OBJECT_KEY_PREFIX = "__kajson"
 
-    The catch covers the kajson decode failures we've documented and
-    verified empirically against the pinned kajson:
-      - `UnicodeDecodeError` — body bytes are not valid UTF-8.
+
+def _find_reserved_object_key(payload: object) -> str | None:
+    """Return the first reserved object key found at any depth of a parsed JSON value, or `None`.
+
+    Walks every object key at every depth with an explicit stack, so a deeply nested body cannot
+    exhaust the interpreter's recursion budget here. Values are never inspected: a string that
+    merely contains `__class__` is data, not a marker.
+    """
+    stack: list[object] = [payload]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict):
+            for key, value in cast("dict[str, object]", current).items():
+                if key in _RESERVED_OBJECT_KEYS or key.startswith(_RESERVED_OBJECT_KEY_PREFIX):
+                    return key
+                stack.append(value)
+        elif isinstance(current, list):
+            stack.extend(cast("list[object]", current))
+    return None
+
+
+def _decode_body(body: bytes) -> dict[str, Any]:
+    """Parse the run body as plain JSON and confirm it is an object free of class markers. Raises 422 if not.
+
+    The body is parsed with `json.loads`, never with kajson. kajson reads a
+    `{"__class__": ..., "__module__": ...}` object as an order to import that module and
+    instantiate that class, so decoding a caller's body with it let any caller run code on the
+    server (`subprocess.Popen` included) before a single field was validated. The MTHDS Protocol
+    wire is plain JSON, and no client sends class markers.
+
+    Parsing as plain data is not enough on its own: a marker accepted as an ordinary dict comes
+    back to life the moment the runtime round-trips the inputs through kajson. So a key a kajson
+    decoder treats as a marker is refused at any depth with a 422 `ReservedObjectKey`.
+
+    The parse failures are caller mistakes, so they map to a 422 `InvalidJSON` rather than a
+    sanitized 500:
+      - `UnicodeDecodeError` — the body bytes are not valid UTF-8.
       - `ValueError` — `json.JSONDecodeError` (it subclasses `ValueError`).
-      - `KajsonDecoderError` — kajson's named class for bad module name,
-        class-not-found, enum mismatch, and pydantic validation failures.
-      - bare `KeyError` / `AttributeError` / `TypeError` — protocol-shape
-        leaks where kajson dereferences crafted `__class__` / `__module__`
-        markers without wrapping (a `__class__` without a `__module__`, a
-        non-string marker, a generic-typed class whose base fallback also
-        resolves nothing). Tracked upstream so kajson eventually wraps
-        them in `KajsonDecoderError`; see
-        `wip/pipelex-changes.md` #15.
-      - `RecursionError` — a deeply-nested JSON array or object exhausts
-        the interpreter's recursion budget inside the JSON parser. Still
-        a caller-controllable input shape, so it maps to 422 alongside
-        the rest rather than escaping to a sanitized 500.
-    All of these are caller mistakes — the body is malformed against
-    kajson's contract — so they map to a 422, not a sanitized 500. The
-    scope here is one line (`kajson.loads(...)`), so catching the bare
-    three cannot mask a programming bug in our code — the only source of
-    those types within this try block is kajson's internal handling.
+      - `RecursionError` — a deeply nested JSON array or object exhausts the parser's
+        recursion budget.
     """
     try:
-        decoded = kajson.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError, KajsonDecoderError, KeyError, AttributeError, TypeError, RecursionError) as exc:
+        decoded = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
         raise_validation_error(
             message=f"Request body is not valid JSON: {exc!s}",
             error_type=ErrorType.INVALID_JSON,
@@ -551,7 +571,20 @@ def _decode_body(body: bytes) -> dict[str, Any]:
             message="Request body must be a JSON object",
             error_type=ErrorType.INVALID_JSON,
         )
-    return cast("dict[str, Any]", decoded)
+    request_data = cast("dict[str, Any]", decoded)
+    reserved_key = _find_reserved_object_key(request_data)
+    if reserved_key is not None:
+        # The key is the caller's, as long as the body allows (any `__kajson…` key matches), and the
+        # detail is logged as a field: echo it bounded, as the correlation fields are.
+        shown_key = reserved_key if len(reserved_key) <= _MAX_CORRELATION_FIELD_LEN else f"{reserved_key[:_MAX_CORRELATION_FIELD_LEN]}…"
+        raise_validation_error(
+            message=(
+                f"Request body contains the reserved object key '{shown_key}'. A run request is plain JSON: "
+                f"no object in it may carry a '__class__' or '__module__' key, or a key starting with '{_RESERVED_OBJECT_KEY_PREFIX}'."
+            ),
+            error_type=ErrorType.RESERVED_OBJECT_KEY,
+        )
+    return request_data
 
 
 # The `error_type` a 422 on one extras field carries. A field absent from this map
@@ -625,8 +658,8 @@ async def _parse_request(request: Request) -> tuple[RunRequest, PipelineApiExtra
     """Parse and validate the request body.
 
     Splits the body into:
-      1. The upstream `RunRequest` (pipe_code, mthds_contents, inputs, …)
-         decoded via `kajson` so structured inputs survive without re-parsing.
+      1. The upstream `RunRequest` (pipe_code, mthds_contents, inputs, …),
+         parsed as plain JSON by `_decode_body`, which refuses class markers.
       2. `PipelineApiExtras` (pipeline_run_id, callback_urls, orchestration_mode,
          storage_scope, analytics_groups) validated by Pydantic — callback_urls
          are checked for scheme + private/loopback hosts to harden against SSRF.
@@ -765,8 +798,8 @@ def _run_source(run_request: RunRequest) -> Generator[_ResolvedRunSource, None, 
     responses={403: PROBLEM_403_RUN_POLICY, 404: PROBLEM_404_METHOD_PACKAGE, 429: PROBLEM_429},
     # Documented body = the protocol's RunRequest plus THIS server's own
     # `orchestration_mode` extension (the route honors a per-request override). The
-    # body is read through the raw Request (kajson decoding — see
-    # `_parse_request`), so FastAPI cannot infer a typed body parameter;
+    # body is read through the raw Request (plain JSON with the reserved-key
+    # refusal — see `_parse_request`), so FastAPI cannot infer a typed body parameter;
     # document it explicitly so the committed OpenAPI artifact (and protocol
     # conformance tooling) publishes the request schema. `responses=` and
     # `openapi_extra` touch different members of the operation object, so both land.

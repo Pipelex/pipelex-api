@@ -15,7 +15,6 @@ from urllib.parse import urlparse
 from mthds.protocol.exceptions import PipelineRequestError
 from mthds.protocol.pipe_output import VariableMultiplicity
 from mthds.protocol.pipeline_inputs import PipelineInputs
-from mthds.protocol.working_memory import WorkingMemoryAbstract
 from pipelex.core.pipes.pipe_output import PipeOutput
 from pipelex.methods.fetching import MethodProvenance
 from pipelex.pipeline.pipeline_response import PipelexRunResultExecute, PipelexRunResultStart
@@ -63,8 +62,9 @@ class RunRequest(BaseModel):
     Attributes:
         pipe_code: Code of the pipe to execute.
         mthds_contents: List of MTHDS bundle contents to load.
-        inputs: Inputs in PipelineInputs format — Pydantic validation is skipped
-            to preserve the flexible format (dicts, strings, StuffContent objects, etc.).
+        inputs: Inputs in PipelineInputs format, as plain JSON — Pydantic validation is
+            skipped to preserve the flexible format (strings, lists, objects); the runtime
+            shapes each value against the entry pipe's declared input.
         output_name: Name of the output slot to write to.
         output_multiplicity: Output multiplicity setting.
         dynamic_output_concept_ref: Override for the dynamic output concept ref.
@@ -85,7 +85,7 @@ class RunRequest(BaseModel):
 
     pipe_code: str | None = None
     mthds_contents: list[str] | None = None
-    inputs: Annotated[PipelineInputs | WorkingMemoryAbstract[Any] | None, SkipValidation] = None
+    inputs: Annotated[PipelineInputs | None, SkipValidation] = None
     output_name: str | None = None
     output_multiplicity: VariableMultiplicity | None = None
     dynamic_output_concept_ref: str | None = None
@@ -446,7 +446,7 @@ class PipelexApiExecuteRequest(RunRequest):
     """Documented body of `POST /execute` — the protocol's `RunRequest` plus THIS server's run extensions.
 
     Used only to publish the OpenAPI request schema: `/execute` reads the body through the raw
-    `Request` (kajson decoding), so FastAPI cannot infer the body type; this model documents the
+    `Request` (plain JSON, parsed by the route), so FastAPI cannot infer the body type; this model documents the
     extensions the route actually honors (`orchestration_mode`, `storage_scope`, `read_scope`, `analytics_groups`,
     all parsed by `PipelineApiExtras`).
     """

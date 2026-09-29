@@ -394,20 +394,6 @@ paths:
                   properties: {}
                   type: object
                   title: StuffContentAbstract
-                WorkingMemoryAbstract_Any_:
-                  properties:
-                    root:
-                      additionalProperties: true
-                      type: object
-                      title: Root
-                    aliases:
-                      additionalProperties:
-                        type: string
-                      type: object
-                      title: Aliases
-                  additionalProperties: false
-                  type: object
-                  title: WorkingMemoryAbstract[Any]
               properties:
                 pipe_code:
                   anyOf:
@@ -436,7 +422,6 @@ paths:
                       - additionalProperties: true
                         type: object
                     type: object
-                  - $ref: '#/$defs/WorkingMemoryAbstract_Any_'
                   - type: 'null'
                   title: Inputs
                 output_name:
@@ -543,7 +528,7 @@ paths:
 
                 Used only to publish the OpenAPI request schema: `/execute` reads the body through the raw
 
-                `Request` (kajson decoding), so FastAPI cannot infer the body type; this model documents the
+                `Request` (plain JSON, parsed by the route), so FastAPI cannot infer the body type; this model documents the
 
                 extensions the route actually honors (`orchestration_mode`, `storage_scope`, `read_scope`, `analytics_groups`,
 
@@ -665,20 +650,6 @@ paths:
                   properties: {}
                   type: object
                   title: StuffContentAbstract
-                WorkingMemoryAbstract_Any_:
-                  properties:
-                    root:
-                      additionalProperties: true
-                      type: object
-                      title: Root
-                    aliases:
-                      additionalProperties:
-                        type: string
-                      type: object
-                      title: Aliases
-                  additionalProperties: false
-                  type: object
-                  title: WorkingMemoryAbstract[Any]
               properties:
                 pipe_code:
                   anyOf:
@@ -707,7 +678,6 @@ paths:
                       - additionalProperties: true
                         type: object
                     type: object
-                  - $ref: '#/$defs/WorkingMemoryAbstract_Any_'
                   - type: 'null'
                   title: Inputs
                 output_name:
