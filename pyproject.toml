@@ -18,7 +18,7 @@ classifiers = [
 dependencies = [
   # The extras deliberately leave out `cli`: the runner selects the `json` log sink and a Rich-free
   # pretty-print mode, so nothing it does on a request renders a terminal.
-  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.69.0",
+  "pipelex[mistralai,anthropic,google,google-genai,bedrock,fal]==0.70.0",
   "fastapi>=0.118.0",
   "pyjwt>=2.10.1",
   "uvicorn>=0.37.0",
@@ -367,6 +367,3 @@ enable = [
   "W0101", # Unreachable code: Used when there is some code behind a "return" or "raise" statement, which will never be accessed.
 ]
 ignore = [".venv", "__pycache__", "build", "dist", ".git"]
-
-[tool.uv.sources]
-pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "46163b2c2bd5946748bd01f7dab9a79c3642afef" }
