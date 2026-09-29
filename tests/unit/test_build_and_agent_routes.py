@@ -1,5 +1,7 @@
 """Smoke + validation tests for /validate, /build/* and /build/{concept,pipe-spec,models}."""
 
+from typing import Any
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -97,6 +99,22 @@ class TestBuildAndAgentRoutes:
         assert response.status_code == 422
         assert response.headers["content-type"] == "application/problem+json"
         assert response.json()["error_type"] == "ValidationError"
+
+    @pytest.mark.parametrize("structure", ["string", {"f": 42}])
+    def test_build_concept_refuses_malformed_structure_with_a_typed_error(self, structure: Any):
+        # `parse_concept_spec` validates the raw shape of `structure` and raises the
+        # typed `ConceptSpecError`, so the route answers a problem document rather
+        # than an opaque 500 from a bare AttributeError / TypeError.
+        client = _build_client()
+        response = client.post(
+            "/v1/build/concept",
+            json={"spec": {"concept_code": "Thing", "description": "d", "structure": structure}},
+        )
+        assert response.status_code == 422
+        assert response.headers["content-type"] == "application/problem+json"
+        body = response.json()
+        assert body["error_type"] == "ConceptSpecError"
+        assert body["error_domain"] == "input"
 
     def test_build_pipe_spec_rejects_unknown_pipe_type(self):
         # `parse_pipe_spec` raises a bare `ValueError` for an unknown pipe_type
