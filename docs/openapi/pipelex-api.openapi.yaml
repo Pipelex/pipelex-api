@@ -1370,21 +1370,17 @@ paths:
         `PipelexError` handler in `api.exception_handlers`.
 
 
-        Known gap (tracked as `pipelex-changes.md` item #11): a non-dict `structure`
+        A malformed shape — a non-mapping `structure` (`{"structure": "string"}`)
 
-        (`{"structure": "string"}`) or a `structure` field that is neither a string
+        or a `structure` field that is neither a string nor a mapping
 
-        nor a dict (`{"structure": {"f": 42}}`) makes `parse_concept_spec` leak a
+        (`{"structure": {"f": 42}}`) — is refused by `parse_concept_spec` itself
 
-        bare `AttributeError`/`TypeError` instead of a typed error, so the request
+        with a typed `ConceptSpecError`, which that same handler answers. Nothing
 
-        surfaces as an opaque 500. We deliberately don''t catch those here — they
+        broader is caught here: a bare exception from pipelex is the signal of a
 
-        are also the signal of a real pipelex programming bug, and a broad route
-
-        catch would mask both. The fix is upstream shape validation in
-
-        `parse_concept_spec`.'
+        real programming bug, and a route-level catch would mask it.'
       operationId: build_concept_v1_build_concept_post
       requestBody:
         content:

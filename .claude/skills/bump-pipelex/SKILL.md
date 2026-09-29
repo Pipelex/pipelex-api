@@ -317,7 +317,7 @@ Show the user:
   hosted plane pins `pipelex` at several sites and consumes `pipelex-api` by git
   tag, so a breaking bump here means someone has to move `pipelex-server` too.
   That is not yours to change from this repo — mention it, and if the user wants
-  it tracked, the workspace convention is a note in `../wip/inbox/`.
+  it tracked, file it in the workspace ledger as an item owned by `pipelex-server`.
 
 Then stop. Do not commit, branch, or push unless the user asks.
 
