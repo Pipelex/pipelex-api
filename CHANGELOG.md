@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Security
+
+- **Runs read only under their read scope (Breaking)**: `POST /v1/execute` and `POST /v1/start` take a `read_scope`, the prefix every `pipelex-storage://` key a run reads must lie under, and a scoped run reads no local path. Omitted, it is the caller's own id on a deployment that identifies callers and unscoped on a single-tenant one, so a multi-tenant host must send it; a malformed read scope, or a storage scope outside it, is a `422` `InvalidReadScope`.
+- **A bundle declaring Python structure classes is refused (Breaking)**: on a sandbox-hosted deployment, a `files` or `bundle_b64` bundle whose Python declares a `StructuredContent` subclass now answers `403` `MethodStructuresRefusedError` naming each file and class, as a fetched `method_ref` package already did, and none of its modules is imported. Declare the types as MTHDS concepts instead; the unedited module `pipelex build structures` writes is accepted.
+
 ## [v0.31.0] - 2026-09-28
 
 ### Highlights

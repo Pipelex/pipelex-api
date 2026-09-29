@@ -583,8 +583,10 @@ paths:
           description: 'A deployment-policy refusal: `OrchestrationModeOverrideForbidden` — the request asked for an `orchestration_mode`
             this deployment does not allow overriding per request (`allow_request_orchestration_mode_override = false`); `CustomCodeRequiresSandbox`
             — the method (a bundle, or a fetched `method_ref` package) ships custom Python and this deployment is not sandbox-hosted;
-            or `MethodStructuresRefusedError` — a fetched package declares in-process Python structure classes, which hosted
-            execution always refuses (express the types as MTHDS concepts instead).'
+            or `MethodStructuresRefusedError` — the method''s Python declares structure classes (`StructuredContent` subclasses),
+            whether it arrived as a bundle (`files` or `bundle_b64`) or as a fetched `method_ref` package: a sandbox-hosted
+            deployment imports no caller Python into its own process, so it refuses them before loading anything (express
+            the types as MTHDS concepts instead).'
           content:
             application/problem+json:
               schema:
@@ -863,8 +865,10 @@ paths:
           description: 'A deployment-policy refusal: `OrchestrationModeOverrideForbidden` — the request asked for an `orchestration_mode`
             this deployment does not allow overriding per request (`allow_request_orchestration_mode_override = false`); `CustomCodeRequiresSandbox`
             — the method (a bundle, or a fetched `method_ref` package) ships custom Python and this deployment is not sandbox-hosted;
-            or `MethodStructuresRefusedError` — a fetched package declares in-process Python structure classes, which hosted
-            execution always refuses (express the types as MTHDS concepts instead).'
+            or `MethodStructuresRefusedError` — the method''s Python declares structure classes (`StructuredContent` subclasses),
+            whether it arrived as a bundle (`files` or `bundle_b64`) or as a fetched `method_ref` package: a sandbox-hosted
+            deployment imports no caller Python into its own process, so it refuses them before loading anything (express
+            the types as MTHDS concepts instead).'
           content:
             application/problem+json:
               schema:
@@ -987,8 +991,10 @@ paths:
           description: 'A deployment-policy refusal: `OrchestrationModeOverrideForbidden` — the request asked for an `orchestration_mode`
             this deployment does not allow overriding per request (`allow_request_orchestration_mode_override = false`); `CustomCodeRequiresSandbox`
             — the method (a bundle, or a fetched `method_ref` package) ships custom Python and this deployment is not sandbox-hosted;
-            or `MethodStructuresRefusedError` — a fetched package declares in-process Python structure classes, which hosted
-            execution always refuses (express the types as MTHDS concepts instead).'
+            or `MethodStructuresRefusedError` — the method''s Python declares structure classes (`StructuredContent` subclasses),
+            whether it arrived as a bundle (`files` or `bundle_b64`) or as a fetched `method_ref` package: a sandbox-hosted
+            deployment imports no caller Python into its own process, so it refuses them before loading anything (express
+            the types as MTHDS concepts instead).'
           content:
             application/problem+json:
               schema:
@@ -5842,6 +5848,7 @@ components:
       - optional_output_required
       - optional_input_unguarded
       - optional_branch_required_field
+      - template_private_name
       - optional_force_redundant
       - input_presence_vacuous
       - native_concept_redeclaration
