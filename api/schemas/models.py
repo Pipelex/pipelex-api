@@ -438,6 +438,7 @@ class PipelexApiStartRequest(StartRequest):
     )
     orchestration_mode: str | None = Field(default=None, description=_ORCHESTRATION_MODE_DESCRIPTION)
     storage_scope: str | None = Field(default=None, description=_STORAGE_SCOPE_DESCRIPTION)
+    read_scope: str | None = Field(default=None, description=_READ_SCOPE_DESCRIPTION)
     analytics_groups: dict[str, str] | None = Field(default=None, description=_ANALYTICS_GROUPS_DESCRIPTION)
 
 
@@ -446,12 +447,13 @@ class PipelexApiExecuteRequest(RunRequest):
 
     Used only to publish the OpenAPI request schema: `/execute` reads the body through the raw
     `Request` (kajson decoding), so FastAPI cannot infer the body type; this model documents the
-    extensions the route actually honors (`orchestration_mode`, `storage_scope`, `analytics_groups`,
+    extensions the route actually honors (`orchestration_mode`, `storage_scope`, `read_scope`, `analytics_groups`,
     all parsed by `PipelineApiExtras`).
     """
 
     orchestration_mode: str | None = Field(default=None, description=_ORCHESTRATION_MODE_DESCRIPTION)
     storage_scope: str | None = Field(default=None, description=_STORAGE_SCOPE_DESCRIPTION)
+    read_scope: str | None = Field(default=None, description=_READ_SCOPE_DESCRIPTION)
     analytics_groups: dict[str, str] | None = Field(default=None, description=_ANALYTICS_GROUPS_DESCRIPTION)
 
 
