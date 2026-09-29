@@ -309,7 +309,7 @@ The caller's id is the run's person on that same stream, with one exception: a d
 
 The `inputs` field accepts several shapes. Pipelex picks how to interpret each value from its structure — pass a string to a `Text` input and you get `TextContent`, pass a dict with `concept` and `content` keys and you get explicit concept resolution, etc. The cases below enumerate every supported form.
 
-**The request body is plain JSON.** The Python objects in Cases 1.3 to 1.5, and the `DictStuff` instances further down, are what a Python caller writes; a Python client of this API serializes each one to plain JSON, its fields only, before sending it. The server never rebuilds a Python class from the request: it reads each value against the entry pipe's declared input, the class name does not travel, and a body carrying a `__class__` or `__module__` key, or a key starting with `__kajson`, in any object at any depth is refused with a `422 ReservedObjectKey` (see [Error Responses](error-responses.md#status-codes)).
+**The request body is plain JSON.** The Python objects in Cases 1.3 to 1.5, and the `DictStuff` instances further down, are what a Python caller writes; a Python client of this API serializes each one to plain JSON before sending it, and the server never rebuilds a Python class from the request. The class name does not travel, so each value is read against the entry pipe's declared input. A structured object (Case 1.3) arrives as its fields and a list of them (Case 1.4) as a list of those, and both are read as intended; a `DictStuff` arrives as the Case 2 envelope. A `ListContent` wrapper (Case 1.5) arrives as `{"items": [...]}`, which the server reads as one item rather than a list, and a native `TextContent` arrives as `{"text": ...}`, which a `Text` input refuses: over HTTP, send the bare list of items or strings instead, or the `{"concept": ..., "content": [...]}` envelope of Cases 2.2, 2.4 and 2.6. A body carrying a `__class__` or `__module__` key, or a key starting with `__kajson`, in any object at any depth is refused with a `422 ReservedObjectKey` (see [Error Responses](error-responses.md#status-codes)).
 
 ### How Input Formatting Works
 
@@ -416,7 +416,7 @@ inputs = {
 **What it accepts:**
 
 - Lists of `StructuredContent` objects (user-defined classes)
-- Lists of native content objects (`TextContent`, `ImageContent`, etc.)
+- Lists of native content objects (`TextContent`, `ImageContent`, etc.), in in-process calls only (over HTTP, see the plain-JSON note above)
 
 **Requirements:**
 
@@ -426,7 +426,7 @@ inputs = {
 
 ### 1.5: ListContent of StuffContent Objects
 
-Provide an existing `ListContent` wrapper object (Python clients):
+Provide an existing `ListContent` wrapper object (in-process Python calls only; over HTTP, send the bare list of items, as the plain-JSON note above explains):
 
 ```python
 # Python client example

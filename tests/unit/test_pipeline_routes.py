@@ -195,6 +195,20 @@ class TestPipelineRoutes:
         assert f"'{reserved_key}'" in problem["detail"], label
         execute_mock.assert_not_awaited()
 
+    def test_execute_bounds_the_reserved_key_it_echoes(self, mocker: MockerFixture):
+        """Any key starting with `__kajson` is refused, so the caller picks its length. The `detail`
+        names it cut to the correlation-field bound, since the detail is also logged as a field.
+        """
+        client, _, _ = _build_client(mocker)
+        long_key = "__kajson" + "k" * 100_000
+        response = client.post("/v1/execute", json={"pipe_code": "echo", "inputs": {"doc": {long_key: 1}}})
+        assert response.status_code == 422
+        problem = response.json()
+        assert problem["error_type"] == "ReservedObjectKey"
+        assert "'__kajsonkkkk" in problem["detail"]
+        assert "…'" in problem["detail"]
+        assert len(problem["detail"]) < 1_000
+
     def test_execute_accepts_marker_lookalikes_as_plain_data(self, mocker: MockerFixture):
         """Only the reserved keys themselves are refused: a value that mentions `__class__`, and a
         key that merely resembles a marker, are data and reach the runner exactly as sent.

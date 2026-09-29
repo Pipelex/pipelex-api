@@ -525,9 +525,12 @@ def _decode_body(body: bytes) -> dict[str, Any]:
     request_data = cast("dict[str, Any]", decoded)
     reserved_key = _find_reserved_object_key(request_data)
     if reserved_key is not None:
+        # The key is the caller's, as long as the body allows (any `__kajson…` key matches), and the
+        # detail is logged as a field: echo it bounded, as the correlation fields are.
+        shown_key = reserved_key if len(reserved_key) <= _MAX_CORRELATION_FIELD_LEN else f"{reserved_key[:_MAX_CORRELATION_FIELD_LEN]}…"
         raise_validation_error(
             message=(
-                f"Request body contains the reserved object key '{reserved_key}'. A run request is plain JSON: "
+                f"Request body contains the reserved object key '{shown_key}'. A run request is plain JSON: "
                 f"no object in it may carry a '__class__' or '__module__' key, or a key starting with '{_RESERVED_OBJECT_KEY_PREFIX}'."
             ),
             error_type=ErrorType.RESERVED_OBJECT_KEY,
