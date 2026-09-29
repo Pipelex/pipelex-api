@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Security
+
+- **The run body is plain JSON, and class markers in it are refused (Breaking)**: `POST /v1/execute` and `POST /v1/start` parse their body with a plain JSON parser instead of kajson, which imported and instantiated any class a body named with `__class__` and `__module__`, so any caller able to reach the runner could run code on it. A body carrying a `__class__` or `__module__` key, or a key starting with `__kajson`, in any object at any depth now answers `422 ReservedObjectKey`, and the published request schema no longer offers a serialized working memory as `inputs`.
+
 ## [v0.31.0] - 2026-09-28
 
 ### Highlights

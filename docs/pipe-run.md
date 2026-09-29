@@ -309,6 +309,8 @@ The caller's id is the run's person on that same stream, with one exception: a d
 
 The `inputs` field accepts several shapes. Pipelex picks how to interpret each value from its structure — pass a string to a `Text` input and you get `TextContent`, pass a dict with `concept` and `content` keys and you get explicit concept resolution, etc. The cases below enumerate every supported form.
 
+**The request body is plain JSON.** The Python objects in Cases 1.3 to 1.5, and the `DictStuff` instances further down, are what a Python caller writes; a Python client of this API serializes each one to plain JSON, its fields only, before sending it. The server never rebuilds a Python class from the request: it reads each value against the entry pipe's declared input, the class name does not travel, and a body carrying a `__class__` or `__module__` key, or a key starting with `__kajson`, in any object at any depth is refused with a `422 ReservedObjectKey` (see [Error Responses](error-responses.md#status-codes)).
+
 ### How Input Formatting Works
 
 **Case 1: Direct Content** - Provide the value directly (simplest)
@@ -391,7 +393,7 @@ inputs = {
 - These classes are defined in your project's Python files
 - Learn more: [Python StructuredContent Classes](https://docs.pipelex.com/pages/build-reliable-ai-workflows-with-pipelex/define_your_concepts/#3-python-structuredcontent-classes)
 
-**Concept Resolution:**
+**Concept Resolution** (in-process calls only, where the object itself reaches the runtime; over HTTP the class name does not travel, and the declared input decides):
 
 - The system searches all available domains for a concept matching the class name
 - If multiple concepts with the same name exist in different domains → **Error**: Must specify domain
