@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **The server is moving into `Pipelex/pipelex`**: from the next release, the server ships from the pipelex repository's `api/` directory together with the pipelex library and under its version number, so the next `pipelex/pipelex-api` image tag is a pipelex version; the image name, its port and its `/root/.pipelex` mount do not change, and this repository will be archived once the move lands.
+
 ### Fixed
 
 - **The `callback_urls` description says what a completion webhook carries**: the OpenAPI description and the run docs said the runner posts the run's result to each callback URL; they now say the body is a completion notice (`pipeline_run_id`, `state` with its legacy `status` alias, the `result_url` storage key prefix and `error`), and that the results themselves stay in storage under that prefix. The description also says that the `X-Completion-Signature` header signs the run id, not the body.
