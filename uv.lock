@@ -2367,7 +2367,7 @@ mistralai = [
 
 [[package]]
 name = "pipelex-api"
-version = "0.33.1"
+version = "0.33.2"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
