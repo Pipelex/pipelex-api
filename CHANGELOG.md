@@ -6,6 +6,77 @@
 
 - **The `callback_urls` description says what a completion webhook carries**: the OpenAPI description and the run docs said the runner posts the run's result to each callback URL; they now say the body is a completion notice (`pipeline_run_id`, `state` with its legacy `status` alias, the `result_url` storage key prefix and `error`), and that the results themselves stay in storage under that prefix.
 
+## [v0.33.1] - 2026-09-30
+
+### Fixed
+
+- **A pipe selection refusal names its failure in `error_type`**: on `POST /v1/pipe-io` and `POST /v1/build/inputs`, `/v1/build/output` and `/v1/build/runner`, a selection the server cannot make is still an input `422`, but its `error_type` is now `EntryPipeNotFoundError` (a `pipe_ref` naming no pipe, a manifest `main_pipe` the closure lacks, or no `pipe_ref` over a closure declaring no `main_pipe`) or `EntryPipeAmbiguousError` (a bare code matching several domains, or no `pipe_ref` over a closure whose domains declare several `main_pipe`s), the values the run routes answer for an unknown or ambiguous `pipe_code`, where it was the `ValidationError` of a malformed request. The problem's `type` and `title` follow the class, and so does its `user_action`, except that the two refusals of an omitted `pipe_ref` ask for a `pipe_ref` instead of a pipe-code check.
+- **The published OpenAPI never names the hosted selector field**: the `POST /v1/pipe-io` request schema's description no longer names the hosted catalog's selector field, and a test keeps that name out of the whole document.
+
+## [v0.33.0] - 2026-09-30
+
+### Highlights
+
+**A method's I/O artifacts without a validation.** `POST /v1/pipe-io` returns the pipe I/O contracts, input form and output form of one pipe, or of every pipe, off one load of the method and with no dry run, so a caller that shows a method, prepares its inputs or generates types for it no longer pays for a `/v1/validate` sweep. The per-pipe selectors also stop calling an ambiguous pipe missing.
+
+### Added
+
+- **`POST /v1/pipe-io`**: returns a method's `pipe_io_contracts`, `input_form` and `output_form` without a dry run, keyed by qualified `pipe_ref`, for the selected pipe or, with `all_pipes: true`, for every pipe, beside the resolved `pipe_ref`, the method's own `default_pipe_ref`, `pending_signatures` and `is_runnable`. It takes the same `files` or `method_ref` closure selector and `pipe_ref` as the `/v1/build/*` routes, `include_files: true` echoes the closure's `.mthds` files, and each artifact equals `/v1/validate`'s same-named view for a closure both routes accept.
+
+### Fixed
+
+- **An ambiguous pipe selector says it is ambiguous**: on `POST /v1/build/inputs`, `/v1/build/output` and `/v1/build/runner`, a bare `pipe_ref` or manifest `main_pipe` that matches pipes in several domains is still a `422`, and its detail now says the code matches several domains and names the qualified refs to choose from, where it said the pipe was not found.
+
+## [v0.32.0] - 2026-09-29
+
+### Highlights
+
+**The runner no longer trusts the run body or the methods it is handed.** `POST /v1/execute` and `POST /v1/start` parse their body as plain JSON, which closes a path by which any caller could make the runner import and instantiate a class. On `pipelex` 0.70.0, a run reads storage only under its read scope, every template renders in Jinja's sandbox, a URL fetch refuses private destinations, and a sandbox-hosted deployment refuses a bundle that declares Python structure classes. A multi-tenant host must now send `read_scope`, and a method that ran on 0.69.0 can now be refused, as the entries below describe.
+
+### Changed
+
+- **Pinned `pipelex` 0.70.0 (Breaking)**: up from `==0.69.0`, exactly. It is the release that carries the read scope and the structure-class refusal described under Security, and it hardens the runtime for methods it did not write, so a method that ran on 0.69.0 can now be refused, as the entries below describe. The `.pipelex/` config shipped here already sits at the current schema, and the release moves no own-key backend's model roster.
+- **PipeCompose, PipeSearch and PipeImgGen refuse an input they never read (Breaking)**: as PipeLLM already did, validation refuses a declared input that none of the pipe's templates reads, as `extraneous_input_variable` naming the input. Reference it in a template, or remove it from `inputs`.
+- **A structure field naming an undeclared concept refuses the load (Breaking)**: a concept whose field names a concept that no bundle it can see declares is now refused at load with `LibraryLoadingError`, naming the concept, its bundle and the missing structure class, where it loaded and then failed at first use with pydantic's "not fully defined" error.
+- **`POST /v1/codegen` stamps `engine_version` `0.70.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.69.0` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
+
+### Fixed
+
+- **A template's reads are seen wherever it makes them**: an input read only through a subscript, a call or a `{% set %}`, such as `{{ items[0].text }}` or `{{ record['meta'].title }}`, now counts as read, where validation refused it as unread, and `{{ combo.summary }}` resolves the named parts of a `Composite` output, which rendered empty.
+- **Concepts holding other concepts resolve**: a field typed by a method package's concept, by a concept an earlier load declared, by a concept backed by a Python class, or as `native.Anything` now resolves, where each loaded and then failed at first use with pydantic's "not fully defined" error.
+- **A generated file's storage key names its format**: a fetched `image/svg+xml` is stored under a `.svg` key, and a type with no extension of its own under `.bin`, where both got `.jpg`.
+
+### Security
+
+- **The run body is plain JSON, and class markers in it are refused (Breaking)**: `POST /v1/execute` and `POST /v1/start` parse their body with a plain JSON parser instead of kajson, which imported and instantiated any class a body named with `__class__` and `__module__`, so any caller able to reach the runner could run code on it. A body carrying a `__class__` or `__module__` key, or a key starting with `__kajson`, in any object at any depth now answers `422 ReservedObjectKey`, and the published request schema no longer offers a serialized working memory as `inputs`.
+- **Runs read only under their read scope (Breaking)**: `POST /v1/execute` and `POST /v1/start` take a `read_scope`, the prefix every `pipelex-storage://` key a run reads must lie under, and a scoped run reads no local path. Omitted, it is the caller's own id on a deployment that identifies callers and unscoped on a single-tenant one, so a multi-tenant host must send it; a malformed read scope, or a storage scope outside it, is a `422` `InvalidReadScope`. A read outside the scope is refused when the run makes it, as `UriReadRefusedError`: a `422` on `/execute`, and on `/start` a synchronous `422` for an input or a run that ends `FAILED` for a URL a pipe reaches during the run.
+- **A bundle declaring Python structure classes is refused (Breaking)**: on a sandbox-hosted deployment, a `files` or `bundle_b64` bundle whose Python declares a `StructuredContent` subclass now answers `403` `MethodStructuresRefusedError` naming each file and class, as a fetched `method_ref` package already did, and none of its modules is imported. Declare the types as MTHDS concepts instead; the unedited module `pipelex build structures` writes is accepted.
+- **Every template renders in Jinja's sandbox (Breaking)**: a prompt, a compose or construct template, an image or search prompt, or a condition expression may read data and call methods of plain values only. One that reaches for a Python internal, calls a method of a Pipelex or pydantic object, or reads a name starting with an underscore other than an input's `_stuff_name`, `_content_class`, `_concept_code` and `_stuff_code` fails with `Jinja2TemplateSecurityError`, and validation refuses the visible cases as `template_private_name`. `_content` and `stuff` are no longer readable on an input, and a PipeCompose construct `from` path or a `list_to_dict_keyed_by` name with a segment starting with an underscore is refused at validation.
+- **Fetching a URL refuses private destinations (Breaking)**: every download of a URL a value carries, such as a document to extract or a prompt image for a provider that does not take URLs, now refuses a host that is `localhost`, a cloud metadata alias, or resolves to a private, loopback, link-local or metadata address, on every redirect hop, and fails the pipe with `SsrfBlockedError` naming the host. The guarded fetch ignores `HTTP_PROXY` and `HTTPS_PROXY`. The image keeps the guard on; a self-hosted deployment reading documents from an intranet host, or reaching the internet only through a proxy, sets `[runtime.network] is_fetch_ssrf_guard_enabled = false`, as [Configuration](docs/configuration.md) describes.
+
+## [v0.31.0] - 2026-09-28
+
+### Highlights
+
+**Run inputs take the values their concept declares, and own-key backends offer today's models.** On `pipelex` 0.69.0, an `Anything` input accepts a string, a number, a boolean or an object and a `JSON` input an object, where most of them used to be refused, and the image's own-key backend files are now the pinned release's, so a deployment that switches one on is offered the current model roster. A deployment that mounts its own `.pipelex/` renames its Bedrock handle to `bedrock_aioboto` and replaces any model handle that went.
+
+### Changed
+
+- **Pinned `pipelex` 0.69.0 (Breaking)**: up from `==0.68.0`, exactly, the release that moves structured output to `instructor` 1.17 and the provider SDKs with it, so the image now carries `mistralai` 2.x and `aiobotocore` 3.x in place of `aioboto3`. Under `instructor` 1.17 the `instructor/openai_structured_outputs` structure method sends a non-strict tool schema, so OpenAI no longer enforces the schema itself; pipelex still validates the response and re-asks on a mismatch.
+- **The Bedrock SDK handle is `bedrock_aioboto` (Breaking)**: the shipped `.pipelex/inference/backends/bedrock.toml` now sets `sdk = "bedrock_aioboto"`, and a deployment that mounts its own `.pipelex/` still setting `sdk = "bedrock_aioboto3"` keeps booting but fails every call to those Bedrock models. `pipelex migrate` names such a file without rewriting it, so replace the handle by hand, in `[defaults]` and in any model table that overrides it.
+- **`Anything` and `JSON` run inputs are read by what they declare (Breaking)**: on `POST /v1/execute` and `POST /v1/start`, a bare string at an `Anything` input becomes a `native.Anything` value rather than `native.Text`, a bare string at a `JSON` input is refused, an item holding `concept` and `content` keys inside a bare `Anything[]` or `JSON[]` list is refused, an explicit single value at a fixed-count `Concept[N]` input raises `MultiplicityCountMismatchError`, and `NaN` or an infinity at a `Number`, `JSON` or `Anything` input is refused. A value the fallback cannot build, such as a list of plain objects at a `Dynamic` input, now answers `StructureValidationError` naming the input and its concept instead of `StuffFactoryError`.
+- **The `json_schema` of an `Anything` value excludes arrays and `null`**: in the `pipe_io_contracts` that `POST /v1/validate` and `POST /v1/execute` return, the `json_schema` of a single `Anything` input or output now carries `"not": {"type": ["array", "null"]}`, and so does the `items` schema of an `Anything[]` input, so a form or validator generated from it refuses what the run refuses.
+- **`POST /v1/build/inputs` renders a `JSON` input as the bare object (Breaking)**: the compact template of a `JSON` input is the object itself, where it was the envelope `{"concept": "native.JSON", "content": {"json_obj": …}}`.
+- **`POST /v1/codegen` stamps `engine_version` `0.69.0`**: the stamp is the pinned `pipelex` version, so a `codegen.lock` committed against `0.68.0` no longer matches until it is regenerated. `POST /v1/build/runner` carries the same stamp.
+- **Own-key backends offer the pinned `pipelex` model roster (Breaking)**: the image's `inference/backends/` files, unchanged since `pipelex` 0.14.0, are now the `pipelex` 0.69.0 kit's, as is `inference/routing_profiles.toml`, so a deployment that switches on an own-key backend is offered the current models and resolves the model deck's default aliases, whose GPT-5.6 targets `openai` and `azure_openai` did not declare. Handles that went, which a method must replace on a deployment that switched their backend on: on `openai`, `gpt-3.5-turbo`, `gpt-4`, `gpt-4-turbo`, the dated `gpt-4o-2024-11-20` and `gpt-4o-mini-2024-07-18`, every `gpt-4.1`, `gpt-5`, `gpt-5.1` and `gpt-5.2` handle, and `o1`, `o3`, `o3-mini` and `o4-mini`; on `azure_openai`, every `gpt-4.1`, `gpt-5`, `gpt-5.1` and `gpt-5.2` handle, and `o1`, `o1-mini`, `o3` and `o3-mini`; on `google` and `portkey`, `gemini-3.0-pro` (replaced by `gemini-3.1-pro`) and `gemini-3.0-flash-preview` (renamed `gemini-3.0-flash`), and on `portkey` also `o4-mini`; on `bedrock`, `claude-3.7-sonnet`; on `openrouter`, `google/gemini-3-pro-preview`. The kit's new `minimax` and `pipelex_manifold` backends ship switched off, the unused `perplexity` and `pipelex_inference` files are gone, and the default Pipelex Gateway deployment, whose catalog comes from the remote config, is unaffected.
+
+### Fixed
+
+- **`Anything` and `JSON` inputs take the values they declare**: an `Anything` input accepts a string, a number, a boolean or an object, and `Anything[]` a list of them, where all but a bare string used to be refused, while `null` and a list at a single `Anything` input, and a `null` or nested-list item of an `Anything[]` list, are refused with a `422`; a `JSON` input accepts an object and `JSON[]` a list of objects, which used to be refused with an error naming neither the input nor its concept.
+- **Structured output on Gemini works with enum fields and honours the prompt settings**: on a deployment that enables the `google` backend, a structured call whose schema has an enum field no longer fails on every attempt, and the system prompt, temperature and token limit now reach Gemini.
+- **A structured-output call keeps its provider error and re-asks when the model returns no tool call**: a rate limit, timeout or refused connection inside a structured call keeps its category and retryability instead of reading as an unknown error, and a response carrying no tool call or no JSON is re-asked instead of failing at once.
+- **A model the inference gateway refuses reads as a configuration fault**: the gateway's `model_not_allowed_error` refusal is now a `config` error whose `user_action` is `change_model` naming the model handle, where it told the caller to review the prompt, parameters and inputs; the status stays `500`.
+
 ## [v0.30.0] - 2026-09-28
 
 ### Highlights

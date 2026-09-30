@@ -20,6 +20,7 @@ THESE tests rather than the collection of every module that transitively imports
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -57,7 +58,8 @@ ROUTE_EXTRA_STATUSES = {
     ("/v1/execute", "post"): (403, 429),
     ("/v1/start", "post"): (400, 403, 409, 501),
     ("/v1/validate", "post"): (403,),
-    ("/v1/resolve", "post"): (501,),
+    ("/v1/resolve", "post"): (404, 501),
+    ("/v1/pipe-io", "post"): (404, 501),
     ("/v1/codegen", "post"): (501,),
 }
 
@@ -133,13 +135,32 @@ class TestOpenApiErrorContract:
         tagged = {(path, method) for path, method, operation in self._operations(openapi_schema) if operation.get("x-mthds-protocol")}
         assert tagged == MTHDS_PROTOCOL_OPERATIONS
 
-    def test_resolve_and_codegen_are_pipelex_extensions(self, openapi_schema: dict[str, Any]):
+    def test_resolve_codegen_and_pipe_io_are_pipelex_extensions(self, openapi_schema: dict[str, Any]):
         """Spelled out separately from the set assertion above, because this is the easy mistake:
-        `/resolve` and `/codegen` look protocol-shaped (they speak the `/validate` verdict discipline
-        and emit the standard's crate) but they are Pipelex API extensions and must not be tagged.
+        `/resolve`, `/codegen` and `/pipe-io` look protocol-shaped (they speak the `/validate` verdict
+        discipline and emit the standard's crate or I/O artifacts) but they are Pipelex API extensions
+        and must not be tagged.
         """
-        for path in ("/v1/resolve", "/v1/codegen"):
+        for path in ("/v1/resolve", "/v1/codegen", "/v1/pipe-io"):
             assert "x-mthds-protocol" not in openapi_schema["paths"][path]["post"]
+
+    def test_the_document_never_names_the_hosted_selector(self, openapi_schema: dict[str, Any]):
+        """The runner declares nothing of the hosted layer, not even in prose: `method_id` is the hosted
+        catalog selector, which the platform replaces with `files` before a request reaches the runner,
+        so the name appears nowhere in the document — no field, no description, no example.
+        """
+        assert "method_id" not in json.dumps(openapi_schema)
+
+    def test_pipe_io_request_declares_no_hosted_selector_and_no_views(self, openapi_schema: dict[str, Any]):
+        """The platform resolves the hosted `method_id` into `files[]` before forwarding, so the runner
+        never declares it; and the route always carries all three artifacts, so it takes no `views`.
+        """
+        schemas = openapi_schema["components"]["schemas"]
+        body_ref = openapi_schema["paths"]["/v1/pipe-io"]["post"]["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+        properties = set(schemas[body_ref.rsplit("/", 1)[-1]]["properties"])
+        assert properties >= {"files", "method_ref", "pipe_ref", "all_pipes", "include_files"}
+        assert "method_id" not in properties
+        assert "views" not in properties
 
     def test_auth_challenge_and_retry_hint_headers_are_documented(self, openapi_schema: dict[str, Any]):
         """A 401 carries `WWW-Authenticate: Bearer`; the provider-429 passthrough carries `Retry-After`."""

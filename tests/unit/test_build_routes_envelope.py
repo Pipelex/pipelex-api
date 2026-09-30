@@ -72,11 +72,33 @@ class TestBuildRoutesEnvelope:
     def test_unknown_pipe_ref_is_a_422_not_an_invalid_verdict(self, path: str):
         # Nothing about the *closure* is wrong — the caller named a pipe that isn't in it. That is a
         # no-verdict condition (422), never a 200 `is_valid: false`.
+        # It carries the entry-lookup `error_type` the run routes answer for an unknown `pipe_code`, never
+        # a request-shape `ValidationError` — `/build/runner` included, whose sliced sweep reaches it first.
         client = _build_client()
         response = client.post(path, json={"files": [{"content": VALID_MTHDS}], "pipe_ref": "smoke.does_not_exist"})
         assert response.status_code == 422, response.text
         assert response.headers["content-type"] == "application/problem+json"
-        assert response.json()["error_type"] == "ValidationError"
+        problem = response.json()
+        assert problem["error_type"] == "EntryPipeNotFoundError"
+        assert problem["error_domain"] == "input"
+        assert "not found" in problem["detail"]
+
+    @pytest.mark.parametrize("path", BUILD_PATHS)
+    def test_an_ambiguous_pipe_ref_is_a_422_that_says_ambiguous_not_missing(self, path: str):
+        # `echo` is declared by both `smoke` and `twin`, so the engine's entry lookup refuses to pick one.
+        # The 422 must say so and name the candidates — calling the pipe "not found" beside a list of
+        # the pipes it matched would contradict itself.
+        client = _build_client()
+        payload = {"files": [{"content": VALID_MTHDS}, {"content": COLLIDING_ECHO_LIST_MTHDS}], "pipe_ref": "echo"}
+        response = client.post(path, json=payload)
+        assert response.status_code == 422, response.text
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "EntryPipeAmbiguousError"
+        detail = response.json()["detail"]
+        assert "several domains" in detail
+        assert "smoke.echo" in detail
+        assert "twin.echo" in detail
+        assert "not found" not in detail, detail
 
     @pytest.mark.parametrize("path", BUILD_PATHS)
     def test_omitted_pipe_ref_on_a_closure_with_no_main_pipe_is_422(self, path: str):
@@ -85,6 +107,7 @@ class TestBuildRoutesEnvelope:
         response = client.post(path, json={"files": [{"content": NO_MAIN_PIPE_MTHDS}]})
         assert response.status_code == 422, response.text
         assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "EntryPipeNotFoundError"
         assert "main_pipe" in response.json()["detail"]
 
     @pytest.mark.parametrize("path", BUILD_PATHS)
@@ -95,6 +118,7 @@ class TestBuildRoutesEnvelope:
         payload = {"files": [{"content": VALID_MTHDS}, {"content": SECOND_MAIN_PIPE_MTHDS}]}
         response = client.post(path, json=payload)
         assert response.status_code == 422, response.text
+        assert response.json()["error_type"] == "EntryPipeAmbiguousError"
         assert "several" in response.json()["detail"]
 
         named = client.post(path, json={**payload, "pipe_ref": "other.shout"})
@@ -199,9 +223,28 @@ class TestBuildRoutesEnvelope:
         response = client.post(path, json={"method_ref": STUB_METHOD_REF})
         assert response.status_code == 422, response.text
         assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "EntryPipeNotFoundError"
         detail = response.json()["detail"]
         assert "'echo'" in detail
         assert "manifest" in detail, f"the 422 must say the selector came from the manifest: {detail}"
+        assert "not found" in detail
+
+    @pytest.mark.parametrize("path", BUILD_PATHS)
+    def test_an_ambiguous_manifest_main_pipe_is_a_422_that_says_ambiguous_not_missing(self, path: str, install_method_package: Callable[..., Path]):
+        # The manifest names `echo`, which both `smoke` and `twin` declare. The caller never spelled it,
+        # so the detail names the manifest as its origin, and it says the code is ambiguous, not missing.
+        install_method_package(files={"smoke.mthds": VALID_MTHDS, "twin.mthds": COLLIDING_ECHO_LIST_MTHDS})
+        client = _build_client()
+        response = client.post(path, json={"method_ref": STUB_METHOD_REF})
+        assert response.status_code == 422, response.text
+        assert response.headers["content-type"] == "application/problem+json"
+        assert response.json()["error_type"] == "EntryPipeAmbiguousError"
+        detail = response.json()["detail"]
+        assert "manifest" in detail
+        assert "several domains" in detail
+        assert "smoke.echo" in detail
+        assert "twin.echo" in detail
+        assert "not found" not in detail, detail
 
     @pytest.mark.parametrize("path", BUILD_PATHS)
     def test_source_labels_ride_through_to_diagnostics(self, path: str):

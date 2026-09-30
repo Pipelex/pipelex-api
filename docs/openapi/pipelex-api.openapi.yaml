@@ -11,7 +11,7 @@ info:
   license:
     name: Elastic License 2.0
     identifier: Elastic-2.0
-  version: 0.30.0
+  version: 0.33.1
 paths:
   /health:
     get:
@@ -83,12 +83,12 @@ paths:
         \ the trust chain `/codegen`'s valid arm\npromises (see `CodegenRouteKind`).\n\nResponse contract (the `/validate`\
         \ discipline):\n\n- **Valid verdict (200, `is_valid: true`):** the template, in `inputs` or `inputs_toml` per `format`.\n\
         - **Invalid verdict (200, `is_valid: false`):** the closure could not be parsed, loaded, or\n  validated — `validation_errors[]`\
-        \ from pipelex's one shared builder; no template exists.\n- **No verdict (non-2xx):** an unknown pipe ref, an omitted\
-        \ `pipe_ref` that nothing defaults (no\n  fetched-manifest `main_pipe`, and a closure declaring no — or several —\
-        \ `main_pipe`), or a\n  malformed closure selector is a request-shape 422 problem+json; a registry-form `method_ref`\n\
-        \  is a 501 until server-side method-registry resolution exists.\n\nAn omitted `pipe_ref` defaults the way a run by\
-        \ address does: to the fetched package manifest's\n`main_pipe` on a `method_ref` request, else to the closure's own\
-        \ declared `main_pipe`."
+        \ from pipelex's one shared builder; no template exists.\n- **No verdict (non-2xx):** a selection refusal — an unknown\
+        \ pipe ref, or an omitted `pipe_ref` that\n  nothing defaults (no fetched-manifest `main_pipe`, and a closure declaring\
+        \ no — or several —\n  `main_pipe`) — is an input 422 whose `error_type` is `EntryPipeNotFoundError` or\n  `EntryPipeAmbiguousError`;\
+        \ a malformed closure selector is a request-shape 422 problem+json; a\n  registry-form `method_ref` is a 501 until\
+        \ server-side method-registry resolution exists.\n\nAn omitted `pipe_ref` defaults the way a run by address does:\
+        \ to the fetched package manifest's\n`main_pipe` on a `method_ref` request, else to the closure's own declared `main_pipe`."
       operationId: build_inputs_v1_build_inputs_post
       requestBody:
         content:
@@ -172,12 +172,13 @@ paths:
         \ a promise the pipe runs. Ask `/validate` for that.\n\nResponse contract (the `/validate` discipline):\n\n- **Valid\
         \ verdict (200, `is_valid: true`):** the representation, in `output` or `output_python` per `format`.\n- **Invalid\
         \ verdict (200, `is_valid: false`):** the closure could not be parsed, loaded, or\n  validated — `validation_errors[]`;\
-        \ no representation exists.\n- **No verdict (non-2xx):** an unknown pipe ref, an omitted `pipe_ref` that nothing defaults\
-        \ (no\n  fetched-manifest `main_pipe`, and a closure declaring no — or several — `main_pipe`), a pipe\n  whose `native.Anything`\
-        \ output has no determinable shape, or a malformed closure selector is a\n  request-shape 422 problem+json; a registry-form\
-        \ `method_ref` is a 501 until server-side\n  method-registry resolution exists.\n\nAn omitted `pipe_ref` defaults\
-        \ the way a run by address does: to the fetched package manifest's\n`main_pipe` on a `method_ref` request, else to\
-        \ the closure's own declared `main_pipe`."
+        \ no representation exists.\n- **No verdict (non-2xx):** a selection refusal — an unknown pipe ref, or an omitted\
+        \ `pipe_ref` that\n  nothing defaults (no fetched-manifest `main_pipe`, and a closure declaring no — or several —\n\
+        \  `main_pipe`) — is an input 422 whose `error_type` is `EntryPipeNotFoundError` or\n  `EntryPipeAmbiguousError`;\
+        \ a pipe whose `native.Anything` output has no determinable shape, or a\n  malformed closure selector, is a request-shape\
+        \ 422 problem+json; a registry-form `method_ref` is a 501 until server-side\n  method-registry resolution exists.\n\
+        \nAn omitted `pipe_ref` defaults the way a run by address does: to the fetched package manifest's\n`main_pipe` on\
+        \ a `method_ref` request, else to the closure's own declared `main_pipe`."
       operationId: build_output_v1_build_output_post
       requestBody:
         content:
@@ -286,13 +287,15 @@ paths:
 
         the requested pipe — is a produced verdict: a **200** `is_valid: false` with the structured
 
-        `validation_errors[]`. Non-2xx is reserved for no-verdict conditions: a request-shape 422 (an
+        `validation_errors[]`. Non-2xx is reserved for no-verdict conditions: a selection refusal (an
 
         unknown pipe ref, an omitted `pipe_ref` that nothing defaults — no fetched-manifest `main_pipe`,
 
-        and a closure declaring no, or several, `main_pipe` — or a requested pipe whose cross-package
+        and a closure declaring no, or several, `main_pipe`), an input 422 whose `error_type` is
 
-        dependencies are absent from the request), a 501 for a registry-form `method_ref`, auth, server
+        `EntryPipeNotFoundError` or `EntryPipeAmbiguousError`; a request-shape 422 for a requested pipe
+
+        whose cross-package dependencies are absent from the request; a 501 for a registry-form `method_ref`, auth, server
 
         fault — RFC 7807 via the global handlers.'
       operationId: build_runner_v1_build_runner_post
@@ -394,20 +397,6 @@ paths:
                   properties: {}
                   type: object
                   title: StuffContentAbstract
-                WorkingMemoryAbstract_Any_:
-                  properties:
-                    root:
-                      additionalProperties: true
-                      type: object
-                      title: Root
-                    aliases:
-                      additionalProperties:
-                        type: string
-                      type: object
-                      title: Aliases
-                  additionalProperties: false
-                  type: object
-                  title: WorkingMemoryAbstract[Any]
               properties:
                 pipe_code:
                   anyOf:
@@ -436,7 +425,6 @@ paths:
                       - additionalProperties: true
                         type: object
                     type: object
-                  - $ref: '#/$defs/WorkingMemoryAbstract_Any_'
                   - type: 'null'
                   title: Inputs
                 output_name:
@@ -509,6 +497,16 @@ paths:
                     the runtime composes its own leaves (`assets/`, `generated/`, `results/`, `payloads/`) onto it and never
                     interprets the value. Omit it and the run is scoped to the caller's own id, which is correct for a single-tenant
                     deployment and wrong for a multi-tenant one — a host serving many tenants MUST send this.
+                read_scope:
+                  anyOf:
+                  - type: string
+                  - type: 'null'
+                  title: Read Scope
+                  description: PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the host-supplied prefix every stored
+                    object this run reads must lie under, and on a scoped run no local path is read at all. One to three path-safe
+                    segments, which must be the `storage_scope` or one of its leading segments, since a run reads back what
+                    it writes. Omit it and the run is scoped to the caller's own id when the deployment identifies callers,
+                    and unscoped when it is single-tenant — a host serving many tenants MUST send this.
                 analytics_groups:
                   anyOf:
                   - additionalProperties:
@@ -533,9 +531,9 @@ paths:
 
                 Used only to publish the OpenAPI request schema: `/execute` reads the body through the raw
 
-                `Request` (kajson decoding), so FastAPI cannot infer the body type; this model documents the
+                `Request` (plain JSON, parsed by the route), so FastAPI cannot infer the body type; this model documents the
 
-                extensions the route actually honors (`orchestration_mode`, `storage_scope`, `analytics_groups`,
+                extensions the route actually honors (`orchestration_mode`, `storage_scope`, `read_scope`, `analytics_groups`,
 
                 all parsed by `PipelineApiExtras`).'
         required: true
@@ -583,8 +581,10 @@ paths:
           description: 'A deployment-policy refusal: `OrchestrationModeOverrideForbidden` — the request asked for an `orchestration_mode`
             this deployment does not allow overriding per request (`allow_request_orchestration_mode_override = false`); `CustomCodeRequiresSandbox`
             — the method (a bundle, or a fetched `method_ref` package) ships custom Python and this deployment is not sandbox-hosted;
-            or `MethodStructuresRefusedError` — a fetched package declares in-process Python structure classes, which hosted
-            execution always refuses (express the types as MTHDS concepts instead).'
+            or `MethodStructuresRefusedError` — the method''s Python declares structure classes (`StructuredContent` subclasses),
+            whether it arrived as a bundle (`files` or `bundle_b64`) or as a fetched `method_ref` package: a sandbox-hosted
+            deployment imports no caller Python into its own process, so it refuses them before loading anything (express
+            the types as MTHDS concepts instead).'
           content:
             application/problem+json:
               schema:
@@ -653,20 +653,6 @@ paths:
                   properties: {}
                   type: object
                   title: StuffContentAbstract
-                WorkingMemoryAbstract_Any_:
-                  properties:
-                    root:
-                      additionalProperties: true
-                      type: object
-                      title: Root
-                    aliases:
-                      additionalProperties:
-                        type: string
-                      type: object
-                      title: Aliases
-                  additionalProperties: false
-                  type: object
-                  title: WorkingMemoryAbstract[Any]
               properties:
                 pipe_code:
                   anyOf:
@@ -695,7 +681,6 @@ paths:
                       - additionalProperties: true
                         type: object
                     type: object
-                  - $ref: '#/$defs/WorkingMemoryAbstract_Any_'
                   - type: 'null'
                   title: Inputs
                 output_name:
@@ -786,6 +771,16 @@ paths:
                     the runtime composes its own leaves (`assets/`, `generated/`, `results/`, `payloads/`) onto it and never
                     interprets the value. Omit it and the run is scoped to the caller's own id, which is correct for a single-tenant
                     deployment and wrong for a multi-tenant one — a host serving many tenants MUST send this.
+                read_scope:
+                  anyOf:
+                  - type: string
+                  - type: 'null'
+                  title: Read Scope
+                  description: PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — the host-supplied prefix every stored
+                    object this run reads must lie under, and on a scoped run no local path is read at all. One to three path-safe
+                    segments, which must be the `storage_scope` or one of its leading segments, since a run reads back what
+                    it writes. Omit it and the run is scoped to the caller's own id when the deployment identifies callers,
+                    and unscoped when it is single-tenant — a host serving many tenants MUST send this.
                 analytics_groups:
                   anyOf:
                   - additionalProperties:
@@ -865,8 +860,10 @@ paths:
           description: 'A deployment-policy refusal: `OrchestrationModeOverrideForbidden` — the request asked for an `orchestration_mode`
             this deployment does not allow overriding per request (`allow_request_orchestration_mode_override = false`); `CustomCodeRequiresSandbox`
             — the method (a bundle, or a fetched `method_ref` package) ships custom Python and this deployment is not sandbox-hosted;
-            or `MethodStructuresRefusedError` — a fetched package declares in-process Python structure classes, which hosted
-            execution always refuses (express the types as MTHDS concepts instead).'
+            or `MethodStructuresRefusedError` — the method''s Python declares structure classes (`StructuredContent` subclasses),
+            whether it arrived as a bundle (`files` or `bundle_b64`) or as a fetched `method_ref` package: a sandbox-hosted
+            deployment imports no caller Python into its own process, so it refuses them before loading anything (express
+            the types as MTHDS concepts instead).'
           content:
             application/problem+json:
               schema:
@@ -989,8 +986,10 @@ paths:
           description: 'A deployment-policy refusal: `OrchestrationModeOverrideForbidden` — the request asked for an `orchestration_mode`
             this deployment does not allow overriding per request (`allow_request_orchestration_mode_override = false`); `CustomCodeRequiresSandbox`
             — the method (a bundle, or a fetched `method_ref` package) ships custom Python and this deployment is not sandbox-hosted;
-            or `MethodStructuresRefusedError` — a fetched package declares in-process Python structure classes, which hosted
-            execution always refuses (express the types as MTHDS concepts instead).'
+            or `MethodStructuresRefusedError` — the method''s Python declares structure classes (`StructuredContent` subclasses),
+            whether it arrived as a bundle (`files` or `bundle_b64`) or as a fetched `method_ref` package: a sandbox-hosted
+            deployment imports no caller Python into its own process, so it refuses them before loading anything (express
+            the types as MTHDS concepts instead).'
           content:
             application/problem+json:
               schema:
@@ -1039,6 +1038,94 @@ paths:
                   propertyName: is_valid
                   mapping:
                     'True': '#/components/schemas/ResolveValidReport'
+                    'False': '#/components/schemas/CrateInvalidReport'
+        '401':
+          description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
+            or `AUTH_MODE=jwt`).
+          headers:
+            WWW-Authenticate:
+              description: Authentication challenge — always `Bearer`.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '413':
+          description: Request body exceeds the deployment's size limit (`MAX_REQUEST_BODY_MIB`, 100 MiB by default).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '422':
+          description: 'The request could not be processed: a malformed body, a field failing validation, or an `input`-domain
+            pipelex error (a `.mthds` bundle the caller must fix). Note that on the diagnostic routes an *invalid bundle*
+            is a **200** verdict, not a 422 — see each route''s response contract.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '500':
+          description: A `config`-domain or `runtime`-domain failure the caller cannot fix (a missing env var, a bad TOML
+            override, a backend fault), or an unclassified error sanitized by the catch-all handler. Report the `request_id`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '404':
+          description: '`MethodPackageNotFoundError` — the `method_ref` repository was fetched, but no package in it matches
+            the requested address by manifest identity. The message lists the packages the repository does contain.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '501':
+          description: '`MethodRefNotSupported` — the request selected its closure by a **registry-form** `method_ref` (not
+            a `github.com/...` address), and no server-side method registry resolves those yet. Use an address-form reference
+            or submit inline `files[]` instead.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+  /v1/pipe-io:
+    post:
+      tags:
+      - pipe-io
+      summary: Pipe Io
+      description: "Return a method's pipe I/O contracts, input form and output form, with no dry run (Pipelex API extension).\n\
+        \nThe closure resolves through the static core `/resolve` rides, a pipe is selected the way the\nper-pipe routes select\
+        \ one, and the three artifacts are derived with `build_pipe_io_artifacts`,\nthe builder `/validate` and every run\
+        \ call — so a call costs one load and one derivation where\n`/validate` dry-runs every pipe.\n\nResponse contract\
+        \ (the `/validate` discipline):\n\n- **Valid verdict (200, `is_valid: true`):** the three artifact maps keyed by qualified\
+        \ `pipe_ref`,\n  beside `pipe_ref`, `default_pipe_ref`, `pending_signatures`, `is_runnable`, and `files` when\n  `include_files`\
+        \ is true.\n- **Invalid verdict (200, `is_valid: false`):** the closure could not be parsed, loaded, or\n  statically\
+        \ validated — the crate verdict, carrying no artifact, no selection and no files.\n- **No verdict (non-2xx):** a malformed\
+        \ body and neither or both closure selectors are\n  request-shape 422s (`ValidationError`); a selection refusal is\
+        \ an input 422 named for its failure,\n  `EntryPipeNotFoundError` for an unknown `pipe_ref` or a single-pipe request\
+        \ whose chain finds no\n  entry pipe, `EntryPipeAmbiguousError` for an ambiguous one or a chain that finds several;\
+        \ the\n  `method_ref` fetch outcomes are those of `/resolve` (404, 422, 501);\n  an artifact that cannot be derived\
+        \ (`PipeIOContractError`) is a 500. All RFC 7807\n  `application/problem+json` via the global handlers."
+      operationId: pipe_io_v1_pipe_io_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PipeIORequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/PipeIOValidReport'
+                - $ref: '#/components/schemas/CrateInvalidReport'
+                title: Response Pipe Io V1 Pipe Io Post
+                discriminator:
+                  propertyName: is_valid
+                  mapping:
+                    'True': '#/components/schemas/PipeIOValidReport'
                     'False': '#/components/schemas/CrateInvalidReport'
         '401':
           description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
@@ -1376,21 +1463,17 @@ paths:
         `PipelexError` handler in `api.exception_handlers`.
 
 
-        Known gap (tracked as `pipelex-changes.md` item #11): a non-dict `structure`
+        A malformed shape — a non-mapping `structure` (`{"structure": "string"}`)
 
-        (`{"structure": "string"}`) or a `structure` field that is neither a string
+        or a `structure` field that is neither a string nor a mapping
 
-        nor a dict (`{"structure": {"f": 42}}`) makes `parse_concept_spec` leak a
+        (`{"structure": {"f": 42}}`) — is refused by `parse_concept_spec` itself
 
-        bare `AttributeError`/`TypeError` instead of a typed error, so the request
+        with a typed `ConceptSpecError`, which that same handler answers. Nothing
 
-        surfaces as an opaque 500. We deliberately don''t catch those here — they
+        broader is caught here: a bare exception from pipelex is the signal of a
 
-        are also the signal of a real pipelex programming bug, and a broad route
-
-        catch would mask both. The fix is upstream shape validation in
-
-        `parse_concept_spec`.'
+        real programming bug, and a route-level catch would mask it.'
       operationId: build_concept_v1_build_concept_post
       requestBody:
         content:
@@ -5157,6 +5240,145 @@ components:
         artifact byte-stable whatever a renderer needs. A pipe with no declared inputs carries
 
         `inputs: {}` — a stated fact, never an omitted member. Closed shape (`extra="forbid"`).'
+    PipeIORequest:
+      properties:
+        files:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/MthdsFileItem'
+            type: array
+            maxItems: 16
+            minItems: 1
+          - type: 'null'
+          title: Files
+          description: Inline MTHDS bundles forming the closure to resolve (content-passing — no server-side path reads).
+        method_ref:
+          anyOf:
+          - type: string
+            maxLength: 512
+            minLength: 1
+          - type: 'null'
+          title: Method Ref
+          description: Reference to a published method, resolving to its package's `.mthds` files. Address form (`github.com/<owner>/<repo>[/<selector>][@<tag>]`)
+            is fetched and resolved server-side; the registry form stays reserved (501 until a method registry exists).
+        pipe_ref:
+          anyOf:
+          - type: string
+            maxLength: 256
+            minLength: 1
+          - type: 'null'
+          title: Pipe Ref
+          description: Qualified pipe ref (`domain.pipe_code`) to project. Optional — defaults to the fetched package manifest's
+            `main_pipe` on a `method_ref` request, else to the closure's declared `main_pipe`; a closure declaring none, or
+            several, with no manifest `main_pipe` to settle it, requires it explicitly.
+        all_pipes:
+          type: boolean
+          title: All Pipes
+          description: 'Describe every pipe the closure loads instead of the selected one. The artifact maps are then keyed
+            by every pipe, and the route never refuses for want of an entry pipe: `pipe_ref` on the valid arm is the requested
+            ref, else the method''s own entry pipe, else `null`.'
+          default: false
+        include_files:
+          type: boolean
+          title: Include Files
+          description: 'Echo the resolved closure''s `.mthds` files on the valid arm, in the request''s own `files[]` shape:
+            the request''s files for inline `files[]`, the fetched package''s `.mthds` files under their package-relative
+            paths for a `method_ref`. Absent from the response unless true.'
+          default: false
+      type: object
+      title: PipeIORequest
+      description: 'The pipe I/O request: the crate routes'' closure selector and pipe selector, plus the whole-method and
+        echo opt-ins.
+
+
+        The hosted catalog selector is replaced by `files` before the request reaches the runner, so this
+
+        request has no field for it. It takes no `views` either, since the valid arm always carries all
+
+        three artifacts.'
+    PipeIOValidReport:
+      properties:
+        is_valid:
+          type: boolean
+          const: true
+          title: Is Valid
+          default: true
+        pipe_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pipe Ref
+          description: The qualified `domain.pipe_code` the selection resolved, read back off the resolved pipe and never
+            echoed from the request. `null` only under `all_pipes` when no pipe was requested and the method declares no single
+            entry pipe.
+        pipe_io_contracts:
+          additionalProperties:
+            $ref: '#/components/schemas/PipeIOContract'
+          type: object
+          title: Pipe Io Contracts
+          description: The standard's pipe I/O contracts, keyed by qualified `pipe_ref`.
+        input_form:
+          additionalProperties:
+            $ref: '#/components/schemas/PipeInputFormDescriptor'
+          type: object
+          title: Input Form
+          description: The standard's input-form descriptors, keyed by qualified `pipe_ref`.
+        output_form:
+          additionalProperties:
+            $ref: '#/components/schemas/PipeOutputFormDescriptor'
+          type: object
+          title: Output Form
+          description: The standard's output-form descriptors, keyed by qualified `pipe_ref`.
+        default_pipe_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Default Pipe Ref
+          description: 'The method''s own entry pipe: the selection chain without the request''s `pipe_ref` — the fetched
+            package manifest''s `main_pipe`, else the closure''s single `main_pipe` declaration. A stated `null` when that
+            chain finds none or several. Not `/validate`''s field of the same name, which is the run default.'
+        pending_signatures:
+          items:
+            type: string
+          type: array
+          title: Pending Signatures
+          description: The qualified refs of every pipe of the closure still declared as a signature, exactly as on `/validate`.
+        is_runnable:
+          type: boolean
+          title: Is Runnable
+          description: '`not pending_signatures`, exactly as on `/validate`. No dry run backs it.'
+        files:
+          items:
+            $ref: '#/components/schemas/MthdsFileItem'
+          type: array
+          title: Files
+          description: 'The resolved closure''s `.mthds` files, in the request''s `files[]` shape. Present only with `include_files:
+            true`.'
+      type: object
+      required:
+      - pipe_ref
+      - pipe_io_contracts
+      - input_form
+      - output_form
+      - default_pipe_ref
+      - pending_signatures
+      - is_runnable
+      title: PipeIOValidReport
+      description: 'The 200 **valid** arm: the method''s three I/O artifacts, with the selection and the runnability facts
+        beside them.
+
+
+        The three maps share one key set: the resolved `pipe_ref` alone by default, every pipe the
+
+        closure loads under `all_pipes`. Each map is the standard''s artifact under its neutral name, and
+
+        for a closure `/validate` also accepts it equals `/validate`''s same-named field restricted to the
+
+        same keys — both routes call the one builder, and both dump without dropping null members.
+
+        `is_valid: true` means what it means on `/resolve`: the closure parsed, loaded and passed static
+
+        validation. No dry run ran; that verdict stays `/validate`''s.'
     PipeImgGenBlueprint:
       properties:
         source:
@@ -5844,6 +6066,7 @@ components:
       - optional_output_required
       - optional_input_unguarded
       - optional_branch_required_field
+      - template_private_name
       - optional_force_redundant
       - input_presence_vacuous
       - native_concept_redeclaration

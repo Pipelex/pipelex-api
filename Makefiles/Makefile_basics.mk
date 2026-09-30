@@ -52,9 +52,6 @@ make lint                     - lint with ruff check
 make pyright                  - Check types with pyright
 make mypy                     - Check types with mypy
 
-make config-template          - Update config template from .pipelex/
-make cft                      - Shorthand -> config-template
-
 make cleanenv                 - Remove virtual env and lock files
 make cleanderived             - Remove extraneous compiled files, caches, logs, etc.
 make cleanall                 - Remove all -> cleanenv + cleanderived
@@ -94,6 +91,9 @@ make docs-deploy              - Deploy documentation with mkdocs
 make openapi-export           - Export the FastAPI OpenAPI schema to docs/openapi/pipelex-api.openapi.yaml
 make openapi-check            - Fail if the committed OpenAPI artifact drifts from the app
 
+make kit-sync                 - Re-sync the vendored .pipelex/inference/ tree from the installed pipelex kit
+make kit-check                - Fail if the vendored .pipelex/inference/ tree drifts from the installed pipelex kit
+
 make agent-check              - Run check pipeline, silent on success (for AI agents)
 make agent-test               - Run unit tests, silent on success, output on failure (for AI agents)
 
@@ -116,8 +116,8 @@ export HELP
 	validate v check c cc \
 	merge-check-ruff-lint merge-check-ruff-format merge-check-mypy merge-check-pyright \
 	li check-unused-imports fix-unused-imports check-uv check-TODOs docs docs-check docs-deploy \
-	config-template cft \
 	openapi-export openapi-check \
+	kit-sync kit-check \
 	test-count check-test-badge
 
 # `help` is owned by the root Makefile, which composes this $$HELP block with
@@ -176,13 +176,6 @@ build: env
 	$(call PRINT_TITLE,"Building the wheels")
 	@uv build
 
-config-template:
-	$(call PRINT_TITLE,"Updating config template from .pipelex/")
-	@rsync -av --exclude='inference/backends.toml' --delete .pipelex/ pipelex/config_template/
-
-cft: config-template
-	@echo "> done: cft = config-template"
-
 ##############################################################################################
 ############################      Cleaning                        ############################
 ##############################################################################################
@@ -207,12 +200,7 @@ cleanenv:
 	find . -type d -wholename './.venv' -exec rm -rf {} + && \
 	echo "Cleaned up virtual env and dependency lock files";
 
-cleanconfig:
-	$(call PRINT_TITLE,"Erasing config files and directories")
-	@find . -type d -wholename './.pipelex' -exec rm -rf {} + && \
-	echo "Cleaned up .pipelex";
-
-cleanall: cleanderived cleanenv cleanconfig
+cleanall: cleanderived cleanenv
 	@echo "Cleaned up all derived files and directories";
 
 ##########################################################################################
@@ -440,7 +428,7 @@ c: format lint pyright mypy
 cc: cleanderived c
 	@echo "> done: cc = cleanderived format lint pyright mypy"
 
-check: cc check-unused-imports pylint openapi-check
+check: cc check-unused-imports pylint openapi-check kit-check
 	@echo "> done: check"
 
 v: validate
@@ -484,3 +472,22 @@ openapi-export: install
 openapi-check: install
 	$(call PRINT_TITLE,"Checking committed OpenAPI artifact against the app")
 	$(VENV_PYTHON) scripts/export_openapi.py --check $(OPENAPI_ARTIFACT)
+
+##########################################################################################
+### VENDORED PIPELEX KIT
+##########################################################################################
+
+VENDORED_CONFIG_DIR := .pipelex
+
+# The image serves the models `.pipelex/inference/` declares, and pipelex never reads its own
+# wheel's kit once that tree exists, so a pin bump moves nothing until `kit-sync` runs. The rules
+# (what is mirrored, what stays this image's own choice) are in scripts/sync_vendored_kit.py.
+# Like the OpenAPI targets, these depend on `install` so they compare against the pipelex the lock
+# pins, not whatever the venv last had.
+kit-sync: install
+	$(call PRINT_TITLE,"Re-syncing $(VENDORED_CONFIG_DIR)/inference/ from the installed pipelex kit")
+	$(VENV_PYTHON) scripts/sync_vendored_kit.py $(VENDORED_CONFIG_DIR)
+
+kit-check: install
+	$(call PRINT_TITLE,"Checking $(VENDORED_CONFIG_DIR)/inference/ against the installed pipelex kit")
+	$(VENV_PYTHON) scripts/sync_vendored_kit.py --check $(VENDORED_CONFIG_DIR)

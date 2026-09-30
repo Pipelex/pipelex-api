@@ -39,6 +39,7 @@ Execute a Pipelex pipeline with flexible inputs and wait for completion.
 - `files` (dict[str, str], optional): **Pipelex-API extension.** The same bundle as a `{relative_path: text}` map (the unzipped equivalent of `bundle_b64`). Mutually exclusive with `bundle_b64`.
 - `method_ref` (string, optional): **Pipelex-API extension.** Run a published method by address instead of inline source — see [Running a method by address](#running-a-method-by-address-method_ref). Mutually exclusive with `mthds_contents` and with a method bundle; `pipe_code` may accompany it to override the package's `main_pipe`.
 - `storage_scope` (string, optional): **Pipelex-API extension.** The prefix every object this run writes lands under — see [Host-supplied run context](#host-supplied-run-context-storage_scope-and-analytics_groups).
+- `read_scope` (string, optional): **Pipelex-API extension.** The prefix every stored object this run reads must lie under — see [Host-supplied run context](#host-supplied-run-context-storage_scope-and-analytics_groups).
 - `analytics_groups` (dict[str, str], optional): **Pipelex-API extension.** The groups this run's telemetry belongs to, such as `{"organization": "org_acme"}` — see [Host-supplied run context](#host-supplied-run-context-storage_scope-and-analytics_groups).
 
 **Validation Rules:**
@@ -118,6 +119,7 @@ Start a pipeline execution and get its `pipeline_run_id` back with a `202` ack.
 - `files` (dict[str, str], optional): **Pipelex-API extension.** The same bundle as a `{relative_path: text}` map (the unzipped equivalent of `bundle_b64`). Mutually exclusive with `bundle_b64`.
 - `method_ref` (string, optional): **Pipelex-API extension.** Run a published method by address instead of inline source — see [Running a method by address](#running-a-method-by-address-method_ref). Mutually exclusive with `mthds_contents` and with a method bundle; `pipe_code` may accompany it to override the package's `main_pipe`.
 - `storage_scope` (string, optional): **Pipelex-API extension.** The prefix every object this run writes lands under — see [Host-supplied run context](#host-supplied-run-context-storage_scope-and-analytics_groups).
+- `read_scope` (string, optional): **Pipelex-API extension.** The prefix every stored object this run reads must lie under — see [Host-supplied run context](#host-supplied-run-context-storage_scope-and-analytics_groups).
 - `analytics_groups` (dict[str, str], optional): **Pipelex-API extension.** The groups this run's telemetry belongs to, such as `{"organization": "org_acme"}` — see [Host-supplied run context](#host-supplied-run-context-storage_scope-and-analytics_groups).
 
 **Validation Rules:**
@@ -207,9 +209,9 @@ The receiver-side secret must be the same value. In typical deployments both sid
 
 ## Shipping a method bundle (custom PipeFunc)
 
-`mthds_contents` carries only the `.mthds` text. When your method uses a **custom `PipeFunc`** — your own Python function, plus any structure classes it needs — the code has to travel with the method too. Both `/execute` and `/start` accept the whole bundle in one of two mutually-exclusive forms:
+`mthds_contents` carries only the `.mthds` text. When your method uses a **custom `PipeFunc`** — your own Python function — the code has to travel with the method too. Both `/execute` and `/start` accept the whole bundle in one of two mutually-exclusive forms:
 
-- `bundle_b64`: a base64-encoded **zip** of the bundle directory (`.mthds` + `pipe_func.py` + `structures/*.py` + an optional `requirements.txt`).
+- `bundle_b64`: a base64-encoded **zip** of the bundle directory (`.mthds` + `pipe_func.py` + an optional `requirements.txt`).
 - `files`: the same content as a `{relative_path: text}` **map** (the unzipped equivalent) — handy for JSON clients that would rather not zip.
 
 The server materializes the bundle into a temporary library directory for the run and tears it down afterward. The pipe to run comes from the bundle's `main_pipe` (or an explicit `pipe_code`, to pick which pipe in the bundle to run). A bundle carries its own `.mthds`, so it is **mutually exclusive with inline `mthds_contents`** — sending both is a `422` (they would load into one library with no dedup and a shared domain would collide).
@@ -232,7 +234,9 @@ The server materializes the bundle into a temporary library directory for the ru
 - **Path safety:** entry names that are absolute, use `..` traversal, use backslashes, or carry a Windows drive/`:` form → `422 InvalidBundle`.
 - Supplying **both** `bundle_b64` and `files`, an empty bundle, or a corrupt zip → `422 InvalidBundle`; invalid base64 → `400 InvalidBase64`.
 
-**Sandbox-hosted only for custom Python.** A bundle that ships any `.py` is honored **only on a sandbox-hosted deployment**, where the load path captures the source without importing it and execution happens in an isolated sandbox. On a non-hosted deployment such a bundle is refused with `403 CustomCodeRequiresSandbox` — running caller-supplied code in-process is never done implicitly. A bundle that carries only `.mthds` (no `.py`) is accepted on any deployment.
+**Sandbox-hosted only for custom Python.** A bundle that ships any `.py` is honored **only on a sandbox-hosted deployment**, where the load path reads the source without importing it and execution happens in an isolated sandbox. On a non-hosted deployment such a bundle is refused with `403 CustomCodeRequiresSandbox` — running caller-supplied code in-process is never done implicitly. A bundle that carries only `.mthds` (no `.py`) is accepted on any deployment.
+
+**No Python structure classes.** A structure class (a `StructuredContent` subclass) can only be used by importing its module into the runner's own process, which a sandbox-hosted deployment never does, so a bundle whose Python declares one is refused with a `403` (`MethodStructuresRefusedError`) naming each file and class, before anything is loaded. The rule is the same however the method arrives: inline as a bundle, or fetched by `method_ref`. Declare the types as MTHDS concepts with inline structures instead; a PipeFunc returns them by importing the classes the sandbox generates from those concepts (`from structures import <domain>__<Concept>`). The `structures` module that `pipelex build structures` writes is accepted as long as it is left as generated, and it is not sent to the sandbox, which generates its own.
 
 ---
 
@@ -255,7 +259,7 @@ Both `/execute` and `/start` accept **`method_ref`** — a globally resolvable a
 
 **Provenance.** The response carries `method_provenance = {address, tag, commit_sha}` — on `/execute` only for `method_ref` runs, on the `/start` ack as a nullable field. Tags can move; the recorded SHA is what keeps a run explainable after the fact.
 
-**Custom Python follows the bundle rules, plus one more.** What decides is *where the code would execute*: `.mthds` content is data, always acceptable. On a deployment that is **not** sandbox-hosted, a fetched package carrying any `.py` is refused with `403 CustomCodeRequiresSandbox`. On a sandbox-hosted deployment, PipeFunc `.py` is accepted (captured as text, executed in the isolated sandbox) — but a package declaring **Python structure classes** (`StructuredContent` subclasses) is always refused with a `403` (`MethodStructuresRefusedError`): structures are imported into the runner's own process, and hosted execution accepts MTHDS concepts and sandboxed PipeFuncs, not in-process Python. Express the types as MTHDS concepts with inline structures instead.
+**Custom Python follows the bundle rules, plus one more.** What decides is *where the code would execute*: `.mthds` content is data, always acceptable. On a deployment that is **not** sandbox-hosted, a fetched package carrying any `.py` is refused with `403 CustomCodeRequiresSandbox`. On a sandbox-hosted deployment, PipeFunc `.py` is accepted (captured as text, executed in the isolated sandbox) — but a package declaring **Python structure classes** (`StructuredContent` subclasses) is refused with a `403` (`MethodStructuresRefusedError`), exactly as a bundle is: see [No Python structure classes](#shipping-a-method-bundle-custom-pipefunc).
 
 **Errors.** Every resolution failure is a distinct RFC 7807 `problem+json` with the originating class as `error_type` (see [Error responses](error-responses.md)):
 
@@ -279,18 +283,21 @@ Both `/execute` and `/start` accept **`method_ref`** — a globally resolvable a
 
 ## Host-supplied run context: `storage_scope` and `analytics_groups`
 
-Both `/execute` and `/start` accept two optional fields that describe the run's tenancy rather than its method. Both are **Pipelex-API extensions**, and both are **data the host computes**, which is why they ride in the body: the caller's *identity* arrives separately, on the trusted `X-User-Id` header or the bearer token (see [Authentication](index.md#authentication)), because it is something a proxy vouches for rather than something the caller chooses. The runtime carries both fields opaquely and never reads a value by name, so it has no notion of what an organization or a tenant is.
+Both `/execute` and `/start` accept optional fields that describe the run's tenancy rather than its method: `storage_scope`, `read_scope` and `analytics_groups`. All are **Pipelex-API extensions**, and all are **data the host computes**, which is why they ride in the body: the caller's *identity* arrives separately, on the trusted `X-User-Id` header or the bearer token (see [Authentication](index.md#authentication)), because it is something a proxy vouches for rather than something the caller chooses. The runtime carries them opaquely and never reads a value by name, so it has no notion of what an organization or a tenant is.
 
 ```json
 {
   "pipe_code": "your_pipeline_code",
   "inputs": { "input_name": "..." },
   "storage_scope": "org_acme/method_42/run_7",
+  "read_scope": "org_acme",
   "analytics_groups": { "organization": "org_acme" }
 }
 ```
 
 **`storage_scope`** is the prefix every object the run writes lands under: one to three path-safe segments, onto which the runtime composes its own leaves (`assets/`, `generated/`, `results/`, `payloads/`). Omit it and the run is scoped to the caller's own id, which is right for a single-tenant deployment and wrong for a multi-tenant one: a host serving many tenants must send it. Each segment is one or more characters from `A-Za-z0-9_-`, so an empty segment, a leading or trailing slash, a `.` or `..`, or a fourth segment is refused with a `422` whose `error_type` is `InvalidStorageScope`.
+
+**`read_scope`** bounds what the run may read: every `pipelex-storage://` key the run reads, whether an input, a URL a pipe builds or an image it shows a model, must lie under it, and a scoped run reads no local path at all. It follows the same segment rule as `storage_scope`, and the storage scope must be the read scope or lie under it, since a run reads back what it writes: `org_acme` covers `org_acme/method_42/run_7`, while `org_other` does not. Omit it and the run is scoped to the caller's own id when the deployment identifies its callers, which is also where their writes land by default, and unscoped when the deployment is single-tenant. A host serving many tenants must send it: a host that sends its own `storage_scope` but no `read_scope` is refused, since that storage scope lies under no caller's id. A malformed read scope, a storage scope outside it, or the local storage scope `local` beside one is a `422` whose `error_type` is `InvalidReadScope`, answered before any method is fetched or library loaded. A read the scope does not allow is refused when the run makes it, with the `error_type` `UriReadRefusedError`, whose message says where the URL sat without quoting it. On `/execute` it is a `422`. On `/start` it is a synchronous `422` when an input breaks the rule, and a run that ends `FAILED` with that error in its completion callback when a pipe reaches for the URL during the run.
 
 **`analytics_groups`** names the entities the run's telemetry belongs to, as a mapping of group type to group key. The runtime carries it on the run as its opaque `extras` and stamps it on every span of the run as the attribute `pipelex.run.extras`, so every OpenTelemetry exporter receives it, and the deployment's own PostHog stream, when `telemetry.toml` sets `mode = "identified"`, attaches it to each capture as PostHog groups. That is what lets a generation made for one of your customers appear inside that customer's organization instead of under one identity for the whole deployment. What Pipelex's own Gateway telemetry stream receives is the runtime's decision, not this server's; the runtime this server pins attributes that stream the same way, with the run's `user_id` and these groups. The rules are the runtime's own, imported rather than restated here:
 
@@ -307,7 +314,9 @@ The caller's id is the run's person on that same stream, with one exception: a d
 
 ## Input Format: PipelineInputs
 
-The `inputs` field accepts several shapes. Pipelex picks how to interpret each value from its structure — pass a string and you get `TextContent`, pass a dict with `concept` and `content` keys and you get explicit concept resolution, etc. The cases below enumerate every supported form.
+The `inputs` field accepts several shapes. Pipelex picks how to interpret each value from its structure — pass a string to a `Text` input and you get `TextContent`, pass a dict with `concept` and `content` keys and you get explicit concept resolution, etc. The cases below enumerate every supported form.
+
+**The request body is plain JSON.** The Python objects in Cases 1.3 to 1.5, and the `DictStuff` instances further down, are what a Python caller writes; a Python client of this API serializes each one to plain JSON before sending it, and the server never rebuilds a Python class from the request. The class name does not travel, so each value is read against the entry pipe's declared input. A structured object (Case 1.3) arrives as its fields and a list of them (Case 1.4) as a list of those, and both are read as intended; a `DictStuff` arrives as the Case 2 envelope. A `ListContent` wrapper (Case 1.5) arrives as `{"items": [...]}`, which the server reads as one item rather than a list, and a native `TextContent` arrives as `{"text": ...}`, which a `Text` input refuses: over HTTP, send the bare list of items or strings instead, or the `{"concept": ..., "content": [...]}` envelope of Cases 2.2, 2.4 and 2.6. A body carrying a `__class__` or `__module__` key, or a key starting with `__kajson`, in any object at any depth is refused with a `422 ReservedObjectKey` (see [Error Responses](error-responses.md#status-codes)).
 
 ### How Input Formatting Works
 
@@ -351,7 +360,9 @@ The simplest case - just provide a string directly:
 }
 ```
 
-**Result:** Automatically becomes `TextContent` with concept `native.Text`
+**Result:** At a `Text` input, automatically becomes `TextContent` with concept `native.Text`
+
+The input's declaration decides the reading for two native concepts. At an `Anything` input, the string becomes a `native.Anything` value holding the text, and a number, a boolean or an object is taken the same way, as a value of its own kind; a date sent as a string is read as text. An `Anything` input refuses `null` and a list, both with a `422`: a list is taken only by an `Anything[]` input, whose items are such values and can be neither `null` nor a list themselves. At a `JSON` input, a string is refused: a `JSON` input reads a JSON object literally, and a `JSON[]` input a list of objects. `NaN` and the infinities are refused at `Number`, `JSON` and `Anything` inputs, since JSON cannot carry them.
 
 ### 1.2: List of Strings (Text List)
 
@@ -367,7 +378,7 @@ Provide multiple text items as a list:
 
 **Result:** Becomes a `ListContent` containing multiple `TextContent` items
 
-**Note:** The concept must be compatible with `native.Text` or an error will be raised.
+**Note:** The concept must be compatible with `native.Text` or an error will be raised. The one exception is an `Anything[]` input, where the list keeps the `native.Anything` concept and holds each string as text.
 
 ### 1.3: StructuredContent Object
 
@@ -389,7 +400,7 @@ inputs = {
 - These classes are defined in your project's Python files
 - Learn more: [Python StructuredContent Classes](https://docs.pipelex.com/pages/build-reliable-ai-workflows-with-pipelex/define_your_concepts/#3-python-structuredcontent-classes)
 
-**Concept Resolution:**
+**Concept Resolution** (in-process calls only, where the object itself reaches the runtime; over HTTP the class name does not travel, and the declared input decides):
 
 - The system searches all available domains for a concept matching the class name
 - If multiple concepts with the same name exist in different domains → **Error**: Must specify domain
@@ -412,7 +423,7 @@ inputs = {
 **What it accepts:**
 
 - Lists of `StructuredContent` objects (user-defined classes)
-- Lists of native content objects (`TextContent`, `ImageContent`, etc.)
+- Lists of native content objects (`TextContent`, `ImageContent`, etc.), in in-process calls only (over HTTP, see the plain-JSON note above)
 
 **Requirements:**
 
@@ -422,7 +433,7 @@ inputs = {
 
 ### 1.5: ListContent of StuffContent Objects
 
-Provide an existing `ListContent` wrapper object (Python clients):
+Provide an existing `ListContent` wrapper object (in-process Python calls only; over HTTP, send the bare list of items, as the plain-JSON note above explains):
 
 ```python
 # Python client example

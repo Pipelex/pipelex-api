@@ -164,10 +164,11 @@ async def build_inputs(request_data: BuildInputsRequest) -> JSONResponse:
     - **Valid verdict (200, `is_valid: true`):** the template, in `inputs` or `inputs_toml` per `format`.
     - **Invalid verdict (200, `is_valid: false`):** the closure could not be parsed, loaded, or
       validated — `validation_errors[]` from pipelex's one shared builder; no template exists.
-    - **No verdict (non-2xx):** an unknown pipe ref, an omitted `pipe_ref` that nothing defaults (no
-      fetched-manifest `main_pipe`, and a closure declaring no — or several — `main_pipe`), or a
-      malformed closure selector is a request-shape 422 problem+json; a registry-form `method_ref`
-      is a 501 until server-side method-registry resolution exists.
+    - **No verdict (non-2xx):** a selection refusal — an unknown pipe ref, or an omitted `pipe_ref` that
+      nothing defaults (no fetched-manifest `main_pipe`, and a closure declaring no — or several —
+      `main_pipe`) — is an input 422 whose `error_type` is `EntryPipeNotFoundError` or
+      `EntryPipeAmbiguousError`; a malformed closure selector is a request-shape 422 problem+json; a
+      registry-form `method_ref` is a 501 until server-side method-registry resolution exists.
 
     An omitted `pipe_ref` defaults the way a run by address does: to the fetched package manifest's
     `main_pipe` on a `method_ref` request, else to the closure's own declared `main_pipe`.

@@ -339,9 +339,10 @@ _ERROR_TYPE_STATUS_OVERRIDES: dict[str, int] = {
     #     cannot be processed under this deployment's bounds → 422 (not 413, which is about
     #     the request entity itself).
     "MethodPackageTooLargeError": 422,
-    #   - The fetched package declares in-process Python structure classes: a policy refusal
-    #     (hosted execution accepts MTHDS concepts and sandboxed PipeFuncs, not in-process
-    #     Python) → 403, the same status as the bundle transport's custom-code gate.
+    #   - The method's Python declares structure classes, whether it was sent as a bundle or
+    #     fetched by `method_ref`: a policy refusal (hosted execution accepts MTHDS concepts and
+    #     sandboxed PipeFuncs, not in-process Python) → 403, the same status as the bundle
+    #     transport's custom-code gate.
     "MethodStructuresRefusedError": 403,
 }
 

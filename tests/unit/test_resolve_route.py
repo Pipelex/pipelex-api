@@ -18,7 +18,7 @@ from pytest_mock import MockerFixture
 
 from api.exception_handlers import register_exception_handlers
 from api.routes import router as api_router
-from tests.unit._constants import INVALID_MAIN_PIPE_MTHDS, VALID_MTHDS
+from tests.unit._constants import INVALID_MAIN_PIPE_MTHDS, SIBLING_MTHDS, VALID_MTHDS
 
 
 def _build_client() -> TestClient:
@@ -26,20 +26,6 @@ def _build_client() -> TestClient:
     app.include_router(api_router, prefix="/v1")
     register_exception_handlers(app)
     return TestClient(app)
-
-
-# A second bundle in the same domain, referencing the first bundle's pipe — proves the closure is
-# merged across files[] entries before resolution.
-SIBLING_MTHDS = """\
-domain = "smoke"
-
-[pipe.wrap_echo]
-type = "PipeSequence"
-description = "Wrap the echo pipe"
-inputs = { text = "Text" }
-output = "Text"
-steps = [{ pipe = "echo", result = "echoed" }]
-"""
 
 
 class TestResolveRoute:

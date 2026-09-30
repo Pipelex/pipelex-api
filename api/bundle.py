@@ -1,7 +1,7 @@
 """Materialize a caller-supplied method bundle into a temporary library directory.
 
-A run request may carry the whole method — the `.mthds` bundle plus its Python
-(`pipe_func.py`, `structures/*.py`) and a `requirements.txt` — instead of only
+A run request may carry the whole method — the `.mthds` bundle plus its PipeFunc
+Python (`pipe_func.py`) and a `requirements.txt` — instead of only
 the inline `mthds_contents` text. Two transport forms are accepted, exactly one
 per request:
 
@@ -14,8 +14,10 @@ hard file-count and total-size ceiling; per-entry path-safety against absolute
 paths and `..` traversal; a zip-bomb guard that bounds actual decompression),
 writes the surviving files into a fresh temp directory, and hands that directory
 back so the runner can load it via `library_dirs`. In a sandbox-hosted
-deployment the load path captures every `.py` as source text (never importing
-it) onto the crate; the caller is responsible for the hosted-mode gate.
+deployment the load path reads every `.py` as source text, never importing it:
+it refuses a bundle whose Python declares a structure class
+(`MethodStructuresRefusedError`, a 403) and captures the rest onto the crate for
+the sandbox. The caller is responsible for the hosted-mode gate.
 
 Nothing here imports or executes the bundle's Python — it only writes bytes to
 disk. The caller cleans the directory up via the `materialized_bundle` context

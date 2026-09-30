@@ -121,8 +121,10 @@ PROBLEM_403_RUN_POLICY: dict[str, Any] = _problem(
     "`orchestration_mode` this deployment does not allow overriding per request "
     "(`allow_request_orchestration_mode_override = false`); `CustomCodeRequiresSandbox` — the method (a bundle, or a "
     "fetched `method_ref` package) ships custom Python and this deployment is not sandbox-hosted; or "
-    "`MethodStructuresRefusedError` — a fetched package declares in-process Python structure classes, which hosted "
-    "execution always refuses (express the types as MTHDS concepts instead).",
+    "`MethodStructuresRefusedError` — the method's Python declares structure classes (`StructuredContent` "
+    "subclasses), whether it arrived as a bundle (`files` or `bundle_b64`) or as a fetched `method_ref` package: "
+    "a sandbox-hosted deployment imports no caller Python into its own process, so it refuses them before "
+    "loading anything (express the types as MTHDS concepts instead).",
 )
 
 PROBLEM_409_DUPLICATE_RUN: dict[str, Any] = _problem(

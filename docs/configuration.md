@@ -114,6 +114,8 @@ The Pipelex runtime loads `.toml` config files in a layered, deep-merged order. 
 
 In the official Docker image, the `.pipelex/` directory shipped in this repository is copied to `/root/.pipelex` at build time and the project-level `.pipelex/` is removed from the image. That means **`/root/.pipelex/` is the single config dir the runtime reads from**, and any file you mount there participates in the layering above. To override anything, you only need to provide the keys you want to change — the layering does the rest.
 
+**The inference tree the image ships is the pinned `pipelex` release's own.** Every file under `inference/backends/`, the routing profiles and the numbered model deck files are that release's defaults, unchanged, so the models an own-key backend offers are the ones the pinned `pipelex` lists: read `.pipelex/inference/backends/<backend>.toml` at the image's tag to see them. Only two things are this image's own choice: the `enabled` switches in `inference/backends.toml`, which leave the Pipelex Gateway and the software-only `internal` backend on and every own-key backend off, and the `x_custom_*` deck overrides. A copy of `inference/backends.toml` you mount yourself therefore keeps the backend list of the release you took it from, so take it again when you move to an image that pins a newer `pipelex`.
+
 For the schema and meaning of every key in these files, see https://docs.pipelex.com.
 
 ## Orchestration mode
@@ -254,6 +256,19 @@ API_KEY=your-strong-secret
 ```
 
 Clients now need `Authorization: Bearer your-strong-secret`.
+
+### Documents on an intranet host, or egress through a proxy
+
+When a run fetches a URL that a value carries (a document to extract, a prompt image for a provider that does not take URLs, a generated image a provider returned as a link), the runtime refuses a host that is `localhost`, a cloud metadata alias, or that resolves to a private, loopback, link-local or metadata address, on the first request and on every redirect hop. The pipe fails with `SsrfBlockedError` naming the host. The guarded fetch also connects directly, ignoring `HTTP_PROXY` and `HTTPS_PROXY`. The image ships with the guard on, which is right for any deployment that runs methods it did not write.
+
+A deployment whose documents live on an intranet host, or whose only way out is an HTTP proxy, turns it off in a `pipelex_override.toml`:
+
+```toml
+[runtime.network]
+is_fetch_ssrf_guard_enabled = false
+```
+
+Webhook delivery stays guarded whatever this says.
 
 ### Customizing Pipelex (storage, tracing, inference, model decks, …)
 
