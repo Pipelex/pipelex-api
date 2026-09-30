@@ -1,5 +1,8 @@
 # Pipelex API Documentation
 
+!!! important "This server is moving into [`Pipelex/pipelex`](https://github.com/Pipelex/pipelex)"
+    It will live there as the repository's `api/` directory and be released together with the pipelex library, under the library's version number, so the next tag of the `pipelex/pipelex-api` image will be a pipelex version rather than the next `0.33.x`. The image keeps its name, its port and its `/root/.pipelex` configuration mount. This repository takes no new changes and will be archived once the move lands; please open new issues on `Pipelex/pipelex`.
+
 Welcome to the Pipelex API documentation. The API provides programmatic access to the Pipelex system.
 
 ## The three-layer contract
