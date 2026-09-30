@@ -431,11 +431,12 @@ class PipelexApiStartRequest(StartRequest):
         default=None,
         description=(
             "PIPELEX-API EXTENSION (not part of the MTHDS Protocol) — completion webhooks. "
-            "When the run finishes, the runner POSTs a completion notice to each URL, HMAC-SHA256-signed "
-            "via the X-Completion-Signature header. The body carries `pipeline_run_id`, `state` (with the "
-            "legacy `status` alias), `result_url` (the storage key prefix of the stored results, when results "
-            "were stored) and `error` on failure; it does not carry the run's output. http/https only; "
-            "private, loopback, link-local and cloud-metadata hosts are rejected."
+            "When the run finishes, the runner POSTs a completion notice to each URL, with an "
+            "X-Completion-Signature header holding the HMAC-SHA256 of the run id (not of the body). "
+            "The body carries `pipeline_run_id`, `state` (with the legacy `status` alias), `result_url` "
+            "(the storage key prefix of the stored results, when results were stored) and `error` on "
+            "failure; it does not carry the run's output. http/https only; private, loopback, link-local "
+            "and cloud-metadata hosts are rejected."
         ),
     )
     orchestration_mode: str | None = Field(default=None, description=_ORCHESTRATION_MODE_DESCRIPTION)
