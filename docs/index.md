@@ -12,7 +12,7 @@ MTHDS Protocol  ⊂  Pipelex API (this server)  ⊂  Pipelex hosted API
 ```
 
 - **MTHDS Protocol** — five routes: `POST /execute`, `POST /start`, `POST /validate`, `GET /models`, `GET /version`. Tagged `x-mthds-protocol: true` in the [committed OpenAPI artifact](openapi/pipelex-api.openapi.yaml), and **only** those five — the flag is how a conformance suite or a third-party runner extracts the portable subset.
-- **Pipelex API (this server)** — the protocol verbatim, plus the Pipelex extensions: resolve and codegen (`/resolve`, `/codegen`), build tooling (`/build/*`), and editor tooling (`/lint`, `/format`). `/upload` and `/resolve-storage-url` were non-contract convenience routes and have been **removed** — see [Storage Transport](storage-transport.md) for where they went and why.
+- **Pipelex API (this server)** — the protocol verbatim, plus the Pipelex extensions: resolve and codegen (`/resolve`, `/codegen`), pipe I/O (`/pipe-io`), build tooling (`/build/*`), and editor tooling (`/lint`, `/format`). `/upload` and `/resolve-storage-url` were non-contract convenience routes and have been **removed** — see [Storage Transport](storage-transport.md) for where they went and why.
 - **Pipelex hosted API** (`api.pipelex.com/v1`) — everything here, same shapes, plus durable runs, the method catalog, and account management.
 
 All routes are served under the `/v1` base path (clients compose `{base}/v1/{endpoint}`).
@@ -27,7 +27,6 @@ The API currently allows you to:
 4. **Build** pipeline components — generate input schemas, output representations, runner code, concepts, and pipe specs
 5. **Lint and format** single `.mthds` files for editor workflows
 6. **List** available model presets and configurations
-7. **Upload** files via presigned URLs
 
 ## Deployment
 
@@ -150,6 +149,13 @@ Validate MTHDS content to ensure pipelines are correctly defined before executio
 
 [Learn more →](pipe-validate.md)
 
+### Pipe I/O
+Read a method's I/O artifacts without a validation. A Pipelex API extension carrying the standard's artifacts.
+
+- `POST /v1/pipe-io` — The pipe I/O contracts, input form and output form of one pipe, or of every pipe with `all_pipes`, beside the method's entry pipe and its pending signatures; no dry run. Takes the same closure selector as `/v1/resolve`, and `include_files` echoes the closure's `.mthds` files
+
+[Learn more →](pipe-io.md)
+
 ### Resolve & Codegen
 Resolve a library closure into its normalized crate, and project that crate into typed artifacts. Pipelex API extensions — not MTHDS Protocol routes, though the crate they emit is the standard's Library Crate Format.
 
@@ -182,9 +188,7 @@ Tools for AI agents building pipelines programmatically.
 - `POST /v1/build/pipe-spec` — Convert a JSON pipe spec to TOML
 - `GET /v1/models` — The protocol model deck this runner routes to (flat `models` list, plus category-keyed `aliases`/`waterfalls` routing extensions); optional single `?type=` category filter
 
-### Uploader (auth-gated, NON-CONTRACT)
-
-These endpoints exist in the server but are NOT part of the published Pipelex API contract — they are deployment conveniences slated for replacement by the storage redesign. They require an authenticated **user identity** and reject unidentified requests with 401; `AUTH_MODE=api_key` does not establish one (the key is shared, not per-caller), so use `AUTH_MODE=jwt`, or a trusted proxy forwarding `X-User-Id` with `TRUST_FORWARDED_IDENTITY_HEADERS=true`.
+### Uploader (removed)
 
 `POST /v1/upload` and `POST /v1/resolve-storage-url` have been **removed** ([Storage Transport](storage-transport.md)). The storage provider itself is untouched — only the two HTTP routes are gone.
 

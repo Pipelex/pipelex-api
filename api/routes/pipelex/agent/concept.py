@@ -39,14 +39,12 @@ async def build_concept(request_data: BuildConceptRequest) -> BuildConceptRespon
     422. Pipelex domain failures propagate untouched to the global
     `PipelexError` handler in `api.exception_handlers`.
 
-    Known gap (tracked as `pipelex-changes.md` item #11): a non-dict `structure`
-    (`{"structure": "string"}`) or a `structure` field that is neither a string
-    nor a dict (`{"structure": {"f": 42}}`) makes `parse_concept_spec` leak a
-    bare `AttributeError`/`TypeError` instead of a typed error, so the request
-    surfaces as an opaque 500. We deliberately don't catch those here — they
-    are also the signal of a real pipelex programming bug, and a broad route
-    catch would mask both. The fix is upstream shape validation in
-    `parse_concept_spec`.
+    A malformed shape — a non-mapping `structure` (`{"structure": "string"}`)
+    or a `structure` field that is neither a string nor a mapping
+    (`{"structure": {"f": 42}}`) — is refused by `parse_concept_spec` itself
+    with a typed `ConceptSpecError`, which that same handler answers. Nothing
+    broader is caught here: a bare exception from pipelex is the signal of a
+    real programming bug, and a route-level catch would mask it.
     """
     try:
         concept_spec = parse_concept_spec(request_data.spec)

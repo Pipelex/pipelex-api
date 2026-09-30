@@ -11,7 +11,7 @@ info:
   license:
     name: Elastic License 2.0
     identifier: Elastic-2.0
-  version: 0.32.0
+  version: 0.33.0
 paths:
   /health:
     get:
@@ -1082,6 +1082,93 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDocument'
+  /v1/pipe-io:
+    post:
+      tags:
+      - pipe-io
+      summary: Pipe Io
+      description: "Return a method's pipe I/O contracts, input form and output form, with no dry run (Pipelex API extension).\n\
+        \nThe closure resolves through the static core `/resolve` rides, a pipe is selected the way the\nper-pipe routes select\
+        \ one, and the three artifacts are derived with `build_pipe_io_artifacts`,\nthe builder `/validate` and every run\
+        \ call — so a call costs one load and one derivation where\n`/validate` dry-runs every pipe.\n\nResponse contract\
+        \ (the `/validate` discipline):\n\n- **Valid verdict (200, `is_valid: true`):** the three artifact maps keyed by qualified\
+        \ `pipe_ref`,\n  beside `pipe_ref`, `default_pipe_ref`, `pending_signatures`, `is_runnable`, and `files` when\n  `include_files`\
+        \ is true.\n- **Invalid verdict (200, `is_valid: false`):** the closure could not be parsed, loaded, or\n  statically\
+        \ validated — the crate verdict, carrying no artifact, no selection and no files.\n- **No verdict (non-2xx):** a malformed\
+        \ body, neither or both closure selectors, an unknown or\n  ambiguous `pipe_ref`, and a single-pipe request whose\
+        \ chain finds no entry pipe or several are\n  request-shape 422s; the `method_ref` fetch outcomes are those of `/resolve`\
+        \ (404, 422, 501);\n  an artifact that cannot be derived (`PipeIOContractError`) is a 500. All RFC 7807\n  `application/problem+json`\
+        \ via the global handlers."
+      operationId: pipe_io_v1_pipe_io_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PipeIORequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/PipeIOValidReport'
+                - $ref: '#/components/schemas/CrateInvalidReport'
+                title: Response Pipe Io V1 Pipe Io Post
+                discriminator:
+                  propertyName: is_valid
+                  mapping:
+                    'True': '#/components/schemas/PipeIOValidReport'
+                    'False': '#/components/schemas/CrateInvalidReport'
+        '401':
+          description: Missing or invalid bearer token. Only reachable when the deployment enables auth (`AUTH_MODE=api_key`
+            or `AUTH_MODE=jwt`).
+          headers:
+            WWW-Authenticate:
+              description: Authentication challenge — always `Bearer`.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '413':
+          description: Request body exceeds the deployment's size limit (`MAX_REQUEST_BODY_MIB`, 100 MiB by default).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '422':
+          description: 'The request could not be processed: a malformed body, a field failing validation, or an `input`-domain
+            pipelex error (a `.mthds` bundle the caller must fix). Note that on the diagnostic routes an *invalid bundle*
+            is a **200** verdict, not a 422 — see each route''s response contract.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '500':
+          description: A `config`-domain or `runtime`-domain failure the caller cannot fix (a missing env var, a bad TOML
+            override, a backend fault), or an unclassified error sanitized by the catch-all handler. Report the `request_id`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '404':
+          description: '`MethodPackageNotFoundError` — the `method_ref` repository was fetched, but no package in it matches
+            the requested address by manifest identity. The message lists the packages the repository does contain.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
+        '501':
+          description: '`MethodRefNotSupported` — the request selected its closure by a **registry-form** `method_ref` (not
+            a `github.com/...` address), and no server-side method registry resolves those yet. Use an address-form reference
+            or submit inline `files[]` instead.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDocument'
   /v1/codegen:
     post:
       tags:
@@ -1370,21 +1457,17 @@ paths:
         `PipelexError` handler in `api.exception_handlers`.
 
 
-        Known gap (tracked as `pipelex-changes.md` item #11): a non-dict `structure`
+        A malformed shape — a non-mapping `structure` (`{"structure": "string"}`)
 
-        (`{"structure": "string"}`) or a `structure` field that is neither a string
+        or a `structure` field that is neither a string nor a mapping
 
-        nor a dict (`{"structure": {"f": 42}}`) makes `parse_concept_spec` leak a
+        (`{"structure": {"f": 42}}`) — is refused by `parse_concept_spec` itself
 
-        bare `AttributeError`/`TypeError` instead of a typed error, so the request
+        with a typed `ConceptSpecError`, which that same handler answers. Nothing
 
-        surfaces as an opaque 500. We deliberately don''t catch those here — they
+        broader is caught here: a bare exception from pipelex is the signal of a
 
-        are also the signal of a real pipelex programming bug, and a broad route
-
-        catch would mask both. The fix is upstream shape validation in
-
-        `parse_concept_spec`.'
+        real programming bug, and a route-level catch would mask it.'
       operationId: build_concept_v1_build_concept_post
       requestBody:
         content:
@@ -5151,6 +5234,145 @@ components:
         artifact byte-stable whatever a renderer needs. A pipe with no declared inputs carries
 
         `inputs: {}` — a stated fact, never an omitted member. Closed shape (`extra="forbid"`).'
+    PipeIORequest:
+      properties:
+        files:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/MthdsFileItem'
+            type: array
+            maxItems: 16
+            minItems: 1
+          - type: 'null'
+          title: Files
+          description: Inline MTHDS bundles forming the closure to resolve (content-passing — no server-side path reads).
+        method_ref:
+          anyOf:
+          - type: string
+            maxLength: 512
+            minLength: 1
+          - type: 'null'
+          title: Method Ref
+          description: Reference to a published method, resolving to its package's `.mthds` files. Address form (`github.com/<owner>/<repo>[/<selector>][@<tag>]`)
+            is fetched and resolved server-side; the registry form stays reserved (501 until a method registry exists).
+        pipe_ref:
+          anyOf:
+          - type: string
+            maxLength: 256
+            minLength: 1
+          - type: 'null'
+          title: Pipe Ref
+          description: Qualified pipe ref (`domain.pipe_code`) to project. Optional — defaults to the fetched package manifest's
+            `main_pipe` on a `method_ref` request, else to the closure's declared `main_pipe`; a closure declaring none, or
+            several, with no manifest `main_pipe` to settle it, requires it explicitly.
+        all_pipes:
+          type: boolean
+          title: All Pipes
+          description: 'Describe every pipe the closure loads instead of the selected one. The artifact maps are then keyed
+            by every pipe, and the route never refuses for want of an entry pipe: `pipe_ref` on the valid arm is the requested
+            ref, else the method''s own entry pipe, else `null`.'
+          default: false
+        include_files:
+          type: boolean
+          title: Include Files
+          description: 'Echo the resolved closure''s `.mthds` files on the valid arm, in the request''s own `files[]` shape:
+            the request''s files for inline `files[]`, the fetched package''s `.mthds` files under their package-relative
+            paths for a `method_ref`. Absent from the response unless true.'
+          default: false
+      type: object
+      title: PipeIORequest
+      description: 'The pipe I/O request: the crate routes'' closure selector and pipe selector, plus the whole-method and
+        echo opt-ins.
+
+
+        It declares no `method_id`: the hosted catalog selector is resolved by the platform, which
+
+        forwards the stored files as `files[]`, so the runner never sees it. It takes no `views` either,
+
+        since the valid arm always carries all three artifacts.'
+    PipeIOValidReport:
+      properties:
+        is_valid:
+          type: boolean
+          const: true
+          title: Is Valid
+          default: true
+        pipe_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pipe Ref
+          description: The qualified `domain.pipe_code` the selection resolved, read back off the resolved pipe and never
+            echoed from the request. `null` only under `all_pipes` when no pipe was requested and the method declares no single
+            entry pipe.
+        pipe_io_contracts:
+          additionalProperties:
+            $ref: '#/components/schemas/PipeIOContract'
+          type: object
+          title: Pipe Io Contracts
+          description: The standard's pipe I/O contracts, keyed by qualified `pipe_ref`.
+        input_form:
+          additionalProperties:
+            $ref: '#/components/schemas/PipeInputFormDescriptor'
+          type: object
+          title: Input Form
+          description: The standard's input-form descriptors, keyed by qualified `pipe_ref`.
+        output_form:
+          additionalProperties:
+            $ref: '#/components/schemas/PipeOutputFormDescriptor'
+          type: object
+          title: Output Form
+          description: The standard's output-form descriptors, keyed by qualified `pipe_ref`.
+        default_pipe_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Default Pipe Ref
+          description: 'The method''s own entry pipe: the selection chain without the request''s `pipe_ref` — the fetched
+            package manifest''s `main_pipe`, else the closure''s single `main_pipe` declaration. A stated `null` when that
+            chain finds none or several. Not `/validate`''s field of the same name, which is the run default.'
+        pending_signatures:
+          items:
+            type: string
+          type: array
+          title: Pending Signatures
+          description: The qualified refs of every pipe of the closure still declared as a signature, exactly as on `/validate`.
+        is_runnable:
+          type: boolean
+          title: Is Runnable
+          description: '`not pending_signatures`, exactly as on `/validate`. No dry run backs it.'
+        files:
+          items:
+            $ref: '#/components/schemas/MthdsFileItem'
+          type: array
+          title: Files
+          description: 'The resolved closure''s `.mthds` files, in the request''s `files[]` shape. Present only with `include_files:
+            true`.'
+      type: object
+      required:
+      - pipe_ref
+      - pipe_io_contracts
+      - input_form
+      - output_form
+      - default_pipe_ref
+      - pending_signatures
+      - is_runnable
+      title: PipeIOValidReport
+      description: 'The 200 **valid** arm: the method''s three I/O artifacts, with the selection and the runnability facts
+        beside them.
+
+
+        The three maps share one key set: the resolved `pipe_ref` alone by default, every pipe the
+
+        closure loads under `all_pipes`. Each map is the standard''s artifact under its neutral name, and
+
+        for a closure `/validate` also accepts it equals `/validate`''s same-named field restricted to the
+
+        same keys — both routes call the one builder, and both dump without dropping null members.
+
+        `is_valid: true` means what it means on `/resolve`: the closure parsed, loaded and passed static
+
+        validation. No dry run ran; that verdict stays `/validate`''s.'
     PipeImgGenBlueprint:
       properties:
         source:
