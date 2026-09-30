@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **`POST /v1/pipe-io`**: returns a method's `pipe_io_contracts`, `input_form` and `output_form` without a dry run, keyed by qualified `pipe_ref`, for the selected pipe or, with `all_pipes: true`, for every pipe, beside the resolved `pipe_ref`, the method's own `default_pipe_ref`, `pending_signatures` and `is_runnable`. It takes the same `files` or `method_ref` closure selector and `pipe_ref` as the `/v1/build/*` routes, `include_files: true` echoes the closure's `.mthds` files, and each artifact equals `/v1/validate`'s same-named view for a closure both routes accept.
+
+### Fixed
+
+- **An ambiguous pipe selector says it is ambiguous**: on `POST /v1/build/inputs`, `/v1/build/output` and `/v1/build/runner`, a bare `pipe_ref` or manifest `main_pipe` that matches pipes in several domains is still a `422`, and its detail now says the code matches several domains and names the qualified refs to choose from, where it said the pipe was not found.
+
 ## [v0.32.0] - 2026-09-29
 
 ### Highlights

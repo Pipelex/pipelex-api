@@ -150,6 +150,13 @@ Validate MTHDS content to ensure pipelines are correctly defined before executio
 
 [Learn more →](pipe-validate.md)
 
+### Pipe I/O
+Read a method's I/O artifacts without a validation. A Pipelex API extension carrying the standard's artifacts.
+
+- `POST /v1/pipe-io` — The pipe I/O contracts, input form and output form of one pipe, or of every pipe with `all_pipes`, beside the method's entry pipe and its pending signatures; no dry run. Takes the same closure selector as `/v1/resolve`, and `include_files` echoes the closure's `.mthds` files
+
+[Learn more →](pipe-io.md)
+
 ### Resolve & Codegen
 Resolve a library closure into its normalized crate, and project that crate into typed artifacts. Pipelex API extensions — not MTHDS Protocol routes, though the crate they emit is the standard's Library Crate Format.
 

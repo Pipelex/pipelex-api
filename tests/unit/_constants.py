@@ -96,6 +96,48 @@ output = "Text"
 prompt = "@text"
 """
 
+# A second bundle in the `smoke` domain, referencing VALID_MTHDS's pipe — proves the closure is
+# merged across files[] entries before resolution, and gives the closure a second, non-entry pipe.
+SIBLING_MTHDS = """\
+domain = "smoke"
+
+[pipe.wrap_echo]
+type = "PipeSequence"
+description = "Wrap the echo pipe"
+inputs = { text = "Text" }
+output = "Text"
+steps = [{ pipe = "echo", result = "echoed" }]
+"""
+
+# One pipe whose contracts and forms carry multiplicity (a variable list input, a fixed-count
+# output) and a structured concept with an optional field — the shapes an I/O artifact must carry.
+SHAPES_MTHDS = """\
+domain = "shapes"
+main_pipe = "digest"
+
+[concept]
+Brief = "A short brief"
+Note = "A working note"
+
+[concept.Card]
+description = "A structured card"
+
+[concept.Card.structure]
+title = { type = "text", description = "The card title", required = true }
+score = { type = "number", description = "A score" }
+
+[pipe.digest]
+type = "PipeLLM"
+description = "Digest a brief and some notes into two cards"
+inputs = { brief = "Brief", notes = "Note[]" }
+output = "Card[2]"
+prompt = '''
+Digest this brief: $brief
+
+@notes
+'''
+"""
+
 # A valid single-pipe bundle that declares NO main_pipe — validates fine (D2: no main-pipe
 # precondition on /validate) and simply yields no graph. On the per-pipe `/build/*` projections it is
 # also the closure that cannot default its pipe selector: an omitted `pipe_ref` is a 422 there.

@@ -132,6 +132,8 @@ The field rides the valid arm only. The invalid arm assembles no library, so the
 
 ## Opt-in extras (`render` and `views`)
 
+A caller that wants the artifacts without the verdict — to show a method, prepare its inputs or generate types for it — reads [`POST /v1/pipe-io`](pipe-io.md) instead: it returns `pipe_io_contracts`, `input_form` and `output_form` for one pipe or every pipe, equal to this route's for a closure both accept, with no dry-run sweep.
+
 The verdict body is lean by default: a request that sends neither list gets exactly the structured contract described above, byte-identical to a request that omits both fields. This matters because the highest-frequency callers of `/validate` — editor hooks, CI gates, agent loops — read a handful of fields and discard the rest, and should never pay for bytes they throw away.
 
 Two independent opt-in axes attach more:
