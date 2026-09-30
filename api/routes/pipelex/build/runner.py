@@ -14,7 +14,7 @@ from pipelex.codegen.resolved_concepts import resolve_concepts_from_crate
 from pipelex.core.pipes.variable_multiplicity import parse_concept_with_multiplicity
 from pipelex.interpreter_hub import get_current_library_id_or_none, get_library_manager
 from pipelex.libraries.crate_normalization import normalize_crate
-from pipelex.libraries.pipe.exceptions import PipeNotFoundError
+from pipelex.libraries.pipe.exceptions import EntryPipeNotFoundError, PipeNotFoundError
 from pipelex.mthds_parsing.pipelex_bundle_blueprint import PipelexBundleBlueprint
 from pipelex.pipeline.bundle_validator import DryRunOutput, DryRunStatus
 from pipelex.pipeline.exceptions import ValidateBundleError
@@ -154,10 +154,11 @@ async def build_runner(request: Request, request_data: BuildRunnerRequest) -> JS
 
     Response contract (the `/validate` discipline): an invalid closure — including a failed dry-run of
     the requested pipe — is a produced verdict: a **200** `is_valid: false` with the structured
-    `validation_errors[]`. Non-2xx is reserved for no-verdict conditions: a request-shape 422 (an
+    `validation_errors[]`. Non-2xx is reserved for no-verdict conditions: a selection refusal (an
     unknown pipe ref, an omitted `pipe_ref` that nothing defaults — no fetched-manifest `main_pipe`,
-    and a closure declaring no, or several, `main_pipe` — or a requested pipe whose cross-package
-    dependencies are absent from the request), a 501 for a registry-form `method_ref`, auth, server
+    and a closure declaring no, or several, `main_pipe`), an input 422 whose `error_type` is
+    `EntryPipeNotFoundError` or `EntryPipeAmbiguousError`; a request-shape 422 for a requested pipe
+    whose cross-package dependencies are absent from the request; a 501 for a registry-form `method_ref`, auth, server
     fault — RFC 7807 via the global handlers.
     """
     library_manager = get_library_manager()
@@ -177,9 +178,11 @@ async def build_runner(request: Request, request_data: BuildRunnerRequest) -> JS
         return invalid_crate_report_response(validate_error.to_error_report())
     except PipeNotFoundError as exc:
         # The engine deliberately lets this one through untranslated (see `translate_to_validate_bundle_error`)
-        # so the caller can own it: a pipe ref naming nothing in the closure is a request-shape 422, not an
-        # invalid-closure verdict — nothing about the closure is wrong. Matches `resolve_requested_pipe`.
-        raise_validation_error(f"Pipe '{request_data.pipe_ref}' not found in the submitted closure: {exc}")
+        # so the caller can own it: a pipe ref naming nothing in the closure is an input 422, not an
+        # invalid-closure verdict — nothing about the closure is wrong. It is re-raised as the entry-lookup
+        # class the slice miss already is, so its `error_type` matches `resolve_requested_pipe`'s refusals.
+        msg = f"Pipe '{request_data.pipe_ref}' not found in the submitted closure: {exc}"
+        raise EntryPipeNotFoundError(msg) from exc
 
     # Success: validate_bundle left its library loaded + current. Build everything from it, then own its teardown.
     library_id = get_current_library_id_or_none()

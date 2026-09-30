@@ -32,10 +32,14 @@ router = APIRouter(tags=["pipe-io"])
 class PipeIORequest(MthdsPipeRequest):
     """The pipe I/O request: the crate routes' closure selector and pipe selector, plus the whole-method and echo opt-ins.
 
-    It declares no `method_id`: the hosted catalog selector is resolved by the platform, which
-    forwards the stored files as `files[]`, so the runner never sees it. It takes no `views` either,
-    since the valid arm always carries all three artifacts.
+    The hosted catalog selector is replaced by `files` before the request reaches the runner, so this
+    request has no field for it. It takes no `views` either, since the valid arm always carries all
+    three artifacts.
     """
+
+    # This docstring is published as the schema's description, so it must never name the hosted
+    # selector field: the runner's OpenAPI declares no such field, not even in prose, and
+    # `test_openapi_contract.py` pins the whole document free of that name.
 
     all_pipes: bool = Field(
         default=False,
@@ -127,9 +131,11 @@ async def pipe_io(request_data: PipeIORequest) -> JSONResponse:
       `include_files` is true.
     - **Invalid verdict (200, `is_valid: false`):** the closure could not be parsed, loaded, or
       statically validated — the crate verdict, carrying no artifact, no selection and no files.
-    - **No verdict (non-2xx):** a malformed body, neither or both closure selectors, an unknown or
-      ambiguous `pipe_ref`, and a single-pipe request whose chain finds no entry pipe or several are
-      request-shape 422s; the `method_ref` fetch outcomes are those of `/resolve` (404, 422, 501);
+    - **No verdict (non-2xx):** a malformed body and neither or both closure selectors are
+      request-shape 422s (`ValidationError`); a selection refusal is an input 422 named for its failure,
+      `EntryPipeNotFoundError` for an unknown `pipe_ref` or a single-pipe request whose chain finds no
+      entry pipe, `EntryPipeAmbiguousError` for an ambiguous one or a chain that finds several; the
+      `method_ref` fetch outcomes are those of `/resolve` (404, 422, 501);
       an artifact that cannot be derived (`PipeIOContractError`) is a 500. All RFC 7807
       `application/problem+json` via the global handlers.
     """

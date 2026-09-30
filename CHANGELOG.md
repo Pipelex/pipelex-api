@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **A pipe selection refusal names its failure in `error_type`**: on `POST /v1/pipe-io` and `POST /v1/build/inputs`, `/v1/build/output` and `/v1/build/runner`, a selection the server cannot make is still an input `422`, but its `error_type` is now `EntryPipeNotFoundError` (a `pipe_ref` naming no pipe, a manifest `main_pipe` the closure lacks, or no `pipe_ref` over a closure declaring no `main_pipe`) or `EntryPipeAmbiguousError` (a bare code matching several domains, or no `pipe_ref` over a closure whose domains declare several `main_pipe`s), the values the run routes answer for an unknown or ambiguous `pipe_code`, where it was the `ValidationError` of a malformed request. The problem's `type` and `title` follow the class, and so does its `user_action`, except that the two refusals of an omitted `pipe_ref` ask for a `pipe_ref` instead of a pipe-code check.
+- **The published OpenAPI never names the hosted selector field**: the `POST /v1/pipe-io` request schema's description no longer names the hosted catalog's selector field, and a test keeps that name out of the whole document.
+
 ## [v0.33.0] - 2026-09-30
 
 ### Highlights
