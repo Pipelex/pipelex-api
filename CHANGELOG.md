@@ -1,6 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [v0.33.0] - 2026-09-30
+
+### Highlights
+
+**A method's I/O artifacts without a validation.** `POST /v1/pipe-io` returns the pipe I/O contracts, input form and output form of one pipe, or of every pipe, off one load of the method and with no dry run, so a caller that shows a method, prepares its inputs or generates types for it no longer pays for a `/v1/validate` sweep. The per-pipe selectors also stop calling an ambiguous pipe missing.
 
 ### Added
 
