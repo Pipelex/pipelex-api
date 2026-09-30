@@ -45,6 +45,12 @@ STUB_METHOD_REF = f"{STUB_METHOD_ADDRESS}@v0.1.0"
 # The three artifact maps the valid arm carries, sharing one key set.
 ARTIFACT_FIELDS = ("pipe_io_contracts", "input_form", "output_form")
 
+# The `error_type`s of a no-verdict 422: a malformed request, and the two pipe-selection refusals,
+# which carry the pipelex entry-lookup class names the run routes answer for the same failure.
+REQUEST_SHAPE_ERROR = "ValidationError"
+PIPE_NOT_FOUND_ERROR = "EntryPipeNotFoundError"
+PIPE_AMBIGUOUS_ERROR = "EntryPipeAmbiguousError"
+
 # Every field only the valid arm carries: the invalid arm is the crate verdict alone.
 VALID_ARM_ONLY_FIELDS = ("pipe_ref", "default_pipe_ref", *ARTIFACT_FIELDS, "pending_signatures", "is_runnable", "files")
 
@@ -75,11 +81,12 @@ def _assert_keys(body: dict[str, Any], expected: set[str]) -> None:
         assert set(body[field_name]) == expected, f"`{field_name}` keyed by {sorted(body[field_name])}, expected {sorted(expected)}"
 
 
-def _assert_request_shape_422(response: Any) -> str:
+def _assert_input_422(response: Any, *, error_type: str) -> str:
+    """Assert a no-verdict input 422 of the given `error_type`, and return its detail."""
     assert response.status_code == 422, response.text
     assert response.headers["content-type"] == "application/problem+json"
     problem = response.json()
-    assert problem["error_type"] == "ValidationError"
+    assert problem["error_type"] == error_type, response.text
     assert problem["error_domain"] == "input"
     assert "is_valid" not in problem
     detail: str = problem["detail"]
@@ -210,7 +217,7 @@ class TestPipeIoRoute:
         assert body["pipe_ref"] is None
         assert body["default_pipe_ref"] is None
         _assert_keys(body, {"other.shout"})
-        detail = _assert_request_shape_422(client.post(PIPE_IO_PATH, json={"method_ref": STUB_METHOD_REF}))
+        detail = _assert_input_422(client.post(PIPE_IO_PATH, json={"method_ref": STUB_METHOD_REF}), error_type=PIPE_NOT_FOUND_ERROR)
         assert "manifest" in detail
         assert "not found" in detail
 
@@ -219,7 +226,7 @@ class TestPipeIoRoute:
         # ambiguous, naming both candidates, and a whole-method request states no default.
         install_method_package(files={"smoke.mthds": VALID_MTHDS, "twin.mthds": COLLIDING_ECHO_LIST_MTHDS})
         client = _build_client()
-        detail = _assert_request_shape_422(client.post(PIPE_IO_PATH, json={"method_ref": STUB_METHOD_REF}))
+        detail = _assert_input_422(client.post(PIPE_IO_PATH, json={"method_ref": STUB_METHOD_REF}), error_type=PIPE_AMBIGUOUS_ERROR)
         assert "manifest" in detail
         assert "several domains" in detail
         assert "smoke.echo" in detail
@@ -233,7 +240,7 @@ class TestPipeIoRoute:
     def test_an_ambiguous_pipe_ref_says_ambiguous(self, all_pipes: bool):
         client = _build_client()
         payload = {"files": _files(VALID_MTHDS, COLLIDING_ECHO_LIST_MTHDS), "pipe_ref": "echo", "all_pipes": all_pipes}
-        detail = _assert_request_shape_422(client.post(PIPE_IO_PATH, json=payload))
+        detail = _assert_input_422(client.post(PIPE_IO_PATH, json=payload), error_type=PIPE_AMBIGUOUS_ERROR)
         assert "Pipe 'echo'" in detail
         assert "several domains" in detail
         assert "smoke.echo" in detail
@@ -302,18 +309,33 @@ class TestPipeIoRoute:
             assert field_name not in body, f"the invalid arm never carries `{field_name}`"
 
     @pytest.mark.parametrize(
-        ("contents", "request_fields", "detail_fragment"),
+        ("contents", "request_fields", "error_type", "detail_fragment"),
         [
-            pytest.param((VALID_MTHDS,), {"pipe_ref": "smoke.not_a_pipe"}, "not found", id="unknown-ref"),
-            pytest.param((VALID_MTHDS,), {"pipe_ref": "smoke.not_a_pipe", "all_pipes": True}, "not found", id="unknown-ref-under-all-pipes"),
-            pytest.param((NO_MAIN_PIPE_MTHDS,), {}, "declares no `main_pipe`", id="no-entry-pipe"),
-            pytest.param((VALID_MTHDS, SECOND_MAIN_PIPE_MTHDS), {}, "several `main_pipe`s", id="several-entry-pipes"),
+            pytest.param((VALID_MTHDS,), {"pipe_ref": "smoke.not_a_pipe"}, PIPE_NOT_FOUND_ERROR, "not found", id="unknown-ref"),
+            pytest.param(
+                (VALID_MTHDS,),
+                {"pipe_ref": "smoke.not_a_pipe", "all_pipes": True},
+                PIPE_NOT_FOUND_ERROR,
+                "not found",
+                id="unknown-ref-under-all-pipes",
+            ),
+            pytest.param((NO_MAIN_PIPE_MTHDS,), {}, PIPE_NOT_FOUND_ERROR, "declares no `main_pipe`", id="no-entry-pipe"),
+            pytest.param((VALID_MTHDS, SECOND_MAIN_PIPE_MTHDS), {}, PIPE_AMBIGUOUS_ERROR, "several `main_pipe`s", id="several-entry-pipes"),
         ],
     )
-    def test_selection_refusals_are_request_shape_422s(self, contents: tuple[str, ...], request_fields: dict[str, Any], detail_fragment: str):
+    def test_selection_refusals_carry_the_entry_lookup_error_type(
+        self, contents: tuple[str, ...], request_fields: dict[str, Any], error_type: str, detail_fragment: str
+    ):
+        # A selection refusal is an input 422 like a malformed request, but its `error_type` is the
+        # pipelex entry-lookup class the run routes answer for the same failure, so a client branches
+        # on it; its problem `type` and its `user_action` name the selection too.
         client = _build_client()
-        detail = _assert_request_shape_422(client.post(PIPE_IO_PATH, json={"files": _files(*contents), **request_fields}))
+        response = client.post(PIPE_IO_PATH, json={"files": _files(*contents), **request_fields})
+        detail = _assert_input_422(response, error_type=error_type)
         assert detail_fragment in detail
+        problem = response.json()
+        assert problem["type"] != client.post(PIPE_IO_PATH, json={}).json()["type"], "a selection refusal must not share the request-shape type"
+        assert problem["user_action"]["kind"] == "change_input"
 
     @pytest.mark.parametrize(
         "payload",
@@ -325,7 +347,7 @@ class TestPipeIoRoute:
     )
     def test_closure_selector_xor_is_a_request_shape_422(self, payload: dict[str, Any]):
         client = _build_client()
-        _assert_request_shape_422(client.post(PIPE_IO_PATH, json=payload))
+        _assert_input_422(client.post(PIPE_IO_PATH, json=payload), error_type=REQUEST_SHAPE_ERROR)
 
     @pytest.mark.parametrize(
         ("contents", "request_fields"),

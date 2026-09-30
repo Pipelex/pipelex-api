@@ -15,13 +15,13 @@ IO, so a valid verdict there says the closure is structurally sound, never that 
 """
 
 from enum import StrEnum
-from typing import Literal, NamedTuple
+from typing import Literal, NamedTuple, NoReturn
 
 from fastapi.responses import JSONResponse
 from pipelex.base_exceptions import ErrorReport, ValidationErrorItem
 from pipelex.interpreter_hub import clear_current_library, get_current_library_id_or_none, get_library_manager, get_required_entry_pipe
 from pipelex.libraries.library_crate import LibraryCrate
-from pipelex.libraries.pipe.exceptions import EntryPipeAmbiguousError, PipeNotFoundError
+from pipelex.libraries.pipe.exceptions import EntryPipeAmbiguousError, EntryPipeNotFoundError, PipeNotFoundError
 from pipelex.methods.method_ref import looks_like_method_ref
 from pipelex.pipe_machinery.pipe_abstract import PipeAbstract
 from pipelex.pipeline.resolve_bundle import resolve_crate_from_contents
@@ -29,7 +29,7 @@ from pipelex.tools.typing.pydantic_utils import empty_list_factory_of
 from pydantic import BaseModel, Field
 
 from api.error_types import ErrorType
-from api.errors import raise_not_implemented, raise_validation_error
+from api.errors import raise_not_implemented
 from api.method_source import fetch_method_mthds_files
 from api.schemas.models import MthdsFileItem, MthdsFilesRequest
 
@@ -167,11 +167,21 @@ class RequestedPipe(NamedTuple):
     """The live pipe, read from the library `resolve_requested_crate` left loaded + current."""
 
 
+class PipeSelectionMissKind(StrEnum):
+    """Why a selection chain link selected no pipe: the two failures the engine's entry lookup names."""
+
+    NOT_FOUND = "not_found"
+    AMBIGUOUS = "ambiguous"
+
+
 class PipeSelectionMiss(NamedTuple):
     """A link of the pipe selection chain that selected no pipe, with the refusal a selection answers."""
 
+    kind: PipeSelectionMissKind
+    """Which entry-lookup failure this is, which picks the pipelex error class the refusal is raised as."""
+
     message: str
-    """The request-shape `422` detail a selection that depends on this link raises."""
+    """The detail of the `422` a selection that depends on this link raises."""
 
 
 class _SelectorOrigin(StrEnum):
@@ -187,8 +197,9 @@ def resolve_requested_pipe(crate: LibraryCrate, *, pipe_ref: str | None, manifes
 
     The request's `pipe_ref` wins; omitted, the default chain (`select_default_pipe`) decides. Every
     failed selection — an unknown ref, an ambiguous one, a chain that finds no entry pipe or several —
-    is a request-shape 422: nothing about the *closure* is wrong in any of them, so none of them is an
-    invalid-crate verdict.
+    is an input-domain 422 rather than an invalid-crate verdict, since nothing about the *closure* is
+    wrong in any of them. It is raised as the engine's own entry-lookup error class, so its
+    `error_type` is the one the run routes answer for the same failure (see `_raise_selection_refusal`).
 
     Must be called while the library `resolve_requested_crate` opened is still loaded + current.
     """
@@ -197,8 +208,30 @@ def resolve_requested_pipe(crate: LibraryCrate, *, pipe_ref: str | None, manifes
     else:
         selected = select_default_pipe(crate, manifest_main_pipe=manifest_main_pipe)
     if isinstance(selected, PipeSelectionMiss):
-        raise_validation_error(selected.message)
+        _raise_selection_refusal(selected)
     return selected
+
+
+def _raise_selection_refusal(miss: PipeSelectionMiss) -> NoReturn:
+    """Raise a selection miss as the pipelex entry-lookup error class that names its failure.
+
+    A selection refusal must not share `ValidationError` with a malformed request, or a client has no
+    field to tell the two apart. So it is raised as `EntryPipeNotFoundError` or
+    `EntryPipeAmbiguousError`, the classes the engine's entry lookup raises and the run routes answer
+    with for an unknown or ambiguous `pipe_code`. The global `PipelexError` handler then renders it —
+    the class name as `error_type`, the INPUT domain as a 422, the class's `user_action` — exactly as
+    it renders the run routes' refusal. Both classes declare their messages caller-facing, which every
+    message built here honours: it names the caller's selector, the manifest's `main_pipe`, or the
+    qualified refs of the closure the caller submitted, and nothing from a host library.
+
+    The no-entry-pipe miss is a not-found and the several-`main_pipe`s miss an ambiguity, the way the
+    pipe-selector design classifies them.
+    """
+    match miss.kind:
+        case PipeSelectionMissKind.NOT_FOUND:
+            raise EntryPipeNotFoundError(miss.message)
+        case PipeSelectionMissKind.AMBIGUOUS:
+            raise EntryPipeAmbiguousError(miss.message)
 
 
 def select_default_pipe(crate: LibraryCrate, *, manifest_main_pipe: str | None) -> RequestedPipe | PipeSelectionMiss:
@@ -226,11 +259,15 @@ def select_default_pipe(crate: LibraryCrate, *, manifest_main_pipe: str | None) 
         return _select_entry_pipe(manifest_main_pipe, origin=_SelectorOrigin.MANIFEST)
     candidates = [f"{domain_code}.{domain.main_pipe}" for domain_code, domain in crate.domains.items() if domain.main_pipe]
     if not candidates:
-        return PipeSelectionMiss(message="No `pipe_ref` was given and the closure declares no `main_pipe` — name the pipe explicitly.")
+        return PipeSelectionMiss(
+            kind=PipeSelectionMissKind.NOT_FOUND,
+            message="No `pipe_ref` was given and the closure declares no `main_pipe` — name the pipe explicitly.",
+        )
     if len(candidates) > 1:
         joined = ", ".join(sorted(candidates))
         return PipeSelectionMiss(
-            message=f"No `pipe_ref` was given and the closure declares several `main_pipe`s ({joined}) — name the pipe explicitly."
+            kind=PipeSelectionMissKind.AMBIGUOUS,
+            message=f"No `pipe_ref` was given and the closure declares several `main_pipe`s ({joined}) — name the pipe explicitly.",
         )
     return _select_entry_pipe(candidates[0], origin=_SelectorOrigin.CLOSURE)
 
@@ -262,9 +299,12 @@ def _select_entry_pipe(selector: str, *, origin: _SelectorOrigin) -> RequestedPi
     try:
         the_pipe = get_required_entry_pipe(pipe_code=selector)
     except EntryPipeAmbiguousError as exc:
-        return PipeSelectionMiss(message=f"{described} matches pipes in several domains of {scope}, so it selects none: {exc}")
+        return PipeSelectionMiss(
+            kind=PipeSelectionMissKind.AMBIGUOUS,
+            message=f"{described} matches pipes in several domains of {scope}, so it selects none: {exc}",
+        )
     except PipeNotFoundError as exc:
-        return PipeSelectionMiss(message=f"{described} not found in {scope}: {exc}")
+        return PipeSelectionMiss(kind=PipeSelectionMissKind.NOT_FOUND, message=f"{described} not found in {scope}: {exc}")
     return RequestedPipe(ref=the_pipe.pipe_ref, pipe=the_pipe)
 
 

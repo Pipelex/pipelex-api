@@ -33,11 +33,12 @@ There is no `views` field, because the valid arm always carries all three artifa
 
 The selection chain is the one the build routes share: the request's `pipe_ref`; else a fetched package's manifest `main_pipe`; else the closure's own `main_pipe` declaration, when exactly one domain declares one. The chain stops at the first link that is present, so a manifest `main_pipe` the closure does not declare, or declares in several domains, is a failed selection rather than a fall-through to the closure's declarations.
 
-The closure is resolved first, so an invalid closure answers its invalid verdict whatever `pipe_ref` names. For a valid closure these selections are refused with a request-shape `422` `problem+json`:
+The closure is resolved first, so an invalid closure answers its invalid verdict whatever `pipe_ref` names. For a valid closure these selections are refused with an input `422` `problem+json`. Its `error_type` is the pipelex entry-lookup class the run routes answer for the same failure, never the `ValidationError` of a malformed request, so a client tells a selection refusal from a request-shape one by that field:
 
-- a `pipe_ref` that names no pipe of the closure (the detail says it was not found);
-- a bare code that matches pipes in several domains, whether the request or the manifest spelled it (the detail names the candidates to choose from);
-- without `all_pipes`, a request with no `pipe_ref` whose chain finds no entry pipe, or several.
+- `EntryPipeNotFoundError` for a `pipe_ref` that names no pipe of the closure, for a manifest `main_pipe` the closure does not declare, and, without `all_pipes`, for a request with no `pipe_ref` whose closure declares no `main_pipe`;
+- `EntryPipeAmbiguousError` for a bare code that matches pipes in several domains, whether the request or the manifest spelled it, and, without `all_pipes`, for a request with no `pipe_ref` whose closure declares several `main_pipe`s.
+
+The `detail` says which case it is and, for an ambiguity, names the qualified refs to choose from; the candidates are in the `detail` alone, with no structured list, as on the run routes. The problem's `type` and `title` are the class's, and its `user_action` names the fix.
 
 A bare `pipe_ref` that matches one pipe (`echo` where `smoke.echo` is meant) is still resolved today, and the valid arm reports the qualified ref.
 
@@ -78,7 +79,7 @@ An invalid closure is the `200` crate verdict `/v1/resolve` gives: `is_valid: fa
 
 Every non-2xx is RFC 7807 `application/problem+json` (see [Error Responses](error-responses.md)):
 
-- **`422`** for a malformed body, neither or both closure selectors, an over-limit file, and the selection refusals above.
+- **`422`** for a malformed body, neither or both closure selectors and an over-limit file, all `ValidationError`, and for the selection refusals above, `EntryPipeNotFoundError` or `EntryPipeAmbiguousError`.
 - **The `method_ref` fetch outcomes**, exactly as on `/v1/resolve`: `404` `MethodPackageNotFoundError` when no package in the fetched repository matches the address, `422` for a reference that does not parse or a fetch the server cannot accept, and `501` `MethodRefNotSupported` for a registry-form reference. The route reads only a package's `.mthds` files, so the custom-code and structures `403`s of `/v1/validate` and the run routes never arise here.
 - **`401` / `403`** for authentication, and **`413`** for a body over the size limit.
 - **`500`** when an artifact cannot be derived: a pipe whose input or output JSON Schema cannot be rendered raises `PipeIOContractError`, which answers `500` as it does on `/v1/validate` — a fault of the tool, not a verdict about the method.

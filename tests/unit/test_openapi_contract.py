@@ -20,6 +20,7 @@ THESE tests rather than the collection of every module that transitively imports
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -142,6 +143,13 @@ class TestOpenApiErrorContract:
         """
         for path in ("/v1/resolve", "/v1/codegen", "/v1/pipe-io"):
             assert "x-mthds-protocol" not in openapi_schema["paths"][path]["post"]
+
+    def test_the_document_never_names_the_hosted_selector(self, openapi_schema: dict[str, Any]):
+        """The runner declares nothing of the hosted layer, not even in prose: `method_id` is the hosted
+        catalog selector, which the platform replaces with `files` before a request reaches the runner,
+        so the name appears nowhere in the document — no field, no description, no example.
+        """
+        assert "method_id" not in json.dumps(openapi_schema)
 
     def test_pipe_io_request_declares_no_hosted_selector_and_no_views(self, openapi_schema: dict[str, Any]):
         """The platform resolves the hosted `method_id` into `files[]` before forwarding, so the runner

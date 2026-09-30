@@ -83,12 +83,12 @@ paths:
         \ the trust chain `/codegen`'s valid arm\npromises (see `CodegenRouteKind`).\n\nResponse contract (the `/validate`\
         \ discipline):\n\n- **Valid verdict (200, `is_valid: true`):** the template, in `inputs` or `inputs_toml` per `format`.\n\
         - **Invalid verdict (200, `is_valid: false`):** the closure could not be parsed, loaded, or\n  validated — `validation_errors[]`\
-        \ from pipelex's one shared builder; no template exists.\n- **No verdict (non-2xx):** an unknown pipe ref, an omitted\
-        \ `pipe_ref` that nothing defaults (no\n  fetched-manifest `main_pipe`, and a closure declaring no — or several —\
-        \ `main_pipe`), or a\n  malformed closure selector is a request-shape 422 problem+json; a registry-form `method_ref`\n\
-        \  is a 501 until server-side method-registry resolution exists.\n\nAn omitted `pipe_ref` defaults the way a run by\
-        \ address does: to the fetched package manifest's\n`main_pipe` on a `method_ref` request, else to the closure's own\
-        \ declared `main_pipe`."
+        \ from pipelex's one shared builder; no template exists.\n- **No verdict (non-2xx):** a selection refusal — an unknown\
+        \ pipe ref, or an omitted `pipe_ref` that\n  nothing defaults (no fetched-manifest `main_pipe`, and a closure declaring\
+        \ no — or several —\n  `main_pipe`) — is an input 422 whose `error_type` is `EntryPipeNotFoundError` or\n  `EntryPipeAmbiguousError`;\
+        \ a malformed closure selector is a request-shape 422 problem+json; a\n  registry-form `method_ref` is a 501 until\
+        \ server-side method-registry resolution exists.\n\nAn omitted `pipe_ref` defaults the way a run by address does:\
+        \ to the fetched package manifest's\n`main_pipe` on a `method_ref` request, else to the closure's own declared `main_pipe`."
       operationId: build_inputs_v1_build_inputs_post
       requestBody:
         content:
@@ -172,12 +172,13 @@ paths:
         \ a promise the pipe runs. Ask `/validate` for that.\n\nResponse contract (the `/validate` discipline):\n\n- **Valid\
         \ verdict (200, `is_valid: true`):** the representation, in `output` or `output_python` per `format`.\n- **Invalid\
         \ verdict (200, `is_valid: false`):** the closure could not be parsed, loaded, or\n  validated — `validation_errors[]`;\
-        \ no representation exists.\n- **No verdict (non-2xx):** an unknown pipe ref, an omitted `pipe_ref` that nothing defaults\
-        \ (no\n  fetched-manifest `main_pipe`, and a closure declaring no — or several — `main_pipe`), a pipe\n  whose `native.Anything`\
-        \ output has no determinable shape, or a malformed closure selector is a\n  request-shape 422 problem+json; a registry-form\
-        \ `method_ref` is a 501 until server-side\n  method-registry resolution exists.\n\nAn omitted `pipe_ref` defaults\
-        \ the way a run by address does: to the fetched package manifest's\n`main_pipe` on a `method_ref` request, else to\
-        \ the closure's own declared `main_pipe`."
+        \ no representation exists.\n- **No verdict (non-2xx):** a selection refusal — an unknown pipe ref, or an omitted\
+        \ `pipe_ref` that\n  nothing defaults (no fetched-manifest `main_pipe`, and a closure declaring no — or several —\n\
+        \  `main_pipe`) — is an input 422 whose `error_type` is `EntryPipeNotFoundError` or\n  `EntryPipeAmbiguousError`;\
+        \ a pipe whose `native.Anything` output has no determinable shape, or a\n  malformed closure selector, is a request-shape\
+        \ 422 problem+json; a registry-form `method_ref` is a 501 until server-side\n  method-registry resolution exists.\n\
+        \nAn omitted `pipe_ref` defaults the way a run by address does: to the fetched package manifest's\n`main_pipe` on\
+        \ a `method_ref` request, else to the closure's own declared `main_pipe`."
       operationId: build_output_v1_build_output_post
       requestBody:
         content:
@@ -286,13 +287,15 @@ paths:
 
         the requested pipe — is a produced verdict: a **200** `is_valid: false` with the structured
 
-        `validation_errors[]`. Non-2xx is reserved for no-verdict conditions: a request-shape 422 (an
+        `validation_errors[]`. Non-2xx is reserved for no-verdict conditions: a selection refusal (an
 
         unknown pipe ref, an omitted `pipe_ref` that nothing defaults — no fetched-manifest `main_pipe`,
 
-        and a closure declaring no, or several, `main_pipe` — or a requested pipe whose cross-package
+        and a closure declaring no, or several, `main_pipe`), an input 422 whose `error_type` is
 
-        dependencies are absent from the request), a 501 for a registry-form `method_ref`, auth, server
+        `EntryPipeNotFoundError` or `EntryPipeAmbiguousError`; a request-shape 422 for a requested pipe
+
+        whose cross-package dependencies are absent from the request; a 501 for a registry-form `method_ref`, auth, server
 
         fault — RFC 7807 via the global handlers.'
       operationId: build_runner_v1_build_runner_post
@@ -1095,10 +1098,11 @@ paths:
         \ `pipe_ref`,\n  beside `pipe_ref`, `default_pipe_ref`, `pending_signatures`, `is_runnable`, and `files` when\n  `include_files`\
         \ is true.\n- **Invalid verdict (200, `is_valid: false`):** the closure could not be parsed, loaded, or\n  statically\
         \ validated — the crate verdict, carrying no artifact, no selection and no files.\n- **No verdict (non-2xx):** a malformed\
-        \ body, neither or both closure selectors, an unknown or\n  ambiguous `pipe_ref`, and a single-pipe request whose\
-        \ chain finds no entry pipe or several are\n  request-shape 422s; the `method_ref` fetch outcomes are those of `/resolve`\
-        \ (404, 422, 501);\n  an artifact that cannot be derived (`PipeIOContractError`) is a 500. All RFC 7807\n  `application/problem+json`\
-        \ via the global handlers."
+        \ body and neither or both closure selectors are\n  request-shape 422s (`ValidationError`); a selection refusal is\
+        \ an input 422 named for its failure,\n  `EntryPipeNotFoundError` for an unknown `pipe_ref` or a single-pipe request\
+        \ whose chain finds no\n  entry pipe, `EntryPipeAmbiguousError` for an ambiguous one or a chain that finds several;\
+        \ the\n  `method_ref` fetch outcomes are those of `/resolve` (404, 422, 501);\n  an artifact that cannot be derived\
+        \ (`PipeIOContractError`) is a 500. All RFC 7807\n  `application/problem+json` via the global handlers."
       operationId: pipe_io_v1_pipe_io_post
       requestBody:
         content:
@@ -5285,11 +5289,11 @@ components:
         echo opt-ins.
 
 
-        It declares no `method_id`: the hosted catalog selector is resolved by the platform, which
+        The hosted catalog selector is replaced by `files` before the request reaches the runner, so this
 
-        forwards the stored files as `files[]`, so the runner never sees it. It takes no `views` either,
+        request has no field for it. It takes no `views` either, since the valid arm always carries all
 
-        since the valid arm always carries all three artifacts.'
+        three artifacts.'
     PipeIOValidReport:
       properties:
         is_valid:
