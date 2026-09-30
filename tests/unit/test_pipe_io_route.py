@@ -309,26 +309,44 @@ class TestPipeIoRoute:
             assert field_name not in body, f"the invalid arm never carries `{field_name}`"
 
     @pytest.mark.parametrize(
-        ("contents", "request_fields", "error_type", "detail_fragment"),
+        ("contents", "request_fields", "error_type", "detail_fragment", "fix_fragment"),
         [
-            pytest.param((VALID_MTHDS,), {"pipe_ref": "smoke.not_a_pipe"}, PIPE_NOT_FOUND_ERROR, "not found", id="unknown-ref"),
+            pytest.param(
+                (VALID_MTHDS,), {"pipe_ref": "smoke.not_a_pipe"}, PIPE_NOT_FOUND_ERROR, "not found", "Check the pipe code", id="unknown-ref"
+            ),
             pytest.param(
                 (VALID_MTHDS,),
                 {"pipe_ref": "smoke.not_a_pipe", "all_pipes": True},
                 PIPE_NOT_FOUND_ERROR,
                 "not found",
+                "Check the pipe code",
                 id="unknown-ref-under-all-pipes",
             ),
-            pytest.param((NO_MAIN_PIPE_MTHDS,), {}, PIPE_NOT_FOUND_ERROR, "declares no `main_pipe`", id="no-entry-pipe"),
-            pytest.param((VALID_MTHDS, SECOND_MAIN_PIPE_MTHDS), {}, PIPE_AMBIGUOUS_ERROR, "several `main_pipe`s", id="several-entry-pipes"),
+            pytest.param(
+                (NO_MAIN_PIPE_MTHDS,),
+                {},
+                PIPE_NOT_FOUND_ERROR,
+                "declares no `main_pipe`",
+                "Send a `pipe_ref` naming the pipe to select",
+                id="no-entry-pipe",
+            ),
+            pytest.param(
+                (VALID_MTHDS, SECOND_MAIN_PIPE_MTHDS),
+                {},
+                PIPE_AMBIGUOUS_ERROR,
+                "several `main_pipe`s",
+                "one of the declared `main_pipe`s",
+                id="several-entry-pipes",
+            ),
         ],
     )
     def test_selection_refusals_carry_the_entry_lookup_error_type(
-        self, contents: tuple[str, ...], request_fields: dict[str, Any], error_type: str, detail_fragment: str
+        self, contents: tuple[str, ...], request_fields: dict[str, Any], error_type: str, detail_fragment: str, fix_fragment: str
     ):
         # A selection refusal is an input 422 like a malformed request, but its `error_type` is the
-        # pipelex entry-lookup class the run routes answer for the same failure, so a client branches
-        # on it; its problem `type` and its `user_action` name the selection too.
+        # pipelex entry-lookup class that names the failure, so a client branches on it; its problem
+        # `type` names the selection too, and its `user_action` names the fix for this very miss —
+        # a default chain that finds no entry pipe, or several, is no pipe-code typo.
         client = _build_client()
         response = client.post(PIPE_IO_PATH, json={"files": _files(*contents), **request_fields})
         detail = _assert_input_422(response, error_type=error_type)
@@ -336,6 +354,7 @@ class TestPipeIoRoute:
         problem = response.json()
         assert problem["type"] != client.post(PIPE_IO_PATH, json={}).json()["type"], "a selection refusal must not share the request-shape type"
         assert problem["user_action"]["kind"] == "change_input"
+        assert fix_fragment in problem["user_action"]["detail"]
 
     @pytest.mark.parametrize(
         "payload",

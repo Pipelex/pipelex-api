@@ -38,7 +38,7 @@ class PipeIORequest(MthdsPipeRequest):
     """
 
     # This docstring is published as the schema's description, so it must never name the hosted
-    # selector: the runner's OpenAPI declares nothing of the hosted layer, not even in prose, and
+    # selector field: the runner's OpenAPI declares no such field, not even in prose, and
     # `test_openapi_contract.py` pins the whole document free of that name.
 
     all_pipes: bool = Field(

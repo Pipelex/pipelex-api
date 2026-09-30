@@ -19,6 +19,7 @@ from typing import Literal, NamedTuple, NoReturn
 
 from fastapi.responses import JSONResponse
 from pipelex.base_exceptions import ErrorReport, ValidationErrorItem
+from pipelex.cogt.inference.error_classification import UserAction, UserActionKind
 from pipelex.interpreter_hub import clear_current_library, get_current_library_id_or_none, get_library_manager, get_required_entry_pipe
 from pipelex.libraries.library_crate import LibraryCrate
 from pipelex.libraries.pipe.exceptions import EntryPipeAmbiguousError, EntryPipeNotFoundError, PipeNotFoundError
@@ -183,6 +184,9 @@ class PipeSelectionMiss(NamedTuple):
     message: str
     """The detail of the `422` a selection that depends on this link raises."""
 
+    user_action: UserAction | None = None
+    """The fix to name instead of the error class's own, when the class's is wrong for this miss."""
+
 
 class _SelectorOrigin(StrEnum):
     """Where a pipe selector came from, which is what its refusal must tell the caller."""
@@ -198,8 +202,10 @@ def resolve_requested_pipe(crate: LibraryCrate, *, pipe_ref: str | None, manifes
     The request's `pipe_ref` wins; omitted, the default chain (`select_default_pipe`) decides. Every
     failed selection — an unknown ref, an ambiguous one, a chain that finds no entry pipe or several —
     is an input-domain 422 rather than an invalid-crate verdict, since nothing about the *closure* is
-    wrong in any of them. It is raised as the engine's own entry-lookup error class, so its
-    `error_type` is the one the run routes answer for the same failure (see `_raise_selection_refusal`).
+    wrong in any of them. It is raised as the engine's own entry-lookup error class (see
+    `_raise_selection_refusal`), so an unknown or ambiguous ref carries the `error_type` the run routes
+    answer for the same `pipe_code`. A chain finding no entry pipe or several has no run-route twin to
+    match: this route refuses both the way the pipe-selector design classifies them.
 
     Must be called while the library `resolve_requested_crate` opened is still loaded + current.
     """
@@ -225,13 +231,14 @@ def _raise_selection_refusal(miss: PipeSelectionMiss) -> NoReturn:
     qualified refs of the closure the caller submitted, and nothing from a host library.
 
     The no-entry-pipe miss is a not-found and the several-`main_pipe`s miss an ambiguity, the way the
-    pipe-selector design classifies them.
+    pipe-selector design classifies them. Neither is a typo in a pipe code, so each carries its own
+    `user_action`, which replaces the class's code-typo advice for that one error.
     """
     match miss.kind:
         case PipeSelectionMissKind.NOT_FOUND:
-            raise EntryPipeNotFoundError(miss.message)
+            raise EntryPipeNotFoundError(miss.message).as_caller_fault(user_action=miss.user_action)
         case PipeSelectionMissKind.AMBIGUOUS:
-            raise EntryPipeAmbiguousError(miss.message)
+            raise EntryPipeAmbiguousError(miss.message).as_caller_fault(user_action=miss.user_action)
 
 
 def select_default_pipe(crate: LibraryCrate, *, manifest_main_pipe: str | None) -> RequestedPipe | PipeSelectionMiss:
@@ -262,12 +269,20 @@ def select_default_pipe(crate: LibraryCrate, *, manifest_main_pipe: str | None) 
         return PipeSelectionMiss(
             kind=PipeSelectionMissKind.NOT_FOUND,
             message="No `pipe_ref` was given and the closure declares no `main_pipe` — name the pipe explicitly.",
+            user_action=UserAction(
+                kind=UserActionKind.CHANGE_INPUT,
+                detail="Send a `pipe_ref` naming the pipe to select, since the closure declares no `main_pipe` to default to.",
+            ),
         )
     if len(candidates) > 1:
         joined = ", ".join(sorted(candidates))
         return PipeSelectionMiss(
             kind=PipeSelectionMissKind.AMBIGUOUS,
             message=f"No `pipe_ref` was given and the closure declares several `main_pipe`s ({joined}) — name the pipe explicitly.",
+            user_action=UserAction(
+                kind=UserActionKind.CHANGE_INPUT,
+                detail="Send a `pipe_ref` naming one of the declared `main_pipe`s.",
+            ),
         )
     return _select_entry_pipe(candidates[0], origin=_SelectorOrigin.CLOSURE)
 
