@@ -177,7 +177,7 @@ Start a pipeline execution and get its `pipeline_run_id` back with a `202` ack.
 
 When the pipeline completes, each URL in the list receives a POST carrying:
 
-- The completion payload in the body: `pipeline_run_id` (the protocol field), the delivery `status` (`"COMPLETED"` or `"FAILED"`), `result_url` (when results were stored), `error` (the raw `ErrorReport` dict on failure), plus the runtime's legacy `pipeline_run_id` key
+- A completion notice in the body, not the run's output: `pipeline_run_id`, the delivery `state` (`"COMPLETED"` or `"FAILED"`, also sent under the legacy `status` key), `result_url` (when results were stored: the storage key prefix under which the result files sit, not a fetchable URL) and `error` (the raw `ErrorReport` dict on failure). The receiver reads the results from storage under that prefix.
 - An **`X-Completion-Signature`** header — `HMAC-SHA256(secret, pipeline_run_id)` rendered as a hex digest
 
 **Verifying the signature on the receiver side**

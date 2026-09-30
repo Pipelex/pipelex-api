@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **The `callback_urls` description says what a completion webhook carries**: the OpenAPI description and the run docs said the runner posts the run's result to each callback URL; they now say the body is a completion notice (`pipeline_run_id`, `state` with its legacy `status` alias, the `result_url` storage key prefix and `error`), and that the results themselves stay in storage under that prefix. The description also says that the `X-Completion-Signature` header signs the run id, not the body.
+
 ## [v0.33.1] - 2026-09-30
 
 ### Fixed
