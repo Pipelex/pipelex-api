@@ -1465,6 +1465,15 @@ wheels = [
 ]
 
 [[package]]
+name = "linkify-it-py"
+version = "2.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/45/98/7a1a5f31fd5c7ba93e963b168e244b8e3dd705b3d2a718e3c3307583bf57/linkify_it_py-2.2.0.tar.gz", hash = "sha256:907acd2d17ac1fbb9ddb62c8957ccbd6158cac602231a15c3b0cd1e215f03cee", size = 32939, upload-time = "2026-08-29T07:07:08.305Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/13/d4/1152d1c7ab42d8b908be64fd200ddc870dc9d4925e951198702084aa1a7d/linkify_it_py-2.2.0-py3-none-any.whl", hash = "sha256:3adc40eb5af300b2605fcfdb968c24e1d780a90f1f2221af7c15e5111e94d443", size = 21971, upload-time = "2026-08-29T07:07:07.164Z" },
+]
+
+[[package]]
 name = "markdown"
 version = "3.10.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1483,6 +1492,11 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/06/ff/7841249c247aa650a76b9ee4bbaeae59370dc8bfd2f6c01f3630c35eb134/markdown_it_py-4.2.0.tar.gz", hash = "sha256:04a21681d6fbb623de53f6f364d352309d4094dd4194040a10fd51833e418d49", size = 82454, upload-time = "2026-05-07T12:08:28.36Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/81/4da04ced5a082363ecfa159c010d200ecbd959ae410c10c0264a38cac0f5/markdown_it_py-4.2.0-py3-none-any.whl", hash = "sha256:9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a", size = 91687, upload-time = "2026-05-07T12:08:27.182Z" },
+]
+
+[package.optional-dependencies]
+linkify = [
+    { name = "linkify-it-py" },
 ]
 
 [[package]]
@@ -2296,7 +2310,7 @@ wheels = [
 [[package]]
 name = "pipelex"
 version = "0.70.0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/Pipelex/pipelex.git?rev=84cb219d9d2f01bd0809ad0d2c9240265a33186b#84cb219d9d2f01bd0809ad0d2c9240265a33186b" }
 dependencies = [
     { name = "aiofiles" },
     { name = "annotated-types" },
@@ -2308,7 +2322,7 @@ dependencies = [
     { name = "jinja2" },
     { name = "json2html" },
     { name = "kajson" },
-    { name = "markdown" },
+    { name = "markdown-it-py", extra = ["linkify"] },
     { name = "mthds" },
     { name = "networkx" },
     { name = "openai" },
@@ -2335,10 +2349,6 @@ dependencies = [
     { name = "typer" },
     { name = "typing-extensions" },
     { name = "urllib3" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/3b/d9/f911e57c6d7fe1dd9ad73d541f2f3a864b0dfd748ffaecd9a5f93ffd8c76/pipelex-0.70.0.tar.gz", hash = "sha256:425cff55ffcc0690dbf16a100e09dd6d4e70f94eb047c3deab49c222d70fc1f4", size = 1759810, upload-time = "2026-09-29T13:03:21.11Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/aa/02/23127c99e2d385d499d049c288051b3da938229227765375726fbc756274/pipelex-0.70.0-py3-none-any.whl", hash = "sha256:eb1de59dee04db852b20c10d8f6863fdb796b55f87a11a4242861a5ff69acda1", size = 2407814, upload-time = "2026-09-29T13:03:18.987Z" },
 ]
 
 [package.optional-dependencies]
@@ -2419,7 +2429,7 @@ requires-dist = [
     { name = "mkdocs-meta-manager", marker = "extra == 'docs'", specifier = "==1.1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.2" },
     { name = "pandas-stubs", marker = "extra == 'dev'", specifier = ">=2.2.3.241126" },
-    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal"], specifier = "==0.70.0" },
+    { name = "pipelex", extras = ["mistralai", "anthropic", "google", "google-genai", "bedrock", "fal"], git = "https://github.com/Pipelex/pipelex.git?rev=84cb219d9d2f01bd0809ad0d2c9240265a33186b" },
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.3.8" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.405" },

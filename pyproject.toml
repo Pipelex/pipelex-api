@@ -367,3 +367,8 @@ enable = [
   "W0101", # Unreachable code: Used when there is some code behind a "return" or "raise" statement, which will never be accessed.
 ]
 ignore = [".venv", "__pycache__", "build", "dist", ".git"]
+
+# TEST BRANCH ONLY — never merge. Runs the API on the unreleased pipelex branch
+# feature/Run-metadata-org-id (Pipelex/pipelex#1306), which sends x-pipelex-metadata to Manifold.
+[tool.uv.sources]
+pipelex = { git = "https://github.com/Pipelex/pipelex.git", rev = "84cb219d9d2f01bd0809ad0d2c9240265a33186b" }
