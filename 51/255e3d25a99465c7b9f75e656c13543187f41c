@@ -1,0 +1,21 @@
+pyproject.toml
+  s_f3c7cb8c321b75::t_ba05bf61b7d8a1 370-374
+uv.lock
+  s_f3c7cb8c321b75::t_bac58da84c1bc6 1467-1475,1497-1501,2313,2325,2432
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "51255e3d25a99465c7b9f75e656c13543187f41c",
+  "prompts": {},
+  "sessions": {
+    "s_f3c7cb8c321b75": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2ef0cfe4-b474-4a78-ba43-f9225122039d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "thomashebrard <thomas@pipelex.com>"
+    }
+  }
+}
